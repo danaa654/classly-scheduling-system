@@ -20,7 +20,6 @@ class ManageRooms extends Component
     // Form State
     public $room_id, $room_name;
     public $type = 'Lecture';
-    public $building = 'Main Building';
     public $capacity = 40;
     
     // UI State
@@ -32,7 +31,6 @@ class ManageRooms extends Component
         return [
             'room_name' => 'required|unique:rooms,room_name,' . $this->room_id,
             'type'      => 'required|in:Lecture,Lab',
-            'building'  => 'required|string',
             'capacity'  => 'required|integer|min:1',
         ];
     }
@@ -56,7 +54,6 @@ class ManageRooms extends Component
         Room::create([
             'room_name' => $this->room_name, 
             'type'      => $this->type, 
-            'building'  => $this->building, 
             'capacity'  => $this->capacity
         ]);
 
@@ -73,7 +70,6 @@ class ManageRooms extends Component
         $this->room_id   = $room->id;
         $this->room_name = $room->room_name;
         $this->type      = $room->type;
-        $this->building  = $room->building;
         $this->capacity  = $room->capacity;
         
         $this->isEditMode = true;
@@ -89,7 +85,6 @@ class ManageRooms extends Component
             $room->update([
                 'room_name' => $this->room_name,
                 'type'      => $this->type,
-                'building'  => $this->building,
                 'capacity'  => $this->capacity,
             ]);
 
@@ -124,14 +119,13 @@ class ManageRooms extends Component
 
         $count = 0;
         while (($row = fgetcsv($file)) !== FALSE) {
-            // CSV structure: room_name, type, building, capacity
+            // CSV structure: room_name, type, capacity
             if (isset($row[0])) {
                 Room::updateOrCreate(
                     ['room_name' => $row[0]], // Match by room name
                     [
                         'type'     => $row[1] ?? 'Lecture',
-                        'building' => $row[2] ?? 'Main Building',
-                        'capacity' => $row[3] ?? 40,
+                        'capacity' => $row[2] ?? 40,
                     ]
                 );
                 $count++;
@@ -152,7 +146,7 @@ class ManageRooms extends Component
         if ($this->search) {
             $query->where(function($q) {
                 $q->where('room_name', 'like', '%' . $this->search . '%')
-                  ->orWhere('building', 'like', '%' . $this->search . '%');
+                  ->orWhere('type', 'like', '%' . $this->search . '%');
             });
         }
 

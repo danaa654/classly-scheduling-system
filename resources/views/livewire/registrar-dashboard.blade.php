@@ -43,7 +43,7 @@
                     <div class="absolute -right-6 -bottom-6 text-9xl text-slate-100 group-hover:scale-110 group-hover:-rotate-12 transition-transform duration-500">📅</div>
                     <p class="text-[11px] font-black uppercase text-slate-400 tracking-widest relative z-10 mb-2">Classes Scheduled Today</p>
                     <p class="text-6xl font-black text-{{ $scheduledTodayCount > 0 ? 'green-500' : 'slate-500' }} tracking-tighter relative z-10">{{ $scheduledTodayCount }}</p>
-                    <a href="{{ route('scheduler') }}" class="text-xs font-bold text-slate-500 mt-4 block relative z-10 hover:underline">View Master Grid →</a>
+                    <a href="{{ route('master-grid') }}" class="text-xs font-bold text-slate-500 mt-4 block relative z-10 hover:underline">View Master Grid →</a>
                 </div>
             </div>
 
@@ -53,7 +53,7 @@
                     <div class="grid grid-cols-2 gap-4">
                         <a href="{{ route('manage-rooms') }}" class="py-4 text-center bg-blue-50 text-blue-700 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-100">+ Add New Room</a>
                         <a href="{{ route('manage-users') }}" class="py-4 text-center bg-blue-50 text-blue-700 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-100">+ New User Account</a>
-                        <a href="{{ route('scheduler') }}" class="py-4 text-center bg-blue-50 text-blue-700 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-100">📅 Create Schedule</a>
+                        <a href="{{ route('master-grid') }}" class="py-4 text-center bg-blue-50 text-blue-700 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-blue-100">📅 Create Schedule</a>
                         <button class="py-4 text-center bg-slate-100 text-slate-700 rounded-xl font-black text-xs uppercase tracking-widest hover:bg-slate-200">📥 Import Data</button>
                     </div>
                 </div>

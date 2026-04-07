@@ -122,11 +122,6 @@
                     </div>
                 </div>
 
-                <div>
-                    <label class="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-2">Building</label>
-                    <input type="text" wire:model="building" class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold focus:ring-2 focus:ring-blue-500">
-                </div>
-
                 <div class="flex space-x-4 pt-4">
                     <button type="button" @click="open = false" class="flex-1 font-black text-slate-400 uppercase tracking-widest text-xs">Cancel</button>
                     <button type="submit" class="flex-1 py-4 bg-blue-600 text-white rounded-[1.5rem] font-black shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all uppercase text-xs">

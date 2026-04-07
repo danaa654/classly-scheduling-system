@@ -100,20 +100,18 @@ class ManageFaculty extends Component
         $this->reset('importFile');
     }
 
-    public function render() 
-    {
-        $query = Faculty::query()
-            // Nested where closure to keep search logic separate from filters
-            ->when($this->search, function($q) {
-                $q->where(function($sub) {
-                    $sub->where('full_name', 'like', '%' . $this->search . '%')
-                        ->orWhere('employee_id', 'like', '%' . $this->search . '%');
-                });
-            })
-            ->when($this->filterDepartment, fn($q) => $q->where('department', $this->filterDepartment));
+    public function render()
+{
+    $user = auth()->user();
 
-        return view('livewire.manage-faculty', [
-            'faculties' => $query->latest()->paginate(10)
-        ]);
-    }
+    return view('livewire.manage-faculty', [
+        'faculties' => Faculty::query()
+            ->when(in_array($user->role, ['dean', 'oic']), function($query) use ($user) {
+                // This is the "Wall" - it forces the query to stay in their department
+                return $query->where('department', $user->department);
+            })
+            ->latest()
+            ->paginate(10)
+    ]);
+}
 }

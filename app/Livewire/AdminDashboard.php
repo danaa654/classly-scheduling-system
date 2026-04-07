@@ -3,40 +3,35 @@
 namespace App\Livewire;
 
 use Livewire\Component;
-use Livewire\WithFileUploads;
-use Illuminate\Support\Facades\Auth;
+use App\Models\Faculty;
+use App\Models\Room;
+use App\Models\User;
+use Carbon\Carbon;
 
 class AdminDashboard extends Component
 {
-    use WithFileUploads;
+    public $totalRooms, $totalUsers, $totalFaculty, $activeUsersCount;
+    public $todayString, $currentMonth, $daysInMonth, $todayDay;
 
-    public $facultyFile;
-
-    /**
-     * Security Gate
-     * This runs before anything else loads on the dashboard.
-     */
     public function mount()
     {
-        if (Auth::user()->role !== 'admin') {
-            abort(403);
-        }
-    }
+        $this->totalRooms = Room::count();
+        $this->totalUsers = User::count();
+        $this->totalFaculty = Faculty::count();
+        
+        // Logical check for active users (last 24 hours activity or just existing)
+        $this->activeUsersCount = User::count(); 
 
-    public function importFaculty()
-    {
-        $this->validate([
-            'facultyFile' => 'required|mimes:csv,xlsx|max:10240', // 10MB Max
-        ]);
-
-        // Logic to process the file will go here later
-        session()->flash('message', 'Faculty data imported successfully!');
+        // Calendar Data
+        $now = Carbon::now();
+        $this->todayString = $now->format('F d, Y');
+        $this->currentMonth = $now->format('F Y');
+        $this->daysInMonth = $now->daysInMonth;
+        $this->todayDay = $now->day;
     }
 
     public function render()
     {
-        // Explicitly ensuring it uses your main app layout
-        return view('livewire.admin-dashboard')
-            ->layout('layouts.app');
+        return view('livewire.admin-dashboard')->layout('layouts.app');
     }
 }

@@ -14,7 +14,6 @@ return new class extends Migration
             Schema::create('rooms', function (Blueprint $table) {
                 $table->id();
                 $table->string('room_name')->unique(); // e.g., Room 201
-                $table->string('building')->default('Main Building'); 
                 $table->string('type')->default('Lecture'); // Lecture or Lab
                 $table->integer('capacity')->default(40);
                 $table->timestamps();
