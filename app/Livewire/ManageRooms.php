@@ -124,8 +124,8 @@ class ManageRooms extends Component
                 Room::updateOrCreate(
                     ['room_name' => $row[0]], // Match by room name
                     [
-                        'type'     => $row[1] ?? 'Lecture',
-                        'capacity' => $row[2] ?? 40,
+                        'capacity' => $row[1] ?? 40,        // Use index 1 for the number
+                        'type'     => $row[2] ?? 'Lecture', // Use index 2 for the word
                     ]
                 );
                 $count++;

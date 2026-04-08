@@ -15,8 +15,11 @@ return new class extends Migration
         $table->id();
         $table->foreignId('subject_id')->constrained()->onDelete('cascade');
         $table->foreignId('room_id')->constrained()->onDelete('cascade');
-        $table->string('day');
-        $table->string('time_slot');
+        $table->foreignId('user_id')->nullable(); // The Faculty
+        $table->string('section'); // e.g., BSIT-3A
+        $table->enum('day', ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
+        $table->time('start_time');
+        $table->time('end_time');
         $table->timestamps();
     });
 }

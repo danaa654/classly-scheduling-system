@@ -24,16 +24,11 @@ class Schedule extends Model
     /**
      * Get the subject assigned to this schedule slot.
      */
-    public function subject(): BelongsTo
-    {
-        return $this->belongsTo(Subject::class);
+    public function subject() {
+    return $this->belongsTo(Subject::class);
     }
 
-    /**
-     * Get the room assigned to this schedule slot.
-     */
-    public function room(): BelongsTo
-    {
+    public function room() {
         return $this->belongsTo(Room::class);
     }
 }
