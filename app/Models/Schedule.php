@@ -15,11 +15,14 @@ class Schedule extends Model
      * These match the columns we added in the migration.
      */
     protected $fillable = [
-        'subject_id',
-        'room_id',
-        'day',
-        'time_slot',
-    ];
+    'subject_id',
+    'room_id',
+    'user_id',
+    'section',
+    'day',
+    'start_time',
+    'end_time',
+];
 
     /**
      * Get the subject assigned to this schedule slot.
