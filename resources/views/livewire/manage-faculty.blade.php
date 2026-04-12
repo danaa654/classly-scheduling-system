@@ -78,7 +78,10 @@
                     </tbody>
                 </table>
             </div>
-            <div class="mt-4">{{ $faculties->links() }}</div>
+            {{-- Pagination --}}
+                <div class="mt-8 mb-6">
+                    {{ $faculties->links('livewire.custom-pagination') }}
+                </div>
         </div>
     </main>
 

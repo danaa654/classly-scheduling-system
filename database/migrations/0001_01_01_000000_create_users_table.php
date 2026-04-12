@@ -19,8 +19,8 @@ return new class extends Migration
         $table->string('password');
 
         // --- Classly Specific Fields ---
-        // Roles: admin, registrar, dean, oic, ass_dean, faculty
-        $table->string('role')->default('faculty'); 
+        // Roles: admin, registrar, dean, oic, ass_dean, 
+        $table->string('role')->default('registrar'); 
         
         // Departments: CCS, CTE, COC, SHTM, or 'ALL' for Admin/Registrar
         $table->string('department')->nullable(); 

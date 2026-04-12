@@ -89,8 +89,9 @@
                 </table>
             </div>
             
-            <div class="mt-4">
-                {{ $rooms->links() }}
+           {{-- Pagination --}}
+            <div class="mt-8 mb-6">
+                {{ $rooms->links('livewire.custom-pagination') }}
             </div>
         </div>
     </main>

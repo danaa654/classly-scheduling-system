@@ -88,9 +88,10 @@
                         @endforeach
                     </tbody>
                 </table>
-            </div>
-            <div class="mt-4">{{ $subjects->links() }}</div>
-        </div>
+            <{{-- Pagination --}}
+                <div class="mt-8 mb-6">
+                    {{ $subjects->links('livewire.custom-pagination') }}
+                </div>
     </main>
 
     <div x-show="bulkOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md" x-cloak>
