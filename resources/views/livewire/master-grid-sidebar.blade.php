@@ -38,6 +38,9 @@
                             <option value="FB">FB</option>
                             <option value="QD">QD</option>
                             <option value="LD">LD</option>
+                        @elseif($selectedDept == 'CCS')
+                            <option value="IT">IT</option>
+                            <option value="ACT">ACT</option>    
                         @endif
                     </select>
                 </div>

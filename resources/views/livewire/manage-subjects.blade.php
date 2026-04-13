@@ -41,6 +41,9 @@
                     <option value="FB">Forensic Biology (FB)</option>
                     <option value="QD">Questioned Document (QD)</option>
                     <option value="LD">Lie Detection (LD)</option>
+                @elseif($selectedDept == 'CCS')
+                    <option value="IT">Information Technology (IT)</option> 
+                    <option value="ACT">ACT (ACT)</option>       
                 @else
                     <option value="">N/A</option>
                 @endif

@@ -39,21 +39,21 @@
             </a>
             @endif
 
-            @if(in_array(auth()->user()->role, ['admin', 'registrar', 'dean', 'oic']))
+            @if(in_array(auth()->user()->role, ['admin', 'registrar', 'dean', 'oic', 'assistant_dean']))
             <a href="/manage-rooms" class="flex items-center p-3 {{ request()->is('manage-rooms*') ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800' }} rounded-xl transition-all font-bold group" title="Rooms">
                 <span class="text-xl flex shrink-0 justify-center" :class="sidebarOpen ? 'mr-3' : 'w-full'">🏫</span>
                 <span x-show="sidebarOpen" x-transition.opacity class="whitespace-nowrap">Manage Rooms</span>
             </a>
             @endif
 
-            @if(in_array(auth()->user()->role, ['admin', 'registrar']))
+            @if(in_array(auth()->user()->role, ['admin', 'registrar', 'assistant_dean']))
             <a href="/faculty" class="flex items-center p-3 {{ request()->is('faculty*') ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800' }} rounded-xl transition-all font-bold group" title="Faculty">
                 <span class="text-xl flex shrink-0 justify-center" :class="sidebarOpen ? 'mr-3' : 'w-full'">👨‍🏫</span>
                 <span x-show="sidebarOpen" x-transition.opacity class="whitespace-nowrap">Faculty List</span>
             </a>
             @endif
 
-            @if(in_array(auth()->user()->role, ['admin', 'registrar', 'dean', 'oic']))
+            @if(in_array(auth()->user()->role, ['admin', 'registrar', 'dean', 'assistant_dean']))
             <a href="{{ route('subjects') }}" class="flex items-center p-3 {{ request()->routeIs('subjects*') ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-400 hover:bg-slate-800' }} rounded-xl transition-all font-bold group" title="Subjects">
                 <span class="text-xl flex shrink-0 justify-center" :class="sidebarOpen ? 'mr-3' : 'w-full'">📚</span>
                 <span x-show="sidebarOpen" x-transition.opacity class="whitespace-nowrap">Subjects</span>

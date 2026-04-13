@@ -19,6 +19,7 @@ class RedirectController extends Controller
         'admin'     => redirect()->route('admin.dashboard'),
         'registrar' => redirect()->route('registrar.dashboard'),
         'dean'      => redirect()->route('dean.dashboard'),
+        'assistant_dean' => redirect()->route('assistant-dean.dashboard'),
         default     => abort(403, "Role mismatch: Found '{$role}'"),
     };
 }

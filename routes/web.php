@@ -11,6 +11,7 @@ use App\Livewire\ManageRooms;
 use App\Livewire\ManageSubjects;
 use App\Livewire\ManageFaculty;
 use App\Livewire\FacultyLoading;
+use App\Livewire\AssistantDeanDashboard;
 
 // Public Landing Page
 Route::get('/', function () {
@@ -27,6 +28,8 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/admin/dashboard', AdminDashboard::class)->name('admin.dashboard');
     Route::get('/registrar/dashboard', RegistrarDashboard::class)->name('registrar.dashboard');
     Route::get('/dean/dashboard', DeanDashboard::class)->name('dean.dashboard');
+    Route::get('/assistant-dean/dashboard', AssistantDeanDashboard::class)->name('assistant-dean.dashboard');
+
 
     // Management & Core System
     Route::get('/manage-users', ManageUsers::class)->name('manage-users');

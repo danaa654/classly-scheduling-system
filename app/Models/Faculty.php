@@ -21,4 +21,10 @@ class Faculty extends Model
         'department', 
         'status',
     ];
+
+    public function subjects()
+{
+    // A faculty member can be assigned to many subjects (schedules)
+    return $this->hasMany(Subject::class); 
+}
 }

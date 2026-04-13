@@ -5,7 +5,7 @@ namespace App\Livewire;
 use Livewire\Component;
 use App\Models\Faculty;
 use App\Models\Subject;
-use App\Models\Room;
+use App\Models\Room;    
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 
@@ -33,11 +33,12 @@ class DeanDashboard extends Component
         $this->todayDay = $now->day;
     }
 
-    // In app/Livewire/DeanDashboard.php
-public function render()
-{
-    // If your file is named 'dean-dashboard.blade.php' in the livewire folder:
-    return view('livewire.dean-dashboard')
-        ->layout('layouts.app');
-}
+
+    public function render()
+    {
+        return view('livewire.dean-dashboard', [
+            'facultyMembers' => \App\Models\Faculty::where('department_id', auth()->user()->department_id)->get(),
+            // ... other variables
+        ]);
+    }
 }

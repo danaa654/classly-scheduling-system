@@ -12,15 +12,30 @@ class ManageFaculty extends Component
 {
     use WithPagination, WithFileUploads;
 
-    public $search = '', $filterDepartment = '', $importFile;
+    // Track state for search and department filtering
+    public $search = '';
+    public $filterDepartment = ''; // Empty string means "ALL"
+    public $importFile;
+
+    // Form fields
     public $faculty_id, $employee_id, $full_name, $email, $department = 'CCS', $status = 'Active';
+    
+    // UI state
     public $showModal = false, $bulkOpen = false, $isEditMode = false;
+
+    // Reset pagination when search or filter changes
+    public function updatingSearch() { $this->resetPage(); }
+    public function updatingFilterDepartment() { $this->resetPage(); }
 
     public function openModal() {
         $this->resetValidation();
         $this->reset(['faculty_id', 'employee_id', 'full_name', 'email', 'isEditMode', 'department']);
         $this->department = 'CCS';
         $this->showModal = true;
+    }
+
+    public function setFilter($dept) {
+        $this->filterDepartment = $dept === 'ALL' ? '' : $dept;
     }
 
     public function saveFaculty() {
@@ -101,17 +116,28 @@ class ManageFaculty extends Component
     }
 
     public function render()
-{
-    $user = auth()->user();
+    {
+        $user = auth()->user();
 
-    return view('livewire.manage-faculty', [
-        'faculties' => Faculty::query()
-            ->when(in_array($user->role, ['dean', 'oic']), function($query) use ($user) {
-                // This is the "Wall" - it forces the query to stay in their department
-                return $query->where('department', $user->department);
+        $query = Faculty::query()
+            // 1. Handle Role-based restrictions
+            ->when(in_array($user->role, ['dean', 'oic']), function($q) use ($user) {
+                return $q->where('department', $user->department);
             })
-            ->latest()
-            ->paginate(10)
-    ]);
-}
+            // 2. Handle the Top-Right Department Buttons (CCS, CTE, etc.)
+            ->when($this->filterDepartment, function($q) {
+                return $q->where('department', $this->filterDepartment);
+            })
+            // 3. Handle the Search Bar
+            ->when($this->search, function($q) {
+                return $q->where(function($sub) {
+                    $sub->where('full_name', 'like', '%' . $this->search . '%')
+                        ->orWhere('employee_id', 'like', '%' . $this->search . '%');
+                });
+            });
+
+        return view('livewire.manage-faculty', [
+            'faculties' => $query->latest()->paginate(10)
+        ]);
+    }
 }
