@@ -1,5 +1,5 @@
 <div class="flex h-screen bg-[#F8FAFC]" x-data="{ open: @entangle('showModal'), bulkOpen: @entangle('bulkOpen') }">
-    <x-sidebar />
+   
 
     <main class="flex-1 flex flex-col overflow-hidden">
         <header class="h-24 bg-white border-b border-slate-200 flex items-center justify-between px-12 shrink-0">

@@ -10,7 +10,7 @@
      :class="darkMode ? 'bg-[#020617] text-white' : 'text-slate-900'"
      :style="!darkMode ? 'background: linear-gradient(233deg, #e0e7ff 0%, #c7d2fe 17%, #a5b4fc 46%, #818cf8 78%, #6366f1 90%);' : ''">
     
-    <x-sidebar />
+   
 
     <main class="flex-1 flex flex-col relative z-10 p-6 space-y-6">
         <header class="flex items-center justify-between">

@@ -20,6 +20,8 @@ class Faculty extends Model
         'email', 
         'department', 
         'status',
+        'requested_by',
+        'rejection_reason',
     ];
 
     public function subjects()

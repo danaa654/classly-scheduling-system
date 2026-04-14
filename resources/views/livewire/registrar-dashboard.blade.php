@@ -9,8 +9,7 @@
      }" 
      :class="darkMode ? 'bg-[#020617] text-white' : 'text-slate-900'"
      :style="!darkMode ? 'background: linear-gradient(233deg, rgba(238, 174, 202, 1) 0%, rgba(185, 182, 220, 1) 17%, rgba(168, 184, 226, 1) 46%, rgba(157, 186, 230, 1) 78%, rgba(148, 187, 233, 1) 90%);' : ''">
-    
-    <x-sidebar />
+
 
     <main class="flex-1 flex flex-col relative z-10 p-6 space-y-6">
         <header class="flex items-center justify-between">

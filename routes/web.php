@@ -12,6 +12,9 @@ use App\Livewire\ManageSubjects;
 use App\Livewire\ManageFaculty;
 use App\Livewire\FacultyLoading;
 use App\Livewire\AssistantDeanDashboard;
+use App\Livewire\NotificationCenter;
+use App\Livewire\GlobalSettings;
+
 
 // Public Landing Page
 Route::get('/', function () {
@@ -38,4 +41,8 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/subjects', ManageSubjects::class)->name('subjects');
     Route::get('/manage-rooms', ManageRooms::class)->name('manage-rooms');
     Route::get('/master-grid', MasterGrid::class)->name('master-grid');
+    Route::get('/notifications', \App\Livewire\NotificationCenter::class)->name('notifications');
+    Route::get('/settings', GlobalSettings::class)->name('settings');
+
+
 });

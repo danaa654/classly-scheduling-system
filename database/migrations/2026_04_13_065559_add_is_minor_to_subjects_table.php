@@ -12,18 +12,25 @@ return new class extends Migration
     public function up()
 {
     Schema::table('subjects', function (Blueprint $table) {
-        $table->integer('duration_hours')->default(3)->after('type'); 
-        $table->boolean('is_minor')->default(false); 
+        // Only add duration_hours if it doesn't exist yet
+        if (!Schema::hasColumn('subjects', 'duration_hours')) {
+            $table->integer('duration_hours')->default(3)->after('type');
+        }
+
+        // Only add is_minor if it doesn't exist yet
+        if (!Schema::hasColumn('subjects', 'is_minor')) {
+            $table->boolean('is_minor')->default(false);
+        }
     });
 }
 
-    /** 
-     * Reverse the migrations.
-     */
-    public function down(): void
-    {
-        Schema::table('subjects', function (Blueprint $table) {
-            //
-        });
-    }
+/** * Reverse the migrations.
+ */
+public function down(): void
+{
+    Schema::table('subjects', function (Blueprint $table) {
+        // Drop the columns we added if we roll back
+        $table->dropColumn(['duration_hours', 'is_minor']);
+    });
+}
 };

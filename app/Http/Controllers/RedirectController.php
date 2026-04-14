@@ -8,19 +8,18 @@ class RedirectController extends Controller
 {
     public function __invoke()
 {
-    $user = auth()->user();
-    
-    // TEMPORARY DEBUG: This will stop the app and show you the role
-    // dd($user->role); 
+    $role = auth()->user()->role;
 
-    $role = strtolower(trim($user->role));
+    if ($role === 'admin') {
+        return redirect()->route('admin.dashboard');
+    } elseif ($role === 'registrar') {
+        return redirect()->route('registrar.dashboard');
+    } elseif ($role === 'dean') {
+        return redirect()->route('dean.dashboard');
+    } elseif ($role === 'ass.dean') { // MAKE SURE THIS MATCHES YOUR DB
+        return redirect()->route('assistant-dean.dashboard');
+    }
 
-    return match ($role) {
-        'admin'     => redirect()->route('admin.dashboard'),
-        'registrar' => redirect()->route('registrar.dashboard'),
-        'dean'      => redirect()->route('dean.dashboard'),
-        'assistant_dean' => redirect()->route('assistant-dean.dashboard'),
-        default     => abort(403, "Role mismatch: Found '{$role}'"),
-    };
+    abort(403, "Role mismatch: Found '$role'");
 }
 }

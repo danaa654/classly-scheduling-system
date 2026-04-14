@@ -7,8 +7,10 @@ use Livewire\Attributes\Url;
 use App\Models\Subject;
 use App\Models\Room;
 use App\Models\Schedule;
+use App\Models\Setting;
 use App\Services\ScheduleService;
 use Livewire\WithPagination;
+use Carbon\Carbon;
 
 class MasterGrid extends Component
 {
@@ -24,80 +26,83 @@ class MasterGrid extends Component
     #[Url]
     public $selectedRoomId = null;
     public $selectedRoomName = null;
-    public $selectedSection = ''; 
+    public $selectedSection = 'A'; 
+    public $activeSubjectId = null; // Currently "held" subject for scheduling
 
-    // Grid properties
+    // Grid Config
     public $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    public $timeSlots = [
-        '07:30 AM - 09:00 AM', '09:00 AM - 10:30 AM', '10:30 AM - 12:00 PM',
-        '01:00 PM - 02:30 PM', '02:30 PM - 04:00 PM', '04:00 PM - 05:30 PM'
-    ];
+    public $startTime = '07:00'; 
+    public $endTime = '18:00';   
+    public $interval = 60; // 1 hour slots
+
+    /**
+     * Initialize settings from database or defaults
+     */
+    public function mount()
+    {
+        $this->startTime = Setting::where('key', 'start_time')->first()?->value ?? '07:00';
+        $this->endTime = Setting::where('key', 'end_time')->first()?->value ?? '18:00';
+    }
 
     // Reset page on search/filter change
     public function updatedSearchSubject() { $this->resetPage(); }
     public function updatedSelectedYear() { $this->resetPage(); }
     public function updatedSelectedMajor() { $this->resetPage(); }
+    public function updatedSelectedDept() { $this->selectedMajor = ''; $this->resetPage(); }
 
-    public function updatedSelectedDept()
+    /**
+     * Sets the subject that is currently being "held" to be scheduled
+     */
+    public function selectSubject($id)
     {
-        $this->selectedMajor = '';
-        $this->resetPage();
+        if ($this->activeSubjectId === $id) {
+            $this->activeSubjectId = null;
+        } else {
+            $this->activeSubjectId = $id;
+        }
     }
 
     /**
-     * FIX: The Logic for assigning a subject
+     * Save global grid settings
      */
-    public function assignSubject($subjectId, $day, $timeSlot)
-{
-    // 1. Guard: Room must be selected
-    if (!$this->selectedRoomId) {
-        $this->dispatch('notify', ['type' => 'error', 'message' => 'Please select a room first!']);
-        return;
-    }
-
-    // 2. Split the time string
-    $parts = explode(' - ', $timeSlot);
-    $startTime = \Carbon\Carbon::createFromFormat('h:i A', trim($parts[0]))->format('H:i:s');
-    $endTime = \Carbon\Carbon::createFromFormat('h:i A', trim($parts[1] ?? ''))->format('H:i:s');
-    
-    // 3. Unit Limit Check
-    $subject = \App\Models\Subject::find($subjectId);
-    $scheduledCount = \App\Models\Schedule::where('subject_id', $subjectId)->count();
-    if (($scheduledCount * 1.5) >= $subject->units) {
-        $this->dispatch('notify', ['type' => 'error', 'message' => 'Subject is already fully scheduled!']);
-        return;
-    }
-
-    // 4. Conflict Check (Same Room, Same Time, Same Day)
-    $exists = \App\Models\Schedule::where('room_id', $this->selectedRoomId)
-        ->where('day', $day)
-        ->where('start_time', $startTime)
-        ->where('end_time', $endTime)
-        ->exists();
-
-    if ($exists) {
-        $this->dispatch('notify', ['type' => 'warning', 'message' => 'This slot is already occupied!']);
-        return;
-    }
-
-    // 5. Create the Record
-    \App\Models\Schedule::create([
-        'subject_id' => $subjectId,
-        'room_id'    => $this->selectedRoomId,
-        'user_id'    => auth()->id() ?? 1, 
-        'day'        => $day,
-        'start_time' => $startTime,
-        'end_time'   => $endTime,
-        'section'    => $this->selectedSection ?: 'A',
-    ]);
-
-    $this->dispatch('notify', ['type' => 'success', 'message' => 'Successfully assigned!']);
-}
-    
-    public function removeAssignment($id)
+    public function saveSettings()
     {
-        Schedule::destroy($id);
-        $this->dispatch('notify', ['type' => 'info', 'message' => 'Schedule removed.']);
+        Setting::updateOrCreate(['key' => 'start_time'], ['value' => $this->startTime]);
+        Setting::updateOrCreate(['key' => 'end_time'], ['value' => $this->endTime]);
+        
+        $this->dispatch('notify', ['type' => 'success', 'message' => 'Grid updated for the new semester!']);
+    }
+
+    /**
+     * Generates 12-hour format time slots dynamically
+     * Skips 12:00 PM - 1:00 PM for lunch
+     */
+    public function getTimeSlotsProperty()
+    {
+        $slots = [];
+        $current = strtotime($this->startTime);
+        $end = strtotime($this->endTime);
+
+        while ($current < $end) {
+            $timeString = date('H:i', $current);
+
+            // Skip Lunch Break
+            if ($timeString == '12:00') {
+                $current = strtotime('+1 hour', $current);
+                continue;
+            }
+
+            $next = strtotime('+' . $this->interval . ' minutes', $current);
+            
+            $slots[] = [
+                'display' => date('h:i A', $current) . ' - ' . date('h:i A', $next),
+                'start' => date('H:i:s', $current),
+                'end' => date('H:i:s', $next),
+            ];
+
+            $current = $next;
+        }
+        return $slots;
     }
 
     public function selectRoom($id)
@@ -109,56 +114,77 @@ class MasterGrid extends Component
         }
     }
 
+    public function assignSubject($subjectId, $day, $startTime, $endTime)
+    {
+        // 1. Guard: Room and Subject must be selected
+        if (!$this->selectedRoomId) {
+            $this->dispatch('notify', ['type' => 'error', 'message' => 'Please select a room first!']);
+            return;
+        }
+
+        if (!$subjectId) {
+            $this->dispatch('notify', ['type' => 'error', 'message' => 'Please select a subject from the sidebar!']);
+            return;
+        }
+
+        // 2. Conflict Check (Same Room, Same Time, Same Day)
+        $exists = Schedule::where('room_id', $this->selectedRoomId)
+            ->where('day', $day)
+            ->where('start_time', $startTime)
+            ->exists();
+
+        if ($exists) {
+            $this->dispatch('notify', ['type' => 'warning', 'message' => 'This slot is already occupied!']);
+            return;
+        }
+
+        // 3. Create the Record
+        Schedule::create([
+            'subject_id' => $subjectId,
+            'room_id'    => $this->selectedRoomId,
+            'user_id'    => auth()->id() ?? 1, 
+            'day'        => $day,
+            'start_time' => $startTime,
+            'end_time'   => $endTime,
+            'section'    => $this->selectedSection ?: 'A',
+        ]);
+
+        $this->dispatch('notify', ['type' => 'success', 'message' => 'Successfully assigned to ' . $day]);
+    }
+
+    public function removeAssignment($id)
+    {
+        Schedule::destroy($id);
+        $this->dispatch('notify', ['type' => 'info', 'message' => 'Schedule removed.']);
+    }
+
     public function render()    
     {
         $service = new ScheduleService();
 
-        // Subject Query Logic
         $subjects = Subject::query()
-            ->when($this->searchSubject, function($query) {
-                $query->where(function($q) {
-                    $q->where('subject_code', 'like', "%{$this->searchSubject}%")
-                      ->orWhere('edp_code', 'like', "%{$this->searchSubject}%")
-                      ->orWhere('description', 'like', "%{$this->searchSubject}%");
-                });  
-            })
-            ->when($this->selectedDept, function($query) {
-                $query->where('edp_code', 'like', $this->selectedDept . '-%');
-            })
-            ->when($this->selectedYear, function($query) {
-                $query->where('edp_code', 'like', '%-%-' . $this->selectedYear . '%');
-            })
-            ->when($this->selectedMajor, function($query) {
-                $query->where('subject_code', 'like', $this->selectedMajor . '%');
-            })
-            ->orderBy('edp_code', 'asc')
-            ->get()
-            ->map(function($subject) {
-                $status = strtolower(trim($subject->type ?? 'minor'));
-                $subject->is_major_type = ($status === 'major');
-                $subject->scheduled_hours = \App\Models\Schedule::where('subject_id', $subject->id)->count() * 1.5;
-                return $subject;
-            })
-            ->filter(function($subject) {
-            return $subject->scheduled_hours < $subject->units;
-            });
+            ->when($this->searchSubject, fn($q) => 
+                $q->where('subject_code', 'like', "%{$this->searchSubject}%")
+                  ->orWhere('description', 'like', "%{$this->searchSubject}%")
+            )
+            ->when($this->selectedDept, fn($q) => $q->where('department', $this->selectedDept))
+            ->orderBy('subject_code', 'asc')
+            ->get();
 
         $rooms = Room::all()->map(function($room) use ($service) {
             $room->utilization = $service->getRoomLoad($room->id);
             return $room;
         });
 
-        // FIX: Only show schedules for the CURRENTLY SELECTED ROOM
-        $schedules = Schedule::with(['subject', 'room'])
-            ->when($this->selectedRoomId, function($query) {
-                $query->where('room_id', $this->selectedRoomId);
-            })
+        $schedules = Schedule::with(['subject'])
+            ->when($this->selectedRoomId, fn($q) => $q->where('room_id', $this->selectedRoomId))
             ->get();
 
         return view('livewire.master-grid', [
             'subjects' => $subjects,
             'rooms' => $rooms,
-            'schedules' => $schedules
+            'schedules' => $schedules,
+            'gridSlots' => $this->timeSlots
         ]);
     }
 }

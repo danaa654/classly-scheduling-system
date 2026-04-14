@@ -37,8 +37,7 @@ class DeanDashboard extends Component
     public function render()
     {
         return view('livewire.dean-dashboard', [
-            'facultyMembers' => \App\Models\Faculty::where('department_id', auth()->user()->department_id)->get(),
-            // ... other variables
+            
         ]);
     }
 }
