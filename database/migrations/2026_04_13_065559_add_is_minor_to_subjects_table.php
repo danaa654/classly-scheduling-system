@@ -12,7 +12,7 @@ return new class extends Migration
     public function up()
 {
     Schema::table('subjects', function (Blueprint $table) {
-        
+        $table->integer('duration_hours')->default(3)->after('type'); 
         $table->boolean('is_minor')->default(false); 
     });
 }

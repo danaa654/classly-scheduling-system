@@ -12,7 +12,9 @@ class Subject extends Model
     'subject_code', 
     'description', 
     'units', 
-    'department', 
-    'type'
+    'department',
+    'type',
+    'duration_hours'
+    
 ];
 }

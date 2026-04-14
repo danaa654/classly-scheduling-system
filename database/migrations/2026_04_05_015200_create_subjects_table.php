@@ -18,11 +18,8 @@ return new class extends Migration
         $table->string('description');
         $table->integer('units')->default(3);
         $table->string('department')->nullable();
-        
-        // Just place this line after department. 
-        // No 'after' keyword needed during table creation.
+        $table->integer('duration_hours')->default(3);
         $table->string('type')->default('Major'); 
-        
         $table->timestamps();
     });
 }
