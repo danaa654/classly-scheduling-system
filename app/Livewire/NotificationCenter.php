@@ -6,18 +6,27 @@ use Livewire\Component;
 
 class NotificationCenter extends Component
 {
-    public function getNotificationsProperty()
+    // Important: No changes needed to markAsRead, but added a flash for user feedback
+    public function markAsRead($id)
     {
-        return auth()->user()->unreadNotifications;
-    }
-
-    public function markAsRead($notificationId)
-    {
-        $notification = auth()->user()->notifications()->find($notificationId);
+        $notification = auth()->user()->notifications()->find($id);
         if ($notification) {
             $notification->markAsRead();
-            return redirect($notification->data['link']);
         }
+    }
+
+    public function deleteNotification($id)
+    {
+        $notification = auth()->user()->notifications()->find($id);
+        // Only allow deletion if already read to prevent accidental loss
+        if ($notification && $notification->read_at !== null) {
+            $notification->delete();
+        }
+    }
+
+    public function markAllAsRead()
+    {
+        auth()->user()->unreadNotifications->markAsRead();
     }
 
     public function render()

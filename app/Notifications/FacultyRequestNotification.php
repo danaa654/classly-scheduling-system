@@ -5,8 +5,6 @@ namespace App\Notifications;
 use App\Models\Faculty;
 use Illuminate\Bus\Queueable;
 use Illuminate\Notifications\Notification;
-use Illuminate\Contracts\Queue\ShouldQueue;
-use Illuminate\Notifications\Messages\MailMessage;
 
 class FacultyRequestNotification extends Notification
 {
@@ -14,19 +12,22 @@ class FacultyRequestNotification extends Notification
 
     public $faculty;
     public $senderName;
+    public $status;
 
     /**
-     * Pass the faculty record and the name of the Dean/OIC
+     * @param Faculty $faculty The faculty record
+     * @param string $senderName Name of the person who performed the action
+     * @param string $status The current status (pending, approved, rejected, deleted)
      */
-    public function __construct(Faculty $faculty, $senderName)
+    public function __construct(Faculty $faculty, $senderName, $status = 'pending')
     {
         $this->faculty = $faculty;
         $this->senderName = $senderName;
+        $this->status = $status;
     }
 
     /**
-     * We use 'database' for dashboard alerts. 
-     * You can keep 'mail' if you want actual emails sent too.
+     * Use 'database' to store notifications in the system table.
      */
     public function via(object $notifiable): array
     {
@@ -34,28 +35,37 @@ class FacultyRequestNotification extends Notification
     }
 
     /**
-     * This data gets saved in the 'data' column of your notifications table.
-     */
-    public function toDatabase(object $notifiable): array
-    {
-        return [
-            'faculty_id' => $this->faculty->id,
-            'faculty_name' => $this->faculty->full_name,
-            'requested_by' => $this->senderName,
-            'message' => "{$this->senderName} submitted a new faculty request for {$this->faculty->full_name}.",
-            'type' => 'faculty_request',
-            'link' => route('faculty.index'), // Ensure your route name matches
-        ];
-    }
-
-    /**
-     * General array representation (backup)
+     * This data is what actually shows up in your notification-center.blade.php
      */
     public function toArray(object $notifiable): array
-    {
-        return [
-            'faculty_id' => $this->faculty->id,
-            'message' => 'New faculty approval required.',
-        ];
+{
+    $message = '';
+    // Logic for Registrar/Admin
+    if (in_array($notifiable->role, ['admin', 'registrar'])) {
+       $message = match($this->status) {
+        'pending'  => "{$this->senderName} submitted a new faculty request for {$this->faculty->full_name}.",
+        'approved' => "The Registrar has approved the record for {$this->faculty->full_name}.",
+        'rejected' => "The request for {$this->faculty->full_name} was declined by the Registrar.",
+        'edited'   => "The Registrar updated the faculty record of {$this->faculty->full_name}.",
+        'deleted'  => "The faculty record for {$this->faculty->full_name} was removed by the Registrar.",
+        default    => "Update on faculty: {$this->faculty->full_name}",
+    };
+    } 
+    // Logic for Deans
+    else {
+        $message = match($this->status) {
+            'approved' => "The Registrar has approved your faculty request for {$this->faculty->full_name}.",
+            'rejected' => "Your request for {$this->faculty->full_name} was rejected by the Registrar.",
+            'edited'   => "The details for {$this->faculty->full_name} have been updated.",
+            'deleted'  => "The faculty record for {$this->faculty->full_name} has been deleted.",
+            default    => "There is an update on {$this->faculty->full_name}."
+        };
     }
+
+    return [
+        'faculty_id' => $this->faculty->id,
+        'message' => $message,
+        'status' => $this->status,
+    ];
+}
 }

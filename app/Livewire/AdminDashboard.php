@@ -7,9 +7,12 @@ use App\Models\Faculty;
 use App\Models\Room;
 use App\Models\User;
 use Carbon\Carbon;
+use App\Traits\HandlesNotifications;
 
 class AdminDashboard extends Component
 {
+    use HandlesNotifications;
+    
     public $totalRooms, $totalUsers, $totalFaculty, $activeUsersCount;
     public $todayString, $currentMonth, $daysInMonth, $todayDay;
 

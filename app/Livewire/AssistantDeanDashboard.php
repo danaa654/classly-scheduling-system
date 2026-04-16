@@ -6,9 +6,12 @@ use Livewire\Component;
 use App\Models\Subject;
 use App\Models\Faculty;
 use App\Models\Room;
+use App\Traits\HandlesNotifications;
 
 class AssistantDeanDashboard extends Component
 {
+    use HandlesNotifications;
+    
     public function render()
     {
         return view('livewire.assistant-dean-dashboard', [

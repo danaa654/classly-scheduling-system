@@ -6,12 +6,15 @@ use Livewire\Component;
 use App\Models\Room;
 use App\Models\User;
 use Carbon\Carbon;
+use App\Traits\HandlesNotifications;
 
 // Placeholder model for scheduling core, use your actual Schedule/Section model
 // use App\Models\ClassSchedule; 
 
 class RegistrarDashboard extends Component
-{
+{   
+    
+    use HandlesNotifications;
     public function render()
     {
         // Fetch key stats

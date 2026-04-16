@@ -15,27 +15,29 @@
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #334155; }
+        [x-cloak] { display: none !important; }
     </style>
 </head>
-<body class="font-sans antialiased text-slate-900 bg-[#f8fafc]">
+<body 
+    x-data="{ 
+        sidebarOpen: true, 
+        darkMode: localStorage.getItem('theme') === 'dark',
+        toggleTheme() {
+            this.darkMode = !this.darkMode;
+            localStorage.setItem('theme', this.darkMode ? 'dark' : 'light');
+        }
+    }"
+    :class="{ 'dark': darkMode }"
+    class="font-sans antialiased text-slate-900 dark:text-white bg-[#f8fafc] dark:bg-[#020617] transition-colors duration-500"
+>
 
-    <div x-data="{ sidebarOpen: true }" class="relative flex h-screen overflow-hidden">
+    <div class="relative flex h-screen overflow-hidden">
         
-        <button 
-            @click="sidebarOpen = !sidebarOpen" 
-            class="fixed top-5 z-50 p-1.5 bg-[#0f172a] text-blue-400 rounded-full border border-slate-700 shadow-xl transition-all duration-300 hover:scale-110 active:scale-95 hover:bg-slate-800 focus:outline-none"
-            :class="sidebarOpen ? 'left-[240px]' : 'left-[52px]'"
-        >
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-transform duration-300" :class="sidebarOpen ? 'rotate-0' : 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M15 19l-7-7 7-7" />
-            </svg>
-        </button>
-
         <aside 
-            class="bg-[#0f172a] text-white flex flex-col h-screen shrink-0 border-r border-slate-800 z-40 transition-all duration-300 ease-in-out"
+            class="bg-[#0f172a] text-white flex flex-col h-screen shrink-0 border-r border-slate-800 z-40 transition-all duration-300 ease-in-out relative"
             :class="sidebarOpen ? 'w-64' : 'w-16'"
         >
-            <div class="px-5 h-16 flex items-center overflow-hidden shrink-0">
+            <div class="px-5 h-16 flex items-center overflow-hidden shrink-0 border-b border-slate-800/50">
                 <div class="flex items-center gap-2.5">
                     <div class="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center shrink-0 shadow-lg">
                         <span class="text-base font-black text-white">C</span>
@@ -47,8 +49,7 @@
                 </div>
             </div>
 
-            <nav class="flex-1 px-2.5 space-y-1 overflow-y-auto pt-2 custom-scrollbar">
-                
+            <nav class="flex-1 px-2.5 space-y-1 overflow-y-auto pt-4 custom-scrollbar">
                 <div x-show="sidebarOpen" class="px-2.5 pb-1">
                     <p class="text-[8px] font-bold text-slate-500 uppercase tracking-widest">General</p>
                 </div>
@@ -74,16 +75,6 @@
                 <a href="/faculty" wire:navigate class="relative flex items-center p-2 rounded-xl transition-all group {{ request()->is('faculty*') ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800' }}">
                     <span class="text-lg flex shrink-0 justify-center" :class="sidebarOpen ? 'mr-2.5' : 'w-full'">👨‍🏫</span>
                     <span x-show="sidebarOpen" x-transition.opacity class="font-semibold text-[11px] whitespace-nowrap">Faculty List</span>
-                    
-                    @if(in_array(auth()->user()->role, ['admin', 'registrar']))
-                        @php $pendingCount = \App\Models\Faculty::where('status', 'pending')->count(); @endphp
-                        @if($pendingCount > 0)
-                            <span class="absolute flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-black text-white border-2 border-[#0f172a] shadow-sm animate-pulse"
-                                :class="sidebarOpen ? 'right-2' : 'top-0 right-1'">
-                                {{ $pendingCount }}
-                            </span>
-                        @endif
-                    @endif
                 </a>
 
                 <a href="{{ route('subjects') }}" wire:navigate class="flex items-center p-2 rounded-xl transition-all group {{ request()->routeIs('subjects*') ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800' }}">
@@ -100,76 +91,75 @@
                     <span x-show="sidebarOpen" x-transition.opacity class="font-semibold text-[11px] whitespace-nowrap">Master Grid</span>
                 </a>
 
-                <a href="/notifications" wire:navigate 
-                    class="relative flex items-center p-2 rounded-xl transition-all group {{ request()->is('notifications*') ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800' }}">
-                    <span class="text-lg flex shrink-0 justify-center" :class="sidebarOpen ? 'mr-2.5' : 'w-full'">🔔</span>
-                    <span x-show="sidebarOpen" x-transition.opacity class="font-semibold text-[11px] whitespace-nowrap">Notifications</span>
-
-                    @php $notifCount = auth()->user()->unreadNotifications->count(); @endphp
-                    @if($notifCount > 0)
-                        <span class="absolute flex h-4 w-4 items-center justify-center rounded-full bg-red-500 text-[9px] font-black text-white border-2 border-[#0f172a] shadow-sm animate-pulse"
-                            :class="sidebarOpen ? 'right-2' : 'top-0 right-1'">
-                            {{ $notifCount }}
-                        </span>
-                    @endif
-                </a>
-
                 @if(in_array(auth()->user()->role, ['admin', 'registrar']))
-                    <div x-show="sidebarOpen" class="px-2.5 pb-1 pt-3">
-                        <p class="text-[8px] font-bold text-slate-500 uppercase tracking-widest">System</p>
-                    </div>
-                    <a href="/settings" wire:navigate class="flex items-center p-2 rounded-xl transition-all group {{ request()->is('settings*') ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800' }}">
-                        <span class="text-lg flex shrink-0 justify-center" :class="sidebarOpen ? 'mr-2.5' : 'w-full'">⚙️</span>
-                        <span x-show="sidebarOpen" x-transition.opacity class="font-semibold text-[11px] whitespace-nowrap">Settings</span>
-                    </a>
-                @endif
-
-                @php $unreadNotifs = auth()->user()->unreadNotifications; @endphp
-                @if($unreadNotifs->count() > 0)
-                <div x-show="sidebarOpen" class="mt-6 mx-2 p-3 bg-blue-500/5 rounded-2xl border border-blue-500/10 transition-all">
-                    <div class="flex items-center justify-between mb-2">
-                        <p class="text-[7px] font-black text-blue-500 uppercase tracking-[0.2em]">Recent Alerts</p>
-                        <span class="flex h-1.5 w-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.5)]"></span>
-                    </div>
-                    <div class="space-y-2 max-h-32 overflow-y-auto pr-1 custom-scrollbar">
-                        @foreach($unreadNotifs->take(3) as $notification)
-                            <div class="flex flex-col gap-1 border-l-2 border-blue-600 pl-2 py-0.5">
-                                <p class="text-[9px] font-bold text-slate-200 leading-tight">
-                                    {{ Str::limit($notification->data['message'] ?? 'New Request', 40) }}
-                                </p>
-                                <span class="text-[7px] text-slate-500 font-medium lowercase italic">{{ $notification->created_at->diffForHumans() }}</span>
-                            </div>
-                        @endforeach
-                    </div>
+                <div x-show="sidebarOpen" class="px-2.5 pb-1 pt-3">
+                    <p class="text-[8px] font-bold text-slate-500 uppercase tracking-widest">System</p>
                 </div>
+                <a href="/settings" wire:navigate class="flex items-center p-2 rounded-xl transition-all group {{ request()->is('settings*') ? 'bg-blue-600 text-white shadow-md' : 'text-slate-400 hover:bg-slate-800' }}">
+                    <span class="text-lg flex shrink-0 justify-center" :class="sidebarOpen ? 'mr-2.5' : 'w-full'">⚙️</span>
+                    <span x-show="sidebarOpen" x-transition.opacity class="font-semibold text-[11px] whitespace-nowrap">Settings</span>
+                </a>
                 @endif
             </nav>
 
-            <div class="p-2.5 border-t border-slate-800 bg-[#020617]/50 shrink-0">
-                <div class="flex items-center mb-2.5" :class="sidebarOpen ? 'px-1.5' : 'justify-center'">
-                    <div class="w-8 h-8 shrink-0 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 flex items-center justify-center text-[9px] font-black shadow-lg border-2 border-slate-800 uppercase text-white">
-                        {{ auth()->user()->initials() }}
-                    </div>
-                    <div x-show="sidebarOpen" x-transition.opacity class="ml-2 overflow-hidden">
-                        <p class="text-[10px] font-bold text-white truncate leading-tight">{{ auth()->user()->name }}</p>
-                        <span class="text-[7px] px-1 py-0.5 bg-blue-500/10 text-blue-400 rounded uppercase font-bold tracking-tighter">{{ auth()->user()->role }}</span>
-                    </div>
-                </div>
-
-                <form method="POST" action="{{ route('logout') }}">
-                    @csrf
-                    <button type="submit" class="w-full flex items-center justify-center p-1.5 text-slate-400 hover:text-white hover:bg-red-500/20 rounded-lg transition-all border border-white/5 group">
-                        <span class="text-sm flex shrink-0" :class="sidebarOpen ? 'mr-2' : ''">🔒</span>
-                        <span x-show="sidebarOpen" x-transition.opacity class="text-[8px] font-black uppercase tracking-widest">Sign Out</span>
-                    </button>
-                </form>
-            </div>
+            <button 
+                @click="sidebarOpen = !sidebarOpen" 
+                class="absolute top-5 -right-3 z-50 p-1 bg-[#0f172a] text-blue-400 rounded-full border border-slate-700 shadow-xl transition-all duration-300 hover:scale-110 active:scale-95"
+            >
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 transition-transform duration-300" :class="sidebarOpen ? 'rotate-0' : 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M15 19l-7-7 7-7" />
+                </svg>
+            </button>
         </aside>
 
-        <main class="flex-1 overflow-y-auto bg-[#F8FAFC] custom-scrollbar relative">
-            {{ $slot }}
-        </main>
+        <div class="flex-1 flex flex-col min-w-0">
+            
+            <header class="h-16 flex items-center justify-between px-8 bg-[#0f172a] text-white shrink-0 z-30 shadow-lg relative">
+                <div>
+                    <h2 class="text-sm font-bold text-slate-200 tracking-tight">Professional Academy of the Philippines</h2>
+                    <p class="text-[9px] text-slate-500 font-bold uppercase tracking-widest leading-tight">Academic Personnel Management</p>
+                </div>
 
+                <div class="flex items-center gap-4">
+                    
+                    <div @click="toggleTheme()" class="cursor-pointer p-2 rounded-xl transition-all group relative overflow-hidden bg-white/5 hover:bg-white/10">
+                        <div class="relative z-10">
+                            <svg x-show="darkMode" x-cloak class="w-5 h-5 text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.6)] group-hover:rotate-45 transition-transform" fill="currentColor" viewBox="0 0 20 20">
+                                <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1a1 1 0 112 0v1a2 2 0 11-4 0 1 1 0 112 0zM13 10a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                            </svg>
+                            <svg x-show="!darkMode" x-cloak class="w-5 h-5 text-slate-400 group-hover:-rotate-12 transition-transform" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.674M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                            </svg>
+                        </div>
+                    </div>
+
+                    @livewire('notification-center')
+
+                    <div class="flex items-center gap-3 pl-4 border-l border-slate-700">
+                        <div class="text-right hidden sm:block">
+                            <p class="text-[11px] font-bold text-white leading-none">{{ auth()->user()->name }}</p>
+                            <p class="text-[9px] text-blue-400 font-black uppercase mt-1 tracking-tighter">{{ auth()->user()->role }}</p>
+                        </div>
+                        <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-700 flex items-center justify-center text-white text-[10px] font-black shadow-inner border border-white/10">
+                            {{ auth()->user()->initials() }}
+                        </div>
+                    </div>
+
+                    <form method="POST" action="{{ route('logout') }}">
+                        @csrf
+                        <button type="submit" class="p-2 text-slate-400 hover:text-white transition-colors">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                            </svg>
+                        </button>
+                    </form>
+                </div>
+            </header>
+
+            <main class="flex-1 overflow-y-auto custom-scrollbar p-6">
+                {{ $slot }}
+            </main>
+        </div>
     </div>
 
     @livewireScripts

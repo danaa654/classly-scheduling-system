@@ -36,7 +36,7 @@ Route::middleware(['auth'])->group(function () {
 
     // Management & Core System
     Route::get('/manage-users', ManageUsers::class)->name('manage-users');
-    Route::get('/faculty', ManageFaculty::class)->name('manage-faculty');
+    Route::get('/faculty', App\Livewire\ManageFaculty::class)->name('faculty.index');
     Route::get('/faculty-load', FacultyLoading::class)->name('faculty-loading');
     Route::get('/subjects', ManageSubjects::class)->name('subjects');
     Route::get('/manage-rooms', ManageRooms::class)->name('manage-rooms');

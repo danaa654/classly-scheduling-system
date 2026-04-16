@@ -9,16 +9,13 @@ return new class extends Migration
     /**
      * Run the migrations.
      */
-    public function up(): void
-    {
-        Schema::table('faculties', function (Blueprint $table) {
-            //
-        });
-    }
+    public function up()
+{
+    Schema::table('faculties', function (Blueprint $table) {
+        $table->foreignId('requested_by')->nullable()->constrained('users')->onDelete('set null');
+    });
+}
 
-    /**
-     * Reverse the migrations.
-     */
     public function down(): void
     {
         Schema::table('faculties', function (Blueprint $table) {

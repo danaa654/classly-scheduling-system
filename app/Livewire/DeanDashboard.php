@@ -8,9 +8,11 @@ use App\Models\Subject;
 use App\Models\Room;    
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
+use App\Traits\HandlesNotifications;
 
 class DeanDashboard extends Component
 {
+    use HandlesNotifications;
     public $totalFaculty, $totalSubjects, $totalRooms;
     public $department, $todayString, $daysInMonth, $todayDay;
 
