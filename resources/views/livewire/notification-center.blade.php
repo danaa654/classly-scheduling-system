@@ -14,50 +14,126 @@
 
     {{-- Dropdown Menu --}}
     <div x-show="open" @click.away="open = false" x-transition 
-         class="absolute right-0 mt-3 w-80 bg-white rounded-[2rem] shadow-2xl border border-slate-100 z-50 overflow-hidden shadow-blue-200/50">
+         class="absolute right-0 mt-3 w-96 bg-white rounded-[1.5rem] shadow-2xl border border-slate-100 z-50 overflow-hidden shadow-blue-200/50">
         
-        <div class="p-5 border-b border-slate-50 flex justify-between items-center bg-white">
-            <h3 class="font-black text-slate-800 uppercase text-xs tracking-widest">Notifications</h3>
-            @if(auth()->user()->unreadNotifications->count() > 0)
-                <button wire:click="markAllAsRead" class="text-[10px] text-blue-600 font-black uppercase hover:underline">Mark all read</button>
-            @endif
+        {{-- Header --}}
+        <div class="p-5 border-b border-slate-50 flex justify-between items-end bg-white sticky top-0 z-10">
+            <div>
+                <h3 class="font-black text-slate-800 text-sm tracking-tight uppercase">Notifications</h3>
+                <div class="flex gap-3 mt-1">
+                    <button wire:click="markAllAsRead" class="text-[10px] text-blue-600 font-bold uppercase hover:underline">Mark all read</button>
+                    @if(auth()->user()->readNotifications->count() > 0)
+                        <button wire:click="deleteAllRead" class="text-[10px] text-slate-400 font-bold uppercase hover:text-red-500 transition-colors">Clear read</button>
+                    @endif
+                </div>
+            </div>
+            <span class="text-[10px] bg-blue-50 px-2 py-1 rounded-full font-black text-blue-600 uppercase">
+                {{ auth()->user()->unreadNotifications->count() }} New
+            </span>
         </div>
 
-        <div class="max-h-96 overflow-y-auto">
+        {{-- Notifications List - SCROLLABLE AREA START --}}
+        <div class="max-h-[25rem] overflow-y-auto custom-scrollbar bg-white">
            @forelse(auth()->user()->notifications as $notification)
-            {{-- Redesign: Blue tint for unread, White for read --}}
-            <div class="p-4 border-b border-slate-50 flex gap-3 transition-colors 
-                {{ $notification->unread() ? 'bg-blue-50/50 border-l-4 border-blue-500' : 'bg-white' }}">
+            @php
+                $senderName = $notification->data['sender_name'] ?? 'System';
+                $words = explode(' ', $senderName);
+                $initials = '';
+                if (count($words) >= 2) {
+                    $initials = substr($words[0], 0, 1) . substr($words[1], 0, 1);
+                } else {
+                    $initials = substr($senderName, 0, 2);
+                }
+                $initials = strtoupper($initials);
+                $notifDate = \Carbon\Carbon::parse($notification->created_at)->timezone('Asia/Manila');
+            @endphp
+
+            {{-- Notification Row --}}
+            <div wire:click="markAsRead('{{ $notification->id }}')" 
+                class="p-4 border-b border-slate-50 flex items-start gap-4 transition-all relative group cursor-pointer 
+                {{ $notification->unread() ? 'bg-blue-50/30' : 'bg-white hover:bg-slate-50' }}">
                 
-                <div class="flex-1">
-                    <p class="text-[13px] leading-snug {{ $notification->unread() ? 'text-slate-900 font-bold' : 'text-slate-600 font-medium' }}">
-                        {{ $notification->data['message'] ?? 'New Notification' }}
-                    </p>
-                    <span class="text-[10px] text-slate-400 italic">
-                        {{ $notification->created_at->diffForHumans() }}
-                    </span>
+                {{-- Dynamic Avatar --}}
+                <div class="flex-shrink-0">
+                    <div class="h-10 w-10 rounded-full transition-colors flex items-center justify-center font-black text-xs border-2 border-white shadow-sm
+                        {{ $notification->unread() ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-400' }}">
+                        {{ $initials }}
+                    </div>
                 </div>
 
-                <div class="flex items-center">
+              {{-- Content Area --}}
+                <div class="flex-1 pr-4">
+                    <p class="text-[12px] leading-[1.4] {{ $notification->unread() ? 'text-slate-900 font-black' : 'text-slate-500 font-medium' }}">
+                        <span class="{{ $notification->unread() ? 'text-blue-600' : 'text-slate-700' }}">
+                            {{ $notification->data['sender_name'] ?? 'System' }}
+                        </span> 
+                        {{ $notification->data['message'] ?? 'updated a request' }} 
+                        <span class="font-bold {{ $notification->unread() ? 'text-slate-900' : 'text-slate-700' }}">
+                            {{ $notification->data['message'] }}
+                        </span>
+                    </p>
+                    
+                    <div class="flex items-center gap-2 mt-1">
+                        <span class="text-[10px] text-slate-400 font-bold uppercase tracking-tight">
+                            @if($notifDate->isToday())
+                                Today at {{ $notifDate->format('h:i A') }}
+                            @else
+                                {{ $notifDate->format('M d, Y | h:i A') }}
+                            @endif
+                        </span>
+                    </div>
+                </div>
+
+                {{-- Blinking Indicator / Trash --}}
+                <div class="flex flex-col items-center justify-center self-center">
                     @if($notification->unread())
-                        <button wire:click="markAsRead('{{ $notification->id }}')" 
-                                class="text-blue-600 hover:text-blue-800 p-1 bg-white rounded-lg shadow-sm border border-blue-100">
-                            <span class="text-[10px] font-black px-1">MARK READ</span>
-                        </button>
+                        <div class="relative flex h-2.5 w-2.5">
+                            <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                            <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-600"></span>
+                        </div>
                     @else
-                        <button wire:click="deleteNotification('{{ $notification->id }}')" class="text-slate-300 hover:text-red-500 transition-colors">
+                        <button wire:click.stop="deleteNotification('{{ $notification->id }}')" 
+                                class="text-slate-300 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100">
                             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
                             </svg>
                         </button>
                     @endif
                 </div>
             </div>
         @empty
-            <div class="p-8 text-center text-slate-400 text-xs italic">
-                All caught up!
+            <div class="p-12 text-center">
+                <div class="bg-slate-50 h-12 w-12 rounded-full flex items-center justify-center mx-auto mb-3">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-slate-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" />
+                    </svg>
+                </div>
+                <p class="text-slate-400 text-[10px] font-black uppercase tracking-widest">All caught up!</p>
             </div>
         @endforelse
         </div>
+        {{-- Notifications List - SCROLLABLE AREA END --}}
+
+        {{-- Optional Footer --}}
+        <div class="p-4 bg-slate-50/50 border-t border-slate-50 text-center">
+             <p class="text-[9px] font-bold text-slate-400 uppercase tracking-widest">End of Notifications</p>
+        </div>
     </div>
 </div>
+
+<style>
+    /* Thin modern scrollbar for the notification list */
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 5px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: #f8fafc;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 10px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+    }
+</style>

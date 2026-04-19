@@ -64,14 +64,14 @@ class ManageFaculty extends Component
     }
 }
 
-    // --- ACTIVITY LOG HELPER ---
-    private function logAction($facultyId, $action, $description) 
+    private function logAction($facultyId, $action, $description, $department = null) 
 {
     FacultyLog::create([
-        'faculty_id'  => $facultyId, // This can be null for bulk actions
+        'faculty_id'  => $facultyId, 
         'user_id'     => auth()->id(), 
         'action'      => $action,      
-        'description' => $description, 
+        'description' => $description,
+        'department'  => $department ?? (auth()->user()->role === 'dean' ? auth()->user()->department : null),
     ]);
 }
 
@@ -118,55 +118,80 @@ protected $rules = [
     'department'  => 'required',
 ];
 
-    public function saveFaculty() 
-    {
-        $this->validate([
-            'employee_id' => 'required|unique:faculties,employee_id',
-            'full_name'   => 'required|string|max:255',
-            'department'  => 'required',
-            'email'       => 'nullable|email',
-        ]);
-
-        $status = $this->isAdminOrRegistrar() ? 'approved' : 'pending';
-
-        $newFaculty = Faculty::create([
-            'employee_id'  => $this->employee_id,
-            'full_name'    => $this->full_name,
-            'email'        => $this->email,
-            'department'   => $this->department,
-            'status'       => $status,
-            'requested_by' => auth()->id(),
-        ]);
-
-        $this->logAction($newFaculty->id, 'created', "Registered faculty: {$newFaculty->full_name}");
+   public function saveFaculty() 
+{
+    $this->validate([
+        'employee_id' => 'required|unique:faculties,employee_id',
+        // Rule order: Required first, then Unique check, then formatting
+        'full_name'   => 'required|unique:faculties,full_name|min:5|regex:/(\s)/', 
+        'email'       => 'required|unique:faculties,email|email', 
+        'department'  => 'required',
+    ], [
+        // Duplicate Indicators
+        'full_name.unique'   => '⚠️ This name is already being used.',
+        'email.unique'       => '⚠️ This email is already being used.',
+        'employee_id.unique' => '⚠️ This ID is already assigned.',
         
-        if ($status === 'pending') {
-            $registrars = User::whereIn('role', ['admin', 'registrar'])->get();
-            Notification::send($registrars, new FacultyRequestNotification($newFaculty, auth()->user()->name, 'pending'));
-        }
+        // Formatting Indicators
+        'full_name.regex'    => '⚠️ Please enter your complete full name.',
+        'email.email'        => "⚠️ Please enter a valid email containing '@'.",
+        'full_name.min'      => '⚠️ Name is too short.',
+        'email.required'     => '⚠️ The email address is required.',
+    ]);
 
-        $this->showModal = false;
-        $this->dispatch('swal', title: $status === 'approved' ? 'Faculty Added!' : 'Request Submitted!', icon: 'success');
-    }
+    // Create logic remains the same...
+    $status = $this->isAdminOrRegistrar() ? 'approved' : 'pending';
+
+    $newFaculty = Faculty::create([
+        'employee_id'  => $this->employee_id,
+        'full_name'    => $this->full_name,
+        'email'        => $this->email,
+        'department'   => $this->department,
+        'status'       => $status,
+        'requested_by' => auth()->id(),
+    ]);
+
+    $this->logAction($newFaculty->id, 'created', "Registered faculty: {$newFaculty->full_name}");
+    
+    $this->showModal = false;
+    $this->dispatch('swal', title: 'Faculty Registered', icon: 'success');
+}
     
     public function deleteSelected()
-{
-    $count = count($this->selectedFaculty);
-    Faculty::whereIn('id', $this->selectedFaculty)->delete();
-    FacultyLog::create([
-    'user_id' => auth()->id(),
-    'action' => 'Bulk Delete',
-    'description' => "Deleted $count records from " . auth()->user()->department . " registry.",
-    'faculty_id' => null, 
-]);
+    {
+        if (empty($this->selectedFaculty)) return;
 
-    $this->dispatch('swal', title: 'Records Deleted', icon: 'warning');
-    $this->logAction(null, 'Bulk Delete', "Deleted $count faculty records.");
-    $this->reset(['selectedFaculty', 'selectAll']);
-    $this->dispatch('swal', title: 'Records Removed', icon: 'warning');
-    $this->reset(['selectedFaculty', 'selectAll', 'confirmingDeletion']);
-    session()->flash('message', "Successfully removed $count records.");
-}
+        $count = count($this->selectedFaculty);
+        $faculties = Faculty::whereIn('id', $this->selectedFaculty)->get();
+
+        foreach ($faculties as $faculty) {
+            // Notify Deans for each record being removed in the bulk action
+            $dean = User::find($faculty->requested_by);
+            if ($dean) {
+                $dean->notify(new FacultyRequestNotification($faculty, auth()->user()->name, 'deleted'));
+            }
+            
+            // Log individual deletion in the activity log
+            $this->logAction($faculty->id, 'deleted', "Bulk deleted: {$faculty->full_name}");
+        }
+
+        // Perform the actual database deletion
+        Faculty::whereIn('id', $this->selectedFaculty)->delete();
+
+        // Log the overall Bulk action
+        FacultyLog::create([
+            'user_id' => auth()->id(),
+            'action' => 'Bulk Delete',
+            'description' => "Deleted $count records from " . auth()->user()->department . " registry.",
+            'faculty_id' => null, 
+        ]);
+
+        // Reset UI state
+        $this->reset(['selectedFaculty', 'selectAll', 'confirmingDeletion']);
+        
+        $this->dispatch('swal', title: "$count Records Removed", icon: 'warning');
+        session()->flash('message', "Successfully removed $count records.");
+    }
     public function editFaculty($id) 
     {
         $this->resetValidation();
@@ -183,10 +208,16 @@ protected $rules = [
     public function updateFaculty() 
     {
         $this->validate([
-            'employee_id' => ['required', Rule::unique('faculties')->ignore($this->faculty_id)],
-            'full_name'   => 'required|string|max:255',
-            'department'  => 'required',
-        ]);
+        'employee_id' => 'required|unique:faculties,employee_id',
+        'full_name'   => 'required|min:5|regex:/(\s)/|unique:faculties,full_name', 
+        'email'       => 'required|email|contains:@|unique:faculties,email',
+        'department'  => 'required',
+    ], [
+        // Custom Error Messages for your Issue #2
+        'full_name.unique' => 'That name is already being used.',
+        'email.unique'     => 'That email address is already being used.',
+        'full_name.regex'  => 'Please enter your complete full name (First and Last).',
+    ]);
 
         $faculty = Faculty::findOrFail($this->faculty_id);
         $faculty->update([
@@ -210,17 +241,28 @@ protected $rules = [
     }
 
     public function deleteFaculty($id)
-    {
-        $faculty = Faculty::find($id);
-        if (!$faculty) return;
+{
+    if (!$this->isAdminOrRegistrar()) return;
 
-        $name = $faculty->full_name;
-        $this->logAction($id, 'deleted', "Removed record: {$name}");
-        $faculty->delete();
-        $this->dispatch('swal', title: 'Faculty Removed', icon: 'warning');
+    $faculty = Faculty::findOrFail($id);
+    $dept = $faculty->department; // Capture the department (CCS, CTE, etc.)
+    $name = $faculty->full_name;
+    $deanId = $faculty->requested_by;
+
+    // 1. Notify
+    $dean = User::find($deanId);
+    if ($dean) {
+        $dean->notify(new FacultyRequestNotification($faculty, auth()->user()->name, 'deleted'));
     }
 
-    // --- BATCH IMPORT WITH HEADER VALIDATION ---
+    // 2. Log with Department info so the Dean can see it in "Recent Activity"
+    $this->logAction($faculty->id, 'deleted', "Deleted faculty: $name", $dept);
+
+    // 3. Delete
+    $faculty->delete();
+
+    $this->dispatch('swal', title: 'Faculty Deleted', icon: 'warning');
+}
     public function updatedImportFile()
 {
     $this->validate([
@@ -263,36 +305,40 @@ protected $rules = [
     }
 }
  public function processImport()
-    {
-        try {
-            $importCount = 0;
-            foreach ($this->importPreview as $data) {
-                if ($data['error']) continue;
+{
+    try {
+        $importCount = 0;
+        foreach ($this->importPreview as $data) {
+            // Check for duplicates before creating to avoid crashes
+            $exists = Faculty::where('full_name', $data['full_name'])
+                ->orWhere('email', $data['email'])
+                ->exists();
 
-                Faculty::create([
-                    'employee_id' => $data['employee_id'],
-                    'full_name'   => $data['full_name'],
-                    'email'       => $data['email'],
-                    'department'  => $data['department'],
-                    'status'      => 'approved', 
-                ]);
-                $importCount++;
-            }
+            if ($exists) continue;
 
-            $this->logAction(null, 'Bulk Import', "Imported $importCount faculty members.");
-            
-            // FIX: Resetting variables and triggering modal close
-            $this->reset(['importFile', 'importPreview', 'bulkOpen']); 
-            $this->dispatch('close-import-modal'); 
-            
-            session()->flash('message', "Import Successful! Added $importCount records.");
-            $this->dispatch('swal', title: 'Import Successful', icon: 'success');
+            $faculty = Faculty::create([
+                'employee_id'  => $data['employee_id'],
+                'full_name'    => $data['full_name'],
+                'email'        => $data['email'],
+                'department'   => $data['department'],
+                'status'       => 'approved', 
+                'requested_by' => auth()->id(), // Essential for Issue #3 (Delete Notifications)
+            ]);
 
-        } catch (\Exception $e) {
-            $this->dispatch('close-import-modal');
-            session()->flash('error', "Database Error: " . $e->getMessage());
+            // Fix for Issue #1 & #4: Create a specific log for the Department's Recent Activity
+            $this->logAction($faculty->id, 'created', "Imported faculty: {$faculty->full_name}");
+            $importCount++;
         }
+
+        $this->reset(['importFile', 'importPreview', 'bulkOpen']); 
+        $this->dispatch('close-import-modal'); 
+        $this->dispatch('swal', title: "Imported $importCount Records", icon: 'success');
+
+    } catch (\Exception $e) {
+        $this->dispatch('close-import-modal');
+        session()->flash('error', "Database Error: " . $e->getMessage());
     }
+}
     public function approveFaculty($id) 
     {
         if (!$this->isAdminOrRegistrar()) return;
@@ -301,26 +347,28 @@ protected $rules = [
         $faculty->update(['status' => 'approved']);
         $this->logAction($faculty->id, 'approved', "Approved entry: {$faculty->full_name}");
 
+        // Notify the Dean who requested this faculty
         $dean = User::find($faculty->requested_by);
         if ($dean) {
             $dean->notify(new FacultyRequestNotification($faculty, auth()->user()->name, 'approved'));
         }
+        
         $this->dispatch('swal', title: 'Request Approved', icon: 'success');
     }
 
     public function declineFaculty($id) 
     {
+        if (!$this->isAdminOrRegistrar()) return;
+
         $faculty = Faculty::findOrFail($id);
-        if ($this->isAdminOrRegistrar()) {
-            $faculty->update(['status' => 'rejected']);
-            $this->logAction($faculty->id, 'rejected', "Rejected entry: {$faculty->full_name}");
-            $dean = User::find($faculty->requested_by);
-            if ($dean) {
-                $dean->notify(new FacultyRequestNotification($faculty, auth()->user()->name, 'rejected'));
-            }
-        } elseif ($faculty->requested_by == auth()->id() && $faculty->status == 'pending') {
-            $faculty->delete(); 
+        $faculty->update(['status' => 'rejected']);
+        $this->logAction($faculty->id, 'rejected', "Rejected entry: {$faculty->full_name}");
+        
+        $dean = User::find($faculty->requested_by);
+        if ($dean) {
+            $dean->notify(new FacultyRequestNotification($faculty, auth()->user()->name, 'rejected'));
         }
+        
         $this->dispatch('swal', title: 'Action Recorded', icon: 'info');
     }
 
@@ -379,20 +427,23 @@ protected $rules = [
                 });
             })->orderBy('employee_id', 'asc')->paginate(10);
 
-        $recentLogs = FacultyLog::with(['user', 'faculty'])
-                ->when(!$this->isAdminOrRegistrar(), function ($q) use ($user) {
-                    return $q->where(function ($query) use ($user) {
-                        $query->where('user_id', $user->id) // Show actions the Dean did personally
-                            ->orWhereHas('faculty', function ($f) use ($user) {
-                                $f->where('department', $user->department); // Show actions involving their faculty
-                            });
-                    });
+            $recentLogs = FacultyLog::with(['user', 'faculty'])
+                ->where(function ($q) use ($user) {
+                    if ($this->isAdminOrRegistrar()) {
+                        $q->whereRaw('1=1'); // Registrar sees all
+                    } else {
+                        // DEAN: Show logs where they did the action OR the faculty belongs to their department
+                        $q->where('user_id', $user->id)
+                        ->orWhereHas('faculty', function ($f) use ($user) {
+                            $f->where('department', $user->department);
+                        });
+                    }
                 })
                 ->latest()
                 ->take(10)
                 ->get();
 
-        return view('livewire.manage-faculty', [
+                    return view('livewire.manage-faculty', [
             'faculties' => $faculties,
             'pendingRequests' => $pendingRequests,
             'recentLogs' => $recentLogs

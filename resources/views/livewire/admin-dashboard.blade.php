@@ -152,7 +152,7 @@
                 </div>
 
                 <div class="grid grid-cols-1 gap-3">
-                    <a href="{{ route('manage-rooms') }}" class="rounded-3xl border flex items-center justify-center gap-3 font-black text-[10px] uppercase tracking-[0.2em] transition-all duration-300 hover:scale-[1.03] hover:bg-blue-600 hover:text-white group"
+                    <a href="{{ route('manage.rooms') }}" class="rounded-3xl border flex items-center justify-center gap-3 font-black text-[10px] uppercase tracking-[0.2em] transition-all duration-300 hover:scale-[1.03] hover:bg-blue-600 hover:text-white group"
                        :class="darkMode ? 'bg-white/5 border-white/5' : 'bg-white border-slate-200 shadow-lg'">
                        <svg class="w-4 h-4 group-hover:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4"/></svg> Manage Rooms
                     </a>

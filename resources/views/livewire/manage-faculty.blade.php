@@ -270,30 +270,33 @@
                     <span class="text-red-500 text-[10px] font-bold ml-2 italic">⚠️ Required or already taken.</span> 
                 @enderror
             </div>
-            
-            {{-- Full Name: validation with complete name warning --}}
-            <div>
-                <label class="text-[10px] font-black text-slate-400 uppercase ml-2 block">Full Name</label>
-                <input type="text" 
-                       wire:model.blur="full_name" 
-                       placeholder="Firstname Lastname"
-                       class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 @error('full_name') ring-2 ring-red-500 @enderror">
-                @error('full_name') 
-                    <span class="text-red-500 text-[10px] font-bold ml-2 italic">⚠️ Please enter your complete full name.</span> 
-                @enderror
-            </div>
-            
-            {{-- Email: validation for @ symbol --}}
-            <div>
-                <label class="text-[10px] font-black text-slate-400 uppercase ml-2 block">Email Address</label>
-                <input type="email" 
-                       wire:model.blur="email" 
-                       placeholder="example@email.com"
-                       class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 @error('email') ring-2 ring-red-500 @enderror">
-                @error('email') 
-                    <span class="text-red-500 text-[10px] font-bold ml-2 italic">⚠️ Please enter a valid email containing '@'.</span> 
-                @enderror
-            </div>
+                        {{-- Full Name Input --}}
+                <div>
+                    <label class="text-[10px] font-black text-slate-400 uppercase ml-2 block">Full Name</label>
+                    <input type="text" 
+                        wire:model.blur="full_name" 
+                        placeholder="Firstname Lastname"
+                        class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 @error('full_name') ring-2 ring-red-500 @enderror">
+                    
+                    @error('full_name') 
+                        {{-- FIX: Using {{ $message }} allows the 'already being used' text to appear --}}
+                        <span class="text-red-500 text-[10px] font-bold ml-2 italic">⚠️ {{ $message }}</span> 
+                    @enderror
+                </div>
+
+                {{-- Email Input --}}
+                <div>
+                    <label class="text-[10px] font-black text-slate-400 uppercase ml-2 block">Email Address</label>
+                    <input type="email" 
+                        wire:model.blur="email" 
+                        placeholder="example@email.com"
+                        class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 @error('email') ring-2 ring-red-500 @enderror">
+                    
+                    @error('email') 
+                        {{-- FIX: This will now show the specific email duplicate error --}}
+                        <span class="text-red-500 text-[10px] font-bold ml-2 italic">⚠️ {{ $message }}</span> 
+                    @enderror
+                </div>
             
             {{-- Department: Role-based Logic --}}
             <div>

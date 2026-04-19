@@ -55,7 +55,7 @@
                 </div>
             </div>
 
-            <a href="{{ route('manage-rooms') }}" class="col-span-3 row-span-2 rounded-[2.5rem] border p-8 flex flex-col justify-between transition-all duration-500 relative overflow-hidden group hover:scale-[1.05] hover:-translate-y-1 shadow-xl"
+           <a href="{{ route('manage.rooms') }}" class="col-span-3 row-span-2 rounded-[2.5rem] border p-8 flex flex-col justify-between transition-all duration-500 relative overflow-hidden group hover:scale-[1.05] hover:-translate-y-1 shadow-xl"
                :class="darkMode ? 'bg-slate-900/40 border-white/5 hover:border-blue-500/50' : 'bg-white/70 border-white/30 backdrop-blur-sm'">
                 <div class="absolute inset-0 bg-gradient-to-tr from-blue-500/10 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                 <div class="relative z-10">
@@ -154,7 +154,7 @@
                 </div>
 
                 <div class="grid grid-cols-1 gap-3">
-                    <a href="{{ route('manage-rooms') }}" class="rounded-3xl border flex items-center justify-center gap-3 font-black text-[10px] uppercase tracking-[0.2em] transition-all duration-300 hover:scale-[1.03] hover:bg-blue-600 hover:text-white group"
+                    <a href="{{ route('manage.rooms') }}"class="rounded-3xl border flex items-center justify-center gap-3 font-black text-[10px] uppercase tracking-[0.2em] transition-all duration-300 hover:scale-[1.03] hover:bg-blue-600 hover:text-white group"
                        :class="darkMode ? 'bg-white/5 border-white/5' : 'bg-white border-slate-200 shadow-lg'">
                        <svg class="w-4 h-4 group-hover:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4"/></svg> Manage Rooms
                     </a>

@@ -39,7 +39,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/faculty', App\Livewire\ManageFaculty::class)->name('faculty.index');
     Route::get('/faculty-load', FacultyLoading::class)->name('faculty-loading');
     Route::get('/subjects', ManageSubjects::class)->name('subjects');
-    Route::get('/manage-rooms', ManageRooms::class)->name('manage-rooms');
+     Route::get('/manage-rooms', \App\Livewire\ManageRooms::class)->name('manage.rooms');
     Route::get('/master-grid', MasterGrid::class)->name('master-grid');
     Route::get('/notifications', \App\Livewire\NotificationCenter::class)->name('notifications');
     Route::get('/settings', GlobalSettings::class)->name('settings');
