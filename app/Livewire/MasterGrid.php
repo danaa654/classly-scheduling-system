@@ -21,6 +21,7 @@ class MasterGrid extends Component
     public $selectedDept = '';
     public $selectedYear = '';
     public $selectedMajor = '';
+    public $roomType = '';
     
     // UI State properties
     #[Url]

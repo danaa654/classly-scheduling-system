@@ -1,131 +1,135 @@
-<div class="flex h-screen bg-[#F8FAFC] font-sans antialiased text-slate-900" 
-     x-data="{ 
-        open: @entangle('showModal'), 
-        bulkOpen: @entangle('bulkOpen'),
-        confirmDelete: @entangle('confirmingDeletion') 
-     }">
-    
-    <main class="flex-1 flex flex-col overflow-hidden">
-        {{-- Header Section --}}
-        <header class="h-24 bg-white border-b border-slate-200 flex items-center justify-between px-12 shadow-sm shrink-0">
-            <div>
-                <h2 class="text-2xl font-black text-slate-800 uppercase tracking-tighter">Room Management</h2>
-                <p class="text-sm text-slate-400 font-medium italic underline decoration-blue-500/20">Institutional Space Allocation</p>
-            </div>
-            
-            @if(in_array(auth()->user()->role, ['admin', 'registrar']))
-            <div class="flex items-center space-x-3">
-                @if(count($selectedRooms) > 0)
-                    <button wire:click="$set('confirmingDeletion', true)" class="px-6 py-3 bg-red-50 text-red-600 rounded-2xl font-black hover:bg-red-100 transition-all border border-red-200 shadow-sm animate-pulse">
-                        🗑️ Delete Selected ({{ count($selectedRooms) }})
-                    </button>
-                @endif
+<div class="min-h-screen bg-[#E6E6E6] dark:bg-[#020617] transition-colors duration-500">
 
-                <button @click="bulkOpen = true" class="px-6 py-3 bg-slate-100 text-slate-600 rounded-2xl font-black hover:bg-slate-200 transition-all flex items-center border border-slate-200">
-                    <span class="mr-2 text-lg">📥</span> Bulk Import
-                </button>
-
-                <button wire:click="openModal" class="group relative px-8 py-3 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-200 overflow-hidden transition-all active:scale-95">
-                    <span class="relative z-10">+ Add New Room</span>
-                    <div class="absolute inset-0 bg-gradient-to-r from-blue-400 to-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-                </button>
-            </div>
-            @endif
-        </header>
-
-        <div class="p-12 overflow-y-auto space-y-6 custom-scrollbar">
-            {{-- Search & Filter Bar --}}
-            <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-[2rem] border border-slate-200 shadow-sm">
-                <div class="relative flex-1 max-w-lg">
-                    <span class="absolute inset-y-0 left-5 flex items-center text-slate-400">🔍</span>
-                    <input type="text" wire:model.live="search" placeholder="Search by room name or type..." 
-                           class="w-full pl-14 pr-6 py-4 bg-slate-50 border-none rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 transition-all text-sm">
+    <div class="flex h-screen font-sans antialiased text-slate-900 dark:text-white" 
+         x-data="{ 
+            open: @entangle('showModal'), 
+            bulkOpen: @entangle('bulkOpen'),
+            confirmDelete: @entangle('confirmingDeletion') 
+         }">
+        
+        <main class="flex-1 flex flex-col overflow-hidden">
+            {{-- Header Section --}}
+            <header class="h-24 bg-white dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-12 shadow-sm shrink-0 backdrop-blur-xl rounded-b-[3rem] transition-colors">
+                <div>
+                    <h2 class="text-2xl font-black text-slate-800 dark:text-slate-100 uppercase tracking-tighter">Room Management</h2>
+                    <p class="text-sm text-slate-400 dark:text-indigo-400/60 font-medium italic underline decoration-blue-500/20">Institutional Space Allocation</p>
                 </div>
                 
-                <div class="flex items-center space-x-2">
-                    <label class="text-[10px] font-black uppercase text-slate-400 tracking-widest px-2">Filter Type:</label>
-                    <select wire:model.live="filterType" class="bg-slate-50 border-none rounded-xl font-bold text-xs uppercase p-3 focus:ring-2 focus:ring-blue-500">
-                        <option value="">All Types</option>
-                        <option value="LECTURE">Lecture</option>
-                        <option value="LAB">Lab</option>
-                    </select>
-                </div>
-            </div>
+                @if(in_array(auth()->user()->role, ['admin', 'registrar']))
+                <div class="flex items-center space-x-3">
+                    @if(count($selectedRooms) > 0)
+                        <button wire:click="$set('confirmingDeletion', true)" class="px-6 py-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-2xl font-black hover:bg-red-100 dark:hover:bg-red-900/30 transition-all border border-red-200 dark:border-red-800 shadow-sm animate-pulse">
+                            🗑️ Delete Selected ({{ count($selectedRooms) }})
+                        </button>
+                    @endif
 
-            {{-- Rooms Table --}}
-            <div class="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm overflow-hidden">
-                <table class="w-full text-left border-collapse">
-                    <thead class="bg-slate-50/50 text-slate-400 uppercase font-black tracking-widest text-[10px]">
-                        <tr>
-                            <th class="px-6 py-5 w-10 text-center">
+                    <button @click="bulkOpen = true" class="px-6 py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-2xl font-black hover:bg-slate-200 dark:hover:bg-slate-700 transition-all flex items-center border border-slate-200 dark:border-slate-700">
+                        <span class="mr-2 text-lg">📥</span> Bulk Import
+                    </button>
+
+                    <button wire:click="openModal" class="group relative px-8 py-3 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-200 dark:shadow-none overflow-hidden transition-all active:scale-95">
+                        <span class="relative z-10">+ Add New Room</span>
+                        <div class="absolute inset-0 bg-gradient-to-r from-blue-400 to-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
+                    </button>
+                </div>
+                @endif
+            </header>
+
+            {{-- Content Body --}}
+            <div class="p-12 overflow-y-auto space-y-6 custom-scrollbar">
+                
+                {{-- Search & Filter Bar --}}
+                <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900/40 p-6 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
+                    <div class="relative flex-1 max-w-lg">
+                        <span class="absolute inset-y-0 left-5 flex items-center text-slate-400">🔍</span>
+                        <input type="text" wire:model.live="search" placeholder="Search by room name or type..." 
+                               class="w-full pl-14 pr-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-none rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 transition-all text-sm text-slate-800 dark:text-slate-200">
+                    </div>
+                    
+                    <div class="flex items-center space-x-2">
+                        <label class="text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest px-2">Filter Type:</label>
+                        <select wire:model.live="filterType" class="bg-slate-50 dark:bg-slate-800/50 border-none rounded-xl font-bold text-xs uppercase p-3 focus:ring-2 focus:ring-blue-500 text-slate-800 dark:text-slate-200">
+                            <option value="">All Types</option>
+                            <option value="LECTURE">Lecture</option>
+                            <option value="LAB">Lab</option>
+                        </select>
+                    </div>
+                </div>
+
+                {{-- Rooms Table --}}
+                <div class="bg-white dark:bg-slate-900/40 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden transition-colors">
+                    <table class="w-full text-left border-collapse">
+                        <thead class="bg-slate-50/50 dark:bg-slate-800/30 text-slate-400 dark:text-slate-500 uppercase font-black tracking-widest text-[10px]">
+                            <tr>
+                                <th class="px-6 py-5 w-10 text-center">
+                                    @if(in_array(auth()->user()->role, ['admin', 'registrar']))
+                                    <input type="checkbox" wire:model.live="selectAll" class="rounded border-slate-300 dark:border-slate-700 bg-transparent text-blue-600 focus:ring-blue-500">
+                                    @endif
+                                </th>
+                                <th class="px-10 py-5">Room Details</th>
+                                <th class="px-10 py-5 text-center">Classification</th>
+                                <th class="px-10 py-5">Capacity Index</th>
                                 @if(in_array(auth()->user()->role, ['admin', 'registrar']))
-                                <input type="checkbox" wire:model.live="selectAll" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+                                <th class="px-10 py-5 text-right">Actions</th>
                                 @endif
-                            </th>
-                            <th class="px-10 py-5">Room Details</th>
-                            <th class="px-10 py-5 text-center">Classification</th>
-                            <th class="px-10 py-5">Capacity Index</th>
-                            @if(in_array(auth()->user()->role, ['admin', 'registrar']))
-                            <th class="px-10 py-5 text-right">Actions</th>
-                            @endif
-                        </tr>
-                    </thead>
-                    <tbody class="divide-y divide-slate-100">
-                        @forelse($rooms as $room)
-                        <tr class="hover:bg-blue-50/30 transition-colors group {{ in_array($room->id, $selectedRooms) ? 'bg-blue-50/50' : '' }}">
-                            <td class="px-6 py-6 text-center">
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                            @forelse($rooms as $room)
+                            <tr class="hover:bg-blue-50/30 dark:hover:bg-blue-900/10 transition-colors group {{ in_array($room->id, $selectedRooms) ? 'bg-blue-50/50 dark:bg-blue-900/20' : '' }}">
+                                <td class="px-6 py-6 text-center">
+                                    @if(in_array(auth()->user()->role, ['admin', 'registrar']))
+                                    <input type="checkbox" wire:model.live="selectedRooms" value="{{ $room->id }}" class="rounded border-slate-300 dark:border-slate-700 bg-transparent text-blue-600 focus:ring-blue-500">
+                                    @endif
+                                </td>
+                                <td class="px-10 py-6">
+                                    <div class="flex flex-col">
+                                        <span class="font-black text-slate-800 dark:text-slate-100 text-lg uppercase tracking-tight">{{ $room->room_name }}</span>
+                                        <span class="text-[10px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-widest">Main Campus Building</span>
+                                    </div>
+                                </td>
+                                <td class="px-10 py-6 text-center">
+                                    <span class="px-4 py-1.5 {{ strtoupper($room->type) === 'LAB' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800' }} border rounded-xl text-[10px] uppercase font-black tracking-tighter">
+                                        {{ $room->type }}
+                                    </span>
+                                </td>
+                                <td class="px-10 py-6">
+                                    <div class="flex items-baseline space-x-1">
+                                        <span class="text-slate-800 dark:text-slate-100 font-black text-lg tracking-tight">{{ $room->capacity }}</span>
+                                        <span class="text-slate-400 dark:text-slate-600 text-[8px] font-bold uppercase tracking-widest">Max Seats</span>
+                                    </div>
+                                </td>
+                                
                                 @if(in_array(auth()->user()->role, ['admin', 'registrar']))
-                                <input type="checkbox" wire:model.live="selectedRooms" value="{{ $room->id }}" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500">
+                                <td class="px-10 py-6 text-right space-x-2 whitespace-nowrap">
+                                    <button wire:click="editRoom({{ $room->id }})" class="p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-blue-600 dark:text-blue-400 rounded-xl hover:bg-blue-600 hover:text-white dark:hover:bg-blue-600 transition-all font-black text-[10px] uppercase px-4 shadow-sm">
+                                        Edit
+                                    </button>
+                                    <button onclick="confirm('Permanently remove this room?') || event.stopImmediatePropagation()" 
+                                            wire:click="deleteRoom({{ $room->id }})" 
+                                            class="p-2 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-red-600 dark:text-red-400 rounded-xl hover:bg-red-600 hover:text-white dark:hover:bg-red-600 transition-all font-black text-[10px] uppercase px-4 shadow-sm">
+                                        Delete
+                                    </button>
+                                </td>
                                 @endif
-                            </td>
-                            <td class="px-10 py-6">
-                                <div class="flex flex-col">
-                                    <span class="font-black text-slate-800 text-lg uppercase tracking-tight">{{ $room->room_name }}</span>
-                                    <span class="text-[10px] text-slate-400 font-bold uppercase tracking-widest">Main Campus Building</span>
-                                </div>
-                            </td>
-                            <td class="px-10 py-6 text-center">
-                                <span class="px-4 py-1.5 {{ strtoupper($room->type) === 'LAB' ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-blue-100 text-blue-700 border-blue-200' }} border rounded-xl text-[10px] uppercase font-black tracking-tighter">
-                                    {{ $room->type }}
-                                </span>
-                            </td>
-                            <td class="px-10 py-6">
-                                <div class="flex items-baseline space-x-1">
-                                    <span class="text-slate-800 font-black text-lg tracking-tight">{{ $room->capacity }}</span>
-                                    <span class="text-slate-400 text-[8px] font-bold uppercase tracking-widest">Max Seats</span>
-                                </div>
-                            </td>
-                            
-                            @if(in_array(auth()->user()->role, ['admin', 'registrar']))
-                            <td class="px-10 py-6 text-right space-x-2 whitespace-nowrap">
-                                <button wire:click="editRoom({{ $room->id }})" class="p-2 bg-white border border-slate-200 text-blue-600 rounded-xl hover:bg-blue-600 hover:text-white hover:border-blue-600 transition-all font-black text-[10px] uppercase px-4 shadow-sm">
-                                    Edit
-                                </button>
-                                <button onclick="confirm('Permanently remove this room?') || event.stopImmediatePropagation()" 
-                                        wire:click="deleteRoom({{ $room->id }})" 
-                                        class="p-2 bg-white border border-slate-200 text-red-600 rounded-xl hover:bg-red-600 hover:text-white hover:border-red-600 transition-all font-black text-[10px] uppercase px-4 shadow-sm">
-                                    Delete
-                                </button>
-                            </td>
-                            @endif
-                        </tr>
-                        @empty
-                        <tr>
-                            <td colspan="5" class="px-10 py-32 text-center">
-                                <div class="flex flex-col items-center">
-                                    <span class="text-5xl mb-4 text-slate-300">🏫</span>
-                                    <p class="text-slate-400 font-black uppercase tracking-widest text-xs">No space allocation records found</p>
-                                </div>
-                            </td>
-                        </tr>
-                        @endforelse
-                    </tbody>
-                </table>
-            </div>
-            
-            <div class="mt-8 mb-10">
-                {{ $rooms->links('livewire.custom-pagination') }}
-            </div>
+                            </tr>
+                            @empty
+                            <tr>
+                                <td colspan="5" class="px-10 py-32 text-center">
+                                    <div class="flex flex-col items-center">
+                                        <span class="text-5xl mb-4 opacity-50">🏫</span>
+                                        <p class="text-slate-400 dark:text-slate-600 font-black uppercase tracking-widest text-xs">No space records found</p>
+                                    </div>
+                                </td>
+                            </tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
+                
+                <div class="mt-8 mb-10">
+                    {{ $rooms->links('livewire.custom-pagination') }}
+                </div>
         </div>
     </main>
 
