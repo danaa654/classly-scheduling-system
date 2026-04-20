@@ -14,6 +14,7 @@ class GeneralNotification extends Notification
 
     /**
      * Create a new notification instance.
+     * @param array $data Expects: title, message, type, url, sender_name
      */
     public function __construct($data)
     {
@@ -25,7 +26,6 @@ class GeneralNotification extends Notification
      */
     public function via($notifiable)
     {
-        // Saves the notification to the 'notifications' table in your database
         return ['database'];
     }
 
@@ -33,17 +33,19 @@ class GeneralNotification extends Notification
      * Get the array representation of the notification for the database.
      */
     public function toDatabase($notifiable)
-{
-    return [
-        'title'   => $this->data['title'] ?? 'System Update',
-        'message' => $this->data['message'] ?? '',
-        'type'    => $this->data['type'] ?? 'general',
-        'url'     => $this->data['url'] ?? '#',
-        // Don't hardcode "a new member" here
-    ];
-}
+    {
+        return [
+            'title'       => $this->data['title'] ?? 'System Update',
+            'message'     => $this->data['message'] ?? '',
+            'type'        => $this->data['type'] ?? 'general',
+            'url'         => $this->data['url'] ?? '#',
+            'sender_name' => $this->data['sender_name'] ?? 'System',
+            'created_at'  => now()->toDateTimeString(), // Stores the real-time date
+        ];
+    }
+
     /**
-     * Fallback for other channels (like broadcast)
+     * Fallback for other channels
      */
     public function toArray($notifiable)
     {

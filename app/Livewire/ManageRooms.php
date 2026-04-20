@@ -65,124 +65,113 @@ class ManageRooms extends Component
     }
 
     public function updatedImportFile()
-{
-    $this->validate([
-        'importFile' => 'required|mimes:csv,txt|max:10240',
-    ]);
+    {
+        $this->validate([
+            'importFile' => 'required|mimes:csv,txt|max:10240',
+        ]);
 
-    $path = $this->importFile->getRealPath();
-    $fileContent = file($path);
-    $data = array_map('str_getcsv', $fileContent);
+        $path = $this->importFile->getRealPath();
+        $fileContent = file($path);
+        $data = array_map('str_getcsv', $fileContent);
 
-    // CLEAN HEADERS: This removes BOM and invisible spaces that prevent warnings
-    $headers = array_map(function($header) {
-        return strtolower(trim(preg_replace('/[\x00-\x1F\x80-\xFF]/', '', $header)));
-    }, $data[0]);
+        $headers = array_map(function($header) {
+            return strtolower(trim(preg_replace('/[\x00-\x1F\x80-\xFF]/', '', $header)));
+        }, $data[0]);
 
-    // CHECK FOR WRONG FILE TYPES (Faculty/Subject)
-    if (in_array('employee_id', $headers) || in_array('subject_code', $headers)) {
-        $type = in_array('employee_id', $headers) ? 'FACULTY' : 'SUBJECT';
-        
-        $this->reset(['importFile', 'importPreview']); // Clear the bad file
-        
-        return $this->dispatch('swal', 
-            title: 'WRONG FILE TYPE',
-            text: "🚨 This is a $type file. Please upload a Room CSV.",
-            icon: 'error'
-        );
-    }
-
-    // CHECK FOR MISSING ROOM HEADERS
-    $required = ['room_name', 'capacity', 'type'];
-    foreach($required as $key) {
-        if (!in_array($key, $headers)) {
+        // CHECK FOR WRONG FILE TYPES (Warning Toast)
+        if (in_array('employee_id', $headers) || in_array('subject_code', $headers)) {
+            $type = in_array('employee_id', $headers) ? 'FACULTY' : 'SUBJECT';
             $this->reset(['importFile', 'importPreview']);
-            return $this->dispatch('swal', 
-                title: 'INVALID FORMAT',
-                text: "🚨 Missing '$key' column. Please check your headers.",
-                icon: 'error'
-            );
+            
+            return $this->dispatch('toast', [
+                'type'    => 'warning',
+                'message' => "File Mismatch: This is a $type file!",
+                'detail'  => "Please upload a Room CSV instead."
+            ]);
+        }
+
+        // Invalid Headers (Warning Toast)
+        $required = ['room_name', 'capacity', 'type'];
+        foreach($required as $key) {
+            if (!in_array($key, $headers)) {
+                $this->reset(['importFile', 'importPreview']);
+                return $this->dispatch('toast', [
+                    'type'    => 'error',
+                    'message' => 'Invalid Format',
+                    'detail'  => "Missing '$key' column."
+                ]);
+            }
+        }
+
+        // Preview Generation...
+        $this->importPreview = [];
+        foreach (array_slice($data, 1) as $row) {
+            if (empty($row) || count($row) < 3) continue;
+            $this->importPreview[] = [
+                'room_name' => trim($row[0]),
+                'capacity'  => trim($row[1]),
+                'type'      => strtoupper(trim($row[2])),
+                'status'    => Room::where('room_name', trim($row[0]))->exists() ? 'DUPLICATE' : 'READY',
+            ];
         }
     }
-
-    // If passed, generate preview
-    $this->importPreview = [];
-    foreach (array_slice($data, 1) as $row) {
-        if (empty($row) || count($row) < 3) continue;
-        $roomName = trim($row[0]);
-        $this->importPreview[] = [
-            'room_name' => $roomName,
-            'capacity'  => trim($row[1]),
-            'type'      => strtoupper(trim($row[2])),
-            'status'    => Room::where('room_name', $roomName)->exists() ? 'DUPLICATE' : 'READY',
-        ];
-    }
-}
 
     public function processImport()
-{
-    $count = 0;
-    
-    foreach ($this->importPreview as $data) {
-        if ($data['status'] === 'READY') {
-            \App\Models\Room::create([
-                'room_name' => $data['room_name'],
-                'capacity'  => $data['capacity'],
-                'type'      => $data['type'],
-            ]);
-            $count++;
+    {
+        $count = 0;
+        foreach ($this->importPreview as $data) {
+            if ($data['status'] === 'READY') {
+                Room::create([
+                    'room_name' => $data['room_name'],
+                    'capacity'  => $data['capacity'],
+                    'type'      => $data['type'],
+                ]);
+                $count++;
+            }
         }
+
+        if ($count > 0) {
+            // Notify others with account info and date (handled by the Notification class)
+            $this->notifyManagement("has imported $count new rooms to the registry.", 'room_import');
+            
+            $this->dispatch('roomImported'); // Refresh components
+
+            // Success Toast for the Registrar
+            $this->dispatch('toast', [
+                'type'    => 'success',
+                'message' => 'Import Successful',
+                'detail'  => "Added $count rooms to the system."
+            ]);
+        }
+        $this->reset(['importFile', 'importPreview', 'bulkOpen']);
     }
-
-    if ($count > 0) {
-        // 1. Notify EVERYONE ELSE (Deans, Admin, etc.)
-        $this->notifyManagement("has imported $count new rooms to the registry.", 'room_import');
-        
-        // Refresh notifications icon
-        $this->dispatch('roomImported');
-
-        // 2. SUCCESS MESSAGE FOR YOU (The Registrar/Admin)
-        $this->dispatch('swal', [
-            'title' => 'Import Successful!',
-            'text' => "You have successfully added $count rooms to the system.",
-            'icon' => 'success',
-            'timer' => 3000,
-            'showConfirmButton' => false,
-        ]);
-    } else {
-        // If everything was a duplicate
-        $this->dispatch('swal', [
-            'title' => 'No New Rooms',
-            'text' => "All rooms in this file already exist in the database.",
-            'icon' => 'info'
-        ]);
-    }
-
-    $this->reset(['importFile', 'importPreview', 'bulkOpen']);
-}
 
     public function deleteSelected()
     {
         if (empty($this->selectedRooms)) {
-            return $this->dispatch('swal', title: 'No Rooms Selected', icon: 'info');
+            return $this->dispatch('toast', ['type' => 'info', 'message' => 'No rooms selected.']);
         }
 
         $count = count($this->selectedRooms);
         Room::whereIn('id', $this->selectedRooms)->delete();
         
+        // Notify others
         $this->notifyManagement("deleted $count rooms from the registry.", 'room_delete');
         $this->dispatch('roomImported');
 
         $this->reset(['selectedRooms', 'selectAll', 'confirmingDeletion']);
-        $this->dispatch('swal', title: 'Selected rooms removed.', icon: 'success');
+        
+        // Delete Toast
+        $this->dispatch('toast', [
+            'type'    => 'success',
+            'message' => 'Rooms Deleted',
+            'detail'  => "Successfully removed $count records."
+        ]);
     }
-
     private function notifyManagement($message, $type)
 {
-    // 1. Define all roles that SHOULD know about room changes
     $managementRoles = ['dean', 'oic', 'ass.dean', 'registrar', 'admin'];
 
-    // 2. Fetch all those users, BUT exclude the person currently logged in
     $usersToNotify = User::whereIn('role', $managementRoles)
         ->where('id', '!=', auth()->id()) 
         ->get();
@@ -190,10 +179,10 @@ class ManageRooms extends Component
     if ($usersToNotify->isNotEmpty()) {
         Notification::send($usersToNotify, new GeneralNotification([
             'title' => 'Room Registry Update',
-            'message' => auth()->user()->name . ' ' . $message,
+            'message' => $message,
             'type' => $type,
             'url' => url('/manage-rooms'),
-            'sender_name' => auth()->user()->name,
+            'sender_name' => auth()->user()->name, 
         ]));
     }
 }

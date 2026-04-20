@@ -64,12 +64,14 @@
               {{-- Content Area --}}
                 <div class="flex-1 pr-4">
                     <p class="text-[12px] leading-[1.4] {{ $notification->unread() ? 'text-slate-900 font-black' : 'text-slate-500 font-medium' }}">
+                        {{-- 1. Show the Sender Name (Blue if unread) --}}
                         <span class="{{ $notification->unread() ? 'text-blue-600' : 'text-slate-700' }}">
                             {{ $notification->data['sender_name'] ?? 'System' }}
                         </span> 
-                        {{ $notification->data['message'] ?? 'updated a request' }} 
-                        <span class="font-bold {{ $notification->unread() ? 'text-slate-900' : 'text-slate-700' }}">
-                            {{ $notification->data['message'] }}
+                        
+                        {{-- 2. Show the Message/Action once (Bold if unread) --}}
+                        <span class="ml-1 {{ $notification->unread() ? 'text-slate-900' : 'text-slate-700' }}">
+                            {{ $notification->data['message'] ?? 'updated the registry' }}
                         </span>
                     </p>
                     

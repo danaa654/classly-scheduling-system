@@ -21,7 +21,7 @@
                         <button wire:click="$set('confirmingDeletion', true)" class="px-6 py-3 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 rounded-2xl font-black hover:bg-red-100 dark:hover:bg-red-900/30 transition-all border border-red-200 dark:border-red-800 shadow-sm animate-pulse">
                             🗑️ Delete Selected ({{ count($selectedRooms) }})
                         </button>
-                    @endif
+                    @endif  
 
                     <button @click="bulkOpen = true" class="px-6 py-3 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-2xl font-black hover:bg-slate-200 dark:hover:bg-slate-700 transition-all flex items-center border border-slate-200 dark:border-slate-700">
                         <span class="mr-2 text-lg">📥</span> Bulk Import
@@ -265,48 +265,43 @@
         </div>
     </div>
 
-    {{-- --- SWEETALERT SCRIPT --- --}}
+    {{-- --- TOAST NOTIFICATION SCRIPT --- --}}
     <script>
         document.addEventListener('livewire:init', () => {
-            // Success/Error/Warning Listener
-            Livewire.on('swal', (event) => {
+            // Listen for the 'toast' event dispatched from ManageRooms.php
+            Livewire.on('toast', (event) => {
                 const data = Array.isArray(event) ? event[0] : event;
                 
-                // If the backend sent a simple success toast (best for fast actions)
-                if (data.icon === 'success') {
-                    const Toast = Swal.mixin({
-                        toast: true,
-                        position: 'top-end',
-                        showConfirmButton: false,
-                        timer: 3000,
-                        timerProgressBar: true,
-                    });
-                    Toast.fire({
-                        icon: 'success',
-                        title: data.title,
-                        text: data.text || ''
-                    });
-                } else {
-                    // Regular Modal for Errors/Warnings
-                    Swal.fire({
-                        title: data.title || 'Notification',
-                        text: data.text || '',
-                        icon: data.icon || 'info',
-                        confirmButtonColor: '#3B82F6',
-                        confirmButtonText: 'Understood'
-                    });
-                }
+                const Toast = Swal.mixin({
+                    toast: true,
+                    position: 'top-end',
+                    showConfirmButton: false,
+                    timer: 4000,
+                    timerProgressBar: true,
+                    didOpen: (toast) => {
+                        toast.addEventListener('mouseenter', Swal.stopTimer)
+                        toast.addEventListener('mouseleave', Swal.resumeTimer)
+                    }
+                });
+
+                Toast.fire({
+                    icon: data.type, // success, warning, error, info
+                    title: data.message,
+                    text: data.detail || '',
+                    background: document.documentElement.classList.contains('dark') ? '#1e293b' : '#ffffff',
+                    color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#1e293b',
+                });
             });
 
-            // Handle network/timeout errors
-            Livewire.on('livewire:error', (el, component, response) => {
+            // Keep the legacy 'swal' listener for regular modals if needed
+            Livewire.on('swal', (event) => {
+                const data = Array.isArray(event) ? event[0] : event;
                 Swal.fire({
-                    title: 'Connection Lost',
-                    text: 'Unable to reach the server. Please check your connection.',
-                    icon: 'error',
-                    confirmButtonColor: '#EF4444'
+                    title: data.title,
+                    text: data.text,
+                    icon: data.icon,
+                    confirmButtonColor: '#3B82F6',
                 });
-                return false; 
             });
         });
     </script>

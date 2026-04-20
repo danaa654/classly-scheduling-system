@@ -17,6 +17,37 @@
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #334155; }
         [x-cloak] { display: none !important; }
     </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+    <script>
+        document.addEventListener('livewire:init', () => {
+            Livewire.on('toast', (event) => {
+                // Livewire v3 sends data inside an array [0]
+                const data = Array.isArray(event) ? event[0] : event;
+
+                const Toast = Swal.mixin({
+                    toast: true,
+                    position: 'top-end',
+                    showConfirmButton: false,
+                    timer: 3000,
+                    timerProgressBar: true,
+                    didOpen: (toast) => {
+                        toast.addEventListener('mouseenter', Swal.stopTimer)
+                        toast.addEventListener('mouseleave', Swal.resumeTimer)
+                    }
+                });
+
+                Toast.fire({
+                    icon: data.type, 
+                    title: data.message,
+                    text: data.detail || '',
+                    // Adding a bit of your glassmorphism style to the toast
+                    background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+                    color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#1e293b',
+                });
+            });
+        });
+    </script>
 </head>
 <body 
     x-data="{ 
