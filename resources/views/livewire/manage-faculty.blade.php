@@ -5,25 +5,6 @@ x-data="{
     confirmDelete: @entangle('confirmingDeletion') 
 }">
     <main class="flex-1 flex flex-col overflow-hidden">
-        
-        {{-- Session Feedback Notifications --}}
-        <div class="fixed top-6 right-6 z-[100] space-y-3 w-80">
-            @if (session()->has('message'))
-                <div x-data="{ show: true }" x-show="show" x-init="setTimeout(() => show = false, 5000)" 
-                    class="p-4 bg-white dark:bg-slate-900 border-l-4 border-green-500 rounded-2xl flex items-center shadow-xl shadow-green-100/50 dark:shadow-none animate-bounce-in">
-                    <span class="text-green-600 mr-3 text-xl">✅</span>
-                    <p class="text-slate-800 dark:text-slate-200 font-bold text-xs uppercase tracking-tight">{{ session('message') }}</p>
-                </div>
-            @endif
-
-            @if (session()->has('error'))
-                <div x-data="{ show: true }" x-show="show" x-init="setTimeout(() => show = false, 5000)" 
-                    class="p-4 bg-white dark:bg-slate-900 border-l-4 border-red-500 rounded-2xl flex items-center shadow-xl shadow-red-100/50 dark:shadow-none">
-                    <span class="text-red-600 mr-3 text-xl">⚠️</span>
-                    <p class="text-slate-800 dark:text-slate-200 font-bold text-xs uppercase tracking-tight">{{ session('error') }}</p>
-                </div>
-            @endif
-        </div>
 
         {{-- Header Section: Curved Edge Logic --}}
          <header class="h-24 bg-white dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between px-12 shadow-sm shrink-0 backdrop-blur-xl rounded-b-[3rem] transition-colors">
@@ -50,13 +31,72 @@ x-data="{
                     </button>
                 @endif
 
-                <button @click="open = true" 
+                <button @click="open = true"  
                         wire:click="openModal" 
                         class="px-8 py-3 bg-blue-600 text-white rounded-2xl font-black shadow-xl shadow-blue-200 dark:shadow-none hover:bg-blue-700 hover:scale-105 transition-all text-xs uppercase active:scale-95">
                     + {{ in_array(auth()->user()->role, ['admin', 'registrar']) ? 'Add Faculty' : 'Request' }}
                 </button>
             </div>
         </header>
+
+            {{-- Container logic: Ass. Dean can see this section, but buttons are restricted below --}}
+@if($this->isAdminOrRegistrar() && $pendingRequests->count() > 0)
+    <div class="mb-8 bg-white/60 dark:bg-slate-900/60 backdrop-blur-md rounded-[2rem] border border-white dark:border-slate-800 shadow-xl shadow-blue-100/50 dark:shadow-none p-6 transition-colors">
+        
+        {{-- Header --}}
+        <div class="flex items-center justify-between mb-4 px-2">
+            <h3 class="text-sm font-black text-slate-800 dark:text-slate-200 uppercase tracking-widest flex items-center gap-2">
+                <span class="h-2 w-2 bg-amber-500 rounded-full animate-pulse"></span>
+                Pending Approvals
+            </h3>
+            <span class="text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-bold px-3 py-1 rounded-full">
+                {{ $pendingRequests->count() }} REQUESTS
+            </span>
+        </div>
+
+        {{-- Grid --}}
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            @foreach($pendingRequests as $request)
+                <div class="bg-white dark:bg-slate-800 border border-slate-100 dark:border-slate-700 p-4 rounded-2xl hover:shadow-lg transition-all group">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-xs font-black text-slate-900 dark:text-white">{{ $request->full_name }}</p>
+                            <p class="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">{{ $request->department }}</p>
+                        </div>
+
+                        {{-- Role-Based Action Logic --}}
+                        <div class="flex gap-1">
+                            @if(in_array(auth()->user()->role, ['admin', 'registrar']))
+                                {{-- Approve Button --}}
+                                <button wire:click="approveFaculty({{ $request->id }})" 
+                                        wire:loading.attr="disabled"
+                                        wire:target="approveFaculty({{ $request->id }})"
+                                        class="p-2 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 rounded-xl hover:bg-blue-600 hover:text-white dark:hover:bg-blue-500 transition-all disabled:opacity-50">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" />
+                                    </svg>
+                                </button>
+
+                                {{-- Decline Button --}}
+                                <button wire:click="declineFaculty({{ $request->id }})" 
+                                        wire:loading.attr="disabled"
+                                        wire:target="declineFaculty({{ $request->id }})"
+                                        class="p-2 bg-red-50 dark:bg-red-900/20 text-red-400 rounded-xl hover:bg-red-500 hover:text-white transition-all disabled:opacity-50">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12" />
+                                    </svg>
+                                </button>
+                            @else
+                                {{-- Display for Ass. Dean who cannot take action --}}
+                                <span class="text-[9px] font-black text-slate-300 dark:text-slate-600 uppercase italic mt-2">Awaiting Review</span>
+                            @endif
+                        </div>
+                    </div>
+                </div>
+            @endforeach
+        </div>
+    </div>
+@endif
 
         <div class="flex-1 overflow-y-auto px-12 py-10">
             <div class="grid grid-cols-12 gap-8">
@@ -110,11 +150,20 @@ x-data="{
                             <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
                                 @forelse($faculties as $faculty)
                                     <tr class="hover:bg-blue-50/30 dark:hover:bg-blue-900/10 transition-all {{ in_array($faculty->id, $selectedFaculty) ? 'bg-blue-50/50 dark:bg-blue-900/20' : '' }}">
+                                        
+                                        {{-- 1. Checkbox Logic --}}
                                         <td class="px-6 py-6 text-center">
-                                            @if(in_array(auth()->user()->role, ['admin', 'registrar']) || (auth()->user()->role === 'dean' && $faculty->status === 'rejected'))
+                                            @php
+                                                // Check if user is Admin/Registrar OR a Dean dealing with a REJECTED faculty
+                                                $canSelect = in_array(auth()->user()->role, ['admin', 'registrar']) || 
+                                                            (auth()->user()->role === 'dean' && $faculty->status === 'rejected');
+                                            @endphp
+
+                                            @if($canSelect)
                                                 <input type="checkbox" wire:model.live="selectedFaculty" value="{{ $faculty->id }}" class="rounded border-slate-300 dark:border-slate-700 dark:bg-slate-800 text-blue-600 focus:ring-blue-500">
                                             @endif
                                         </td>
+
                                         <td class="px-6 py-6">
                                             @if($faculty->status === 'approved')
                                                 <span class="px-2 py-1 bg-green-100 dark:bg-green-900/20 text-green-700 dark:text-green-400 rounded-md text-[9px] font-black uppercase tracking-tighter">Active</span>
@@ -122,18 +171,30 @@ x-data="{
                                                 <span class="px-2 py-1 bg-red-50 dark:bg-red-900/20 text-red-500 dark:text-red-400 rounded-md text-[9px] font-black uppercase tracking-tighter">{{ $faculty->status }}</span>
                                             @endif
                                         </td>
+
                                         <td class="px-6 py-6 font-black text-slate-400 dark:text-slate-600 italic tracking-tighter">{{ $faculty->employee_id }}</td>
                                         <td class="px-6 py-6 font-bold text-slate-800 dark:text-slate-200">{{ $faculty->full_name }}</td>
+                                        
                                         <td class="px-6 py-6">
                                             <span class="text-blue-600 dark:text-blue-400 font-black uppercase text-[10px] bg-blue-50 dark:bg-blue-900/20 px-3 py-1 rounded-full">{{ $faculty->department }}</span>
                                         </td>
+
+                                        {{-- 2. Actions Logic (Fixes the "Locked" issue) --}}
                                         <td class="px-6 py-6 text-right space-x-4">
                                             @if(in_array(auth()->user()->role, ['admin', 'registrar']))
+                                                {{-- Admin/Registrar sees everything --}}
                                                 <button @click="open = true" wire:click="editFaculty({{ $faculty->id }})" 
                                                         class="text-blue-600 dark:text-blue-400 font-black text-xs uppercase hover:underline">Edit</button>
                                                 <button wire:click="deleteFaculty({{ $faculty->id }})" wire:confirm="Permanently delete {{ $faculty->full_name }}?" 
                                                         class="text-slate-300 dark:text-slate-600 font-black text-xs uppercase hover:text-red-600 transition-colors">Delete</button>
+                                            
+                                            @elseif(auth()->user()->role === 'dean' && $faculty->status === 'rejected')
+                                                {{-- Dean can ONLY see Delete for REJECTED entries --}}
+                                                <button wire:click="deleteFaculty({{ $faculty->id }})" wire:confirm="Remove this rejected application for {{ $faculty->full_name }}?" 
+                                                        class="text-red-500 dark:text-red-400 font-black text-xs uppercase hover:underline">Delete</button>
+                                            
                                             @else
+                                                {{-- Everything else is Locked --}}
                                                 <span class="text-[9px] text-slate-400 dark:text-slate-600 font-black uppercase italic tracking-tighter">Locked</span>
                                             @endif
                                         </td>
@@ -152,28 +213,74 @@ x-data="{
 
                 {{-- Sidebar: Activity Logs --}}
                 <div class="col-span-12 lg:col-span-3">
-                    <div class="bg-white dark:bg-slate-900/40 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm sticky top-8 backdrop-blur-md">
-                        <h3 class="font-black text-slate-800 dark:text-slate-200 uppercase text-xs tracking-widest mb-6">Recent Activity</h3>
-                        <div class="space-y-6">
-                            @forelse($recentLogs as $log)
-                                <div class="flex gap-3 items-start relative pb-5 border-l-2 border-slate-100 dark:border-slate-800 ml-3 pl-5">
-                                    <div class="absolute -left-[9px] top-0 w-4 h-4 rounded-full border-4 border-white dark:border-slate-900 
-                                        {{ $log->action == 'Bulk Delete' ? 'bg-red-500' : 'bg-blue-500' }}"></div>
-                                    <div>
-                                        <p class="text-[11px] font-black text-slate-700 dark:text-slate-300 leading-tight uppercase tracking-tight">
-                                            {{ $log->action }}: {{ $log->description }}
-                                        </p>
-                                        <p class="text-[9px] font-bold text-slate-400 dark:text-slate-500 mt-1 uppercase">
-                                            {{ $log->created_at->diffForHumans() }}
-                                        </p>
+    <div class="bg-white dark:bg-slate-900/40 p-8 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm sticky top-8 backdrop-blur-md">
+        
+        <div class="flex items-center justify-between mb-6">
+            <h3 class="font-black text-slate-800 dark:text-slate-200 uppercase text-xs tracking-widest">Recent Activity</h3>
+            <span class="animate-pulse flex h-2 w-2 rounded-full bg-blue-500"></span>
+        </div>
+
+        <div class="space-y-4 h-[600px] overflow-y-auto pr-3 custom-scrollbar">
+            @forelse($recentLogs as $log)
+                <div class="group relative overflow-hidden bg-white dark:bg-slate-900 border border-slate-100 dark:border-slate-800 p-4 rounded-2xl shadow-sm hover:shadow-md transition-all duration-200">
+                    
+                    <div class="flex items-start gap-4">
+                        <div class="absolute left-0 top-0 bottom-0 w-1 
+        {{ $log->action == 'created' ? 'bg-emerald-500' : '' }}
+        {{-- Both 'deleted' and 'rejected' will now be Red --}}
+        {{ in_array($log->action, ['deleted', 'rejected']) ? 'bg-rose-500' : '' }}
+        {{ $log->action == 'approved' ? 'bg-blue-500' : '' }}">
+    </div>
+
+    <div class="flex-1">
+        <div class="flex items-center justify-between mb-1">
+            <span class="text-[10px] font-black uppercase tracking-widest 
+                {{ $log->action == 'created' ? 'text-emerald-500' : '' }}
+                {{-- Makes the word 'DELETED' or 'REJECTED' Red --}}
+                {{ in_array($log->action, ['deleted', 'rejected']) ? 'text-rose-500' : '' }}
+                {{ $log->action == 'approved' ? 'text-blue-500' : '' }}">
+                {{ $log->action }}
+            </span>
+
+            <span class="text-[10px] text-slate-400 font-medium">
+                {{ $log->created_at->diffForHumans() }}
+            </span>
+        </div>
+
+        <h4 class="text-sm font-bold text-slate-800 dark:text-slate-200 leading-tight">
+            {{ $log->description }}
+        </h4>
+
+                            <div class="mt-3 flex items-center gap-2">
+                                <div class="flex items-center gap-1.5 px-2 py-0.5 bg-slate-100 dark:bg-slate-800 rounded-lg">
+                                    <div class="w-4 h-4 rounded-full bg-slate-300 dark:bg-slate-600 flex items-center justify-center text-[8px] font-bold text-white uppercase">
+                                        {{ substr($log->user->name ?? 'S', 0, 1) }}
                                     </div>
+                                    <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                                        {{ $log->user->name ?? 'System' }}
+                                    </span>
                                 </div>
-                            @empty
-                                <div class="py-10 text-center text-[10px] font-black text-slate-300 dark:text-slate-700 uppercase tracking-widest">Logs Clear</div>
-                            @endforelse
+                                
+                                <span class="text-[9px] px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 text-slate-400 uppercase font-bold tracking-tighter">
+                                    {{ $log->user->role }}
+                                </span>
+                            </div>
                         </div>
                     </div>
                 </div>
+            @empty
+                <div class="flex flex-col items-center justify-center h-full text-center py-10 opacity-60">
+                    <div class="p-4 bg-slate-50 dark:bg-slate-800 rounded-full mb-3">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </div>
+                    <p class="text-xs text-slate-400 italic font-medium uppercase tracking-widest">No recent registry activity.</p>
+                </div>
+            @endforelse
+        </div>  
+    </div>
+</div>
             </div>
         </div>
     </main>
@@ -338,17 +445,32 @@ x-data="{
         </div>
     </div>
 
-     {{-- MODAL: Bulk Delete Confirm --}}
-
-    <div x-show="confirmDelete" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm" x-cloak x-transition>
-        <div class="bg-white w-full max-w-sm rounded-[2.5rem] p-10 text-center shadow-2xl">
-            <div class="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-6">⚠️</div>
-            <h3 class="text-2xl font-black text-slate-800 tracking-tighter">Purge Records?</h3>
-            <p class="text-sm text-slate-500 mb-8 mt-2 italic font-medium">You are about to delete <span class="text-red-600 font-black">{{ count($selectedFaculty) }}</span> entries.</p>
-            <div class="flex flex-col space-y-3">
-                <button wire:click="deleteSelected" class="w-full py-4 bg-red-600 text-white rounded-2xl font-black uppercase text-xs shadow-lg hover:bg-red-700 transition-all">Yes, Delete All</button>
-                <button @click="confirmDelete = false" class="w-full py-4 bg-slate-100 text-slate-400 rounded-2xl font-black uppercase text-xs">No, Keep Them</button>
+                {{-- MODAL: Bulk Delete Confirm --}}
+            <div x-show="confirmDelete" 
+            class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm" 
+            x-cloak 
+            x-transition
+            @keydown.window.escape="confirmDelete = false"> <div class="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[2.5rem] p-10 text-center shadow-2xl border border-slate-100 dark:border-slate-800"
+                @click.away="confirmDelete = false"> <div class="w-20 h-20 bg-red-100 dark:bg-red-900/30 text-red-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-6 animate-bounce">
+                    ⚠️
+                </div>
+                <h3 class="text-2xl font-black text-slate-800 dark:text-white tracking-tighter uppercase">Purge Records?</h3>
+                <p class="text-sm text-slate-500 mb-8 mt-2 italic font-medium">
+                    You are about to delete <span class="text-red-600 font-black">{{ count($selectedFaculty) }}</span> entries.
+                </p>
+                <div class="flex flex-col space-y-3">
+                    <button 
+                        wire:click="deleteSelected" 
+                        @keydown.window.enter="confirmDelete = false; $wire.deleteSelected()"
+                        class="w-full py-4 bg-red-600 text-white rounded-2xl font-black uppercase text-[10px] tracking-widest shadow-lg shadow-red-500/20 hover:bg-red-700 transition-all active:scale-95">
+                        Confirm Delete (Enter)
+                    </button>
+                    <button 
+                        @click="confirmDelete = false" 
+                        class="w-full py-4 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 rounded-2xl font-black uppercase text-[10px] tracking-widest hover:bg-slate-200 dark:hover:bg-slate-700 transition-all">
+                        Cancel (Esc)
+                    </button>
+                </div>
             </div>
         </div>
-    </div>
 </div>

@@ -20,34 +20,36 @@
 
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
-        document.addEventListener('livewire:init', () => {
-            Livewire.on('toast', (event) => {
-                // Livewire v3 sends data inside an array [0]
-                const data = Array.isArray(event) ? event[0] : event;
+    document.addEventListener('livewire:init', () => {
+        Livewire.on('toast', (event) => {
+            // This line ensures it works with Livewire v3's array wrapper
+            const data = Array.isArray(event) ? event[0] : event;
 
-                const Toast = Swal.mixin({
-                    toast: true,
-                    position: 'top-end',
-                    showConfirmButton: false,
-                    timer: 3000,
-                    timerProgressBar: true,
-                    didOpen: (toast) => {
-                        toast.addEventListener('mouseenter', Swal.stopTimer)
-                        toast.addEventListener('mouseleave', Swal.resumeTimer)
-                    }
-                });
+            const Toast = Swal.mixin({
+                toast: true,
+                position: 'top-end',
+                showConfirmButton: false,
+                timer: 3000,
+                timerProgressBar: true,
+                didOpen: (toast) => {
+                    // This makes it visible over EVERYTHING (Modals, Dashboards, etc.)
+                    toast.style.zIndex = "10000"; 
+                    toast.addEventListener('mouseenter', Swal.stopTimer)
+                    toast.addEventListener('mouseleave', Swal.resumeTimer)
+                }
+            });
 
-                Toast.fire({
-                    icon: data.type, 
-                    title: data.message,
-                    text: data.detail || '',
-                    // Adding a bit of your glassmorphism style to the toast
-                    background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
-                    color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#1e293b',
-                });
+            Toast.fire({
+                icon: data.type, 
+                title: data.message,
+                text: data.detail || '',
+                // Keeps your minimalist/dark mode styling intact
+                background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+                color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#1e293b',
             });
         });
-    </script>
+    });
+</script>
 </head>
 <body 
     x-data="{ 

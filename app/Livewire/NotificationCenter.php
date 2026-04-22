@@ -3,59 +3,87 @@
 namespace App\Livewire;
 
 use Livewire\Component;
+use Livewire\Attributes\On; // Required for the modern refresh logic
 
 class NotificationCenter extends Component
 {
-    // Define the property so the view can access it
+    // The collection of notifications displayed in the dropdown
     public $notifications = [];
 
-    // Listeners for both Faculty (Echo/Broadcast) and Room (Local Dispatch)
+    /**
+     * Listeners for Real-time updates.
+     * Includes Echo for broadcasting and local dispatchers for Rooms/Faculty.
+     */
     protected $listeners = [
         'echo:notifications,NotificationSent' => 'loadNotifications',
-        'roomImported' => 'loadNotifications', 
-        'facultyUpdated' => 'loadNotifications', // Ensuring faculty logic is preserved
     ];
 
-    // Runs when the component is first loaded
+    /**
+     * Refreshes the notification list whenever faculty or rooms are updated.
+     * This handles the scenarios where Deans or Registrars perform bulk actions.
+     */
+    #[On('facultyUpdated')]
+    #[On('roomImported')]
+    public function loadNotifications()
+    {
+        // Fetches both Faculty and Room notifications from the database
+        // Updated to latest() to ensure the most recent actions are at the top
+        $this->notifications = auth()->user()->notifications()
+            ->latest()
+            ->take(10) 
+            ->get();
+    }
+
+    /**
+     * Initialize the component by loading current notifications.
+     */
     public function mount()
     {
         $this->loadNotifications();
     }
 
-    public function loadNotifications()
-    {
-        // Fetches both Faculty and Room notifications from the database
-        $this->notifications = auth()->user()->notifications()
-            ->latest()
-            ->take(10) // Increased to 10 so the Dean sees more history
-            ->get();
-    }
-
+    /**
+     * Marks a single notification as read and refreshes the list.
+     */
     public function markAsRead($id)
     {
         $notification = auth()->user()->notifications()->find($id);
         if ($notification) {
             $notification->markAsRead();
-            $this->loadNotifications(); // Refresh list after marking read
+            $this->loadNotifications(); 
         }
     }
 
+    /**
+     * Permanently deletes a single notification from the database.
+     */
     public function deleteNotification($id)
     {
         $notification = auth()->user()->notifications()->find($id);
         if ($notification) {
             $notification->delete();
-            $this->loadNotifications(); // Refresh list after deleting
+            $this->loadNotifications(); 
         }
     }
 
+    /**
+     * Bulk deletes all notifications that have already been read.
+     */
     public function deleteAllRead()
     {
         auth()->user()->readNotifications()->delete();
         $this->loadNotifications();
-        session()->flash('message', 'Cleared all read notifications.');
+        
+        $this->dispatch('toast', [
+            'type' => 'info',
+            'message' => 'Archive Cleared',
+            'detail' => 'All read notifications have been removed.'
+        ]);
     }
 
+    /**
+     * Marks every unread notification as read.
+     */
     public function markAllAsRead()
     {
         auth()->user()->unreadNotifications->markAsRead();
