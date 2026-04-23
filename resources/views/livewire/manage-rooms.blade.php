@@ -134,48 +134,56 @@
     </main>
 
     {{-- --- ADD/EDIT MODAL --- --}}
-    <div x-show="open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md" x-cloak x-transition>
-        <div class="bg-white w-full max-w-lg rounded-[3rem] p-12 shadow-2xl border border-slate-200" @click.away="open = false">
-            <div class="flex items-center justify-between mb-8">
-                <h3 class="text-3xl font-black text-slate-800 tracking-tighter">
-                    {{ $isEditMode ? 'Edit Room' : 'Add New Room' }}
-                </h3>
-                <button @click="open = false" class="text-slate-300 hover:text-slate-600 transition-colors">✕</button>
-            </div>
-            
-            <form wire:submit.prevent="{{ $isEditMode ? 'updateRoom' : 'saveRoom' }}" class="space-y-6">
-                <div>
-                    <label class="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-2">Room Identifier</label>
-                    <input type="text" wire:model="room_name" placeholder="e.g. Room 302" 
-                           class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 shadow-inner">
-                    @error('room_name') <span class="text-red-500 text-[10px] font-bold mt-1 ml-2 uppercase">{{ $message }}</span> @enderror
-                </div>
-
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-2">Room Type</label>
-                        <select wire:model="type" class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 shadow-inner">
-                            <option value="LECTURE">Lecture</option>
-                            <option value="LAB">Lab</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-[10px] font-black uppercase text-slate-400 tracking-widest mb-2 ml-2">Capacity</label>
-                        <input type="number" wire:model="capacity" 
-                               class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 shadow-inner">
-                        @error('capacity') <span class="text-red-500 text-[10px] font-bold mt-1 ml-2 uppercase">{{ $message }}</span> @enderror
-                    </div>
-                </div>
-
-                <div class="flex space-x-4 pt-6">
-                    <button type="button" @click="open = false" class="flex-1 font-black text-slate-400 uppercase tracking-widest text-xs hover:text-slate-600 transition-colors">Cancel</button>
-                    <button type="submit" class="flex-1 py-4 bg-blue-600 text-white rounded-[1.5rem] font-black shadow-xl shadow-blue-100 hover:bg-blue-700 transition-all uppercase text-xs">
-                        {{ $isEditMode ? 'Update Details' : 'Confirm & Add' }}
-                    </button>
-                </div>
-            </form>
+    <div x-show="open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-md" x-cloak x-transition>
+    {{-- Main Modal Card --}}
+    <div class="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-12 shadow-2xl border border-slate-200 dark:border-slate-800 transition-colors duration-500" @click.away="open = false">
+        
+        <div class="flex items-center justify-between mb-8">
+            <h3 class="text-3xl font-black text-slate-800 dark:text-slate-100 tracking-tighter">
+                {{ $isEditMode ? 'Edit Room' : 'Add New Room' }}
+            </h3>
+            <button @click="open = false" class="text-slate-300 dark:text-slate-600 hover:text-red-500 transition-colors">✕</button>
         </div>
+        
+        <form wire:submit.prevent="{{ $isEditMode ? 'updateRoom' : 'saveRoom' }}" class="space-y-6">
+            {{-- Room Identifier --}}
+            <div>
+                <label class="block text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest mb-2 ml-2">Room Identifier</label>
+                <input type="text" wire:model="room_name" placeholder="e.g. Room 302" 
+                       class="w-full px-6 py-4 bg-slate-50 dark:bg-slate-800 border-none dark:text-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 shadow-inner dark:placeholder-slate-600">
+                @error('room_name') <span class="text-red-500 text-[10px] font-bold mt-1 ml-2 uppercase">{{ $message }}</span> @enderror
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                {{-- Room Type --}}
+                <div>
+                    <label class="block text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest mb-2 ml-2">Room Type</label>
+                    <select wire:model="type" class="w-full px-6 py-4 bg-slate-50 dark:bg-slate-800 border-none dark:text-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 shadow-inner uppercase text-xs">
+                        <option value="LECTURE">Lecture</option>
+                        <option value="LAB">Lab</option>
+                    </select>
+                </div>
+                {{-- Capacity --}}
+                <div>
+                    <label class="block text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest mb-2 ml-2">Capacity</label>
+                    <input type="number" wire:model="capacity" 
+                           class="w-full px-6 py-4 bg-slate-50 dark:bg-slate-800 border-none dark:text-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 shadow-inner">
+                    @error('capacity') <span class="text-red-500 text-[10px] font-bold mt-1 ml-2 uppercase">{{ $message }}</span> @enderror
+                </div>
+            </div>
+
+            {{-- Actions --}}
+            <div class="flex space-x-4 pt-6">
+                <button type="button" @click="open = false" class="flex-1 font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest text-[10px] hover:text-slate-600 dark:hover:text-slate-400 transition-colors">
+                    Cancel
+                </button>
+                <button type="submit" class="flex-1 py-4 bg-blue-600 dark:bg-blue-700 text-white rounded-[1.5rem] font-black shadow-xl shadow-blue-100 dark:shadow-none hover:bg-blue-700 transition-all uppercase text-[10px] tracking-widest">
+                    {{ $isEditMode ? 'Update Details' : 'Confirm & Add' }}
+                </button>
+            </div>
+        </form>
     </div>
+</div>
 
     {{-- --- BULK IMPORT MODAL --- --}}
     <div x-show="bulkOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md" x-cloak x-transition>

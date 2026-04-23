@@ -10,16 +10,12 @@ class RedirectController extends Controller
 {
     $role = auth()->user()->role;
 
-    if ($role === 'admin') {
-        return redirect()->route('admin.dashboard');
-    } elseif ($role === 'registrar') {
-        return redirect()->route('registrar.dashboard');
-    } elseif ($role === 'dean') {
-        return redirect()->route('dean.dashboard');
-    } elseif ($role === 'ass.dean') { // MAKE SURE THIS MATCHES YOUR DB
-        return redirect()->route('assistant-dean.dashboard');
-    }
-
-    abort(403, "Role mismatch: Found '$role'");
+    return match ($role) {
+        'admin'          => redirect()->route('admin.dashboard'),
+        'registrar'      => redirect()->route('registrar.dashboard'),
+        'dean', 'oic'    => redirect()->route('dean.dashboard'),
+        'associate_dean' => redirect()->route('assistant-dean.dashboard'),
+        default          => abort(403, "Role '{$role}' is not configured for a dashboard."),
+    };
 }
 }

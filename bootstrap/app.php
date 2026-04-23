@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\SetTeamUrlDefaults;
+use App\Http\Middleware\DepartmentAccess; // Add this import
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -14,6 +15,11 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->web(append: [
             SetTeamUrlDefaults::class,
+        ]);
+
+        // Add the alias here so 'role' works in web.php
+        $middleware->alias([
+            'role' => DepartmentAccess::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

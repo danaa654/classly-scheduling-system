@@ -1,14 +1,20 @@
 <div class="h-screen w-full flex flex-col p-6 gap-6 antialiased font-sans bg-[#E6E6E6] dark:bg-[#020617] transition-colors duration-500">
     <header class="grid grid-cols-12 gap-6 h-[12%] shrink-0">
         <div class="col-span-8 rounded-[2.5rem] border border-white/20 dark:border-slate-800 bg-white/70 dark:bg-slate-900/50 backdrop-blur-2xl px-10 flex items-center justify-between shadow-sm hover:shadow-[0_0_20px_rgba(244,63,94,0.2)] dark:hover:shadow-[0_0_25px_rgba(244,63,94,0.3)] hover:border-rose-400/50 transition-all duration-500 group/header">
-            <div>
-                <p class="text-[10px] uppercase tracking-[0.4em] text-rose-500 dark:text-rose-400 font-bold mb-1 transition-all group-hover/header:tracking-[0.5em]">
-                    Academic Oversight
-                </p>
+            <div class="group/header">
+                <div class="flex items-center gap-3 mb-1">
+                    <p class="text-[10px] uppercase tracking-[0.4em] text-rose-500 dark:text-rose-400 font-bold transition-all group-hover/header:tracking-[0.5em]">
+                        Academic Oversight
+                    </p>
+                    {{-- Global Access Badge --}}
+                    <span class="px-2 py-0.5 bg-rose-500/10 border border-rose-500/20 text-rose-500 text-[8px] font-black rounded-md uppercase tracking-widest">
+                        Academy-Wide Access
+                    </span>
+                </div>
                 <h1 class="text-2xl font-light text-slate-800 dark:text-slate-100">
                     Welcome, 
                     <span class="font-bold bg-gradient-to-r from-rose-600 via-orange-500 to-amber-400 bg-clip-text text-transparent">
-                        Assistant Dean
+                        Associate Dean
                     </span>
                 </h1>
             </div>

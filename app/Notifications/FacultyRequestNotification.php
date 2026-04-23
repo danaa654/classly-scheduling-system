@@ -59,4 +59,4 @@ class FacultyRequestNotification extends Notification
             default      => 'updated the registry for',
         };
     }
-}
+}   

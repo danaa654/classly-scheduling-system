@@ -52,7 +52,7 @@ x-data="{
             <span class="text-[10px] bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 font-bold px-3 py-1 rounded-full">
                 {{ $pendingRequests->count() }} REQUESTS
             </span>
-        </div>
+        </div>  
 
         {{-- Grid --}}
         <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -115,7 +115,7 @@ x-data="{
                         </div>
 
                         <div class="flex items-center gap-2 bg-gray-100/50 dark:bg-slate-800/50 p-1.5 rounded-2xl">
-                            @if(in_array(auth()->user()->role, ['admin', 'registrar']))
+                            @if(in_array(auth()->user()->role, ['admin', 'registrar', 'associate_dean']))
                                 @foreach(['ALL', 'CCS', 'CTE', 'COC', 'SHTM'] as $dept)
                                     <button wire:click="$set('filterDepartment', '{{ $dept == 'ALL' ? '' : $dept }}')" 
                                         class="px-4 py-1.5 rounded-xl text-xs font-bold transition-all {{ ($filterDepartment == ($dept == 'ALL' ? '' : $dept)) ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:text-slate-500' }}">
@@ -286,95 +286,103 @@ x-data="{
     </main>
 
 
-    {{-- MODAL: Request/Edit --}}
-    <div x-show="open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md" x-cloak x-transition>
-    <div class="bg-white w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-slate-200" @click.away="open = false">
-        <h3 class="text-2xl font-black text-slate-800 tracking-tighter mb-6">
-            {{ $isEditMode ? 'Update Record' : 'New Registration' }}
-        </h3>
+        {{-- MODAL: Request/Edit --}}
+        <div x-show="open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md" x-cloak x-transition>
+            <div class="bg-white w-full max-w-lg rounded-[3rem] p-10 shadow-2xl border border-slate-200" @click.away="open = false">
+            <h3 class="text-2xl font-black text-slate-800 tracking-tighter mb-6">
+                {{ $isEditMode ? 'Update Record' : 'New Registration' }}
+            </h3>
 
-        <div class="space-y-4">
-            {{-- Employee ID: Auto-Uppercase and Next Number Hint --}}
-            <div>
-                <label class="text-[10px] font-black text-slate-400 uppercase ml-2 block">Employee ID</label>
-                <input type="text" 
-                       wire:model="employee_id" 
-                       placeholder="e.g. EMP001" 
-                       class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 uppercase @error('employee_id') ring-2 ring-red-500 @enderror">
-                @error('employee_id') 
-                    <span class="text-red-500 text-[10px] font-bold ml-2 italic">⚠️ Required or already taken.</span> 
-                @enderror
-            </div>
-                        {{-- Full Name Input --}}
+            <div class="space-y-4">
+                {{-- Employee ID: Auto-Uppercase and Next Number Hint --}}
                 <div>
-                    <label class="text-[10px] font-black text-slate-400 uppercase ml-2 block">Full Name</label>
+                    <label class="text-[10px] font-black text-slate-400 uppercase ml-2 block">Employee ID</label>
                     <input type="text" 
-                        wire:model.blur="full_name" 
-                        placeholder="Firstname Lastname"
-                        class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 @error('full_name') ring-2 ring-red-500 @enderror">
-                    
-                    @error('full_name') 
-                        {{-- FIX: Using {{ $message }} allows the 'already being used' text to appear --}}
-                        <span class="text-red-500 text-[10px] font-bold ml-2 italic">⚠️ {{ $message }}</span> 
+                        wire:model="employee_id" 
+                        placeholder="e.g. EMP001" 
+                        class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 uppercase @error('employee_id') ring-2 ring-red-500 @enderror">
+                    @error('employee_id') 
+                        <span class="text-red-500 text-[10px] font-bold ml-2 italic">⚠️ Required or already taken.</span> 
                     @enderror
                 </div>
-
-                {{-- Email Input --}}
-                <div>
-                    <label class="text-[10px] font-black text-slate-400 uppercase ml-2 block">Email Address</label>
-                    <input type="email" 
-                        wire:model.blur="email" 
-                        placeholder="example@email.com"
-                        class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 @error('email') ring-2 ring-red-500 @enderror">
-                    
-                    @error('email') 
-                        {{-- FIX: This will now show the specific email duplicate error --}}
-                        <span class="text-red-500 text-[10px] font-bold ml-2 italic">⚠️ {{ $message }}</span> 
-                    @enderror
-                </div>
-            
-            {{-- Department: Role-based Logic --}}
-            <div>
-                <label class="text-[10px] font-black text-slate-400 uppercase ml-2 block">Department</label>
-                
-                @if(auth()->user()->role === 'dean')
-                    {{-- Deans are fixed to their department --}}
-                    <div class="w-full px-6 py-4 bg-slate-100 border-none rounded-2xl font-black text-blue-600 flex items-center justify-between">
-                        <span>{{ auth()->user()->department }}</span>
-                        <span class="text-[9px] bg-blue-100 px-2 py-1 rounded-lg">FIXED</span>
+                            {{-- Full Name Input --}}
+                    <div>
+                        <label class="text-[10px] font-black text-slate-400 uppercase ml-2 block">Full Name</label>
+                        <input type="text" 
+                            wire:model.blur="full_name" 
+                            placeholder="Firstname Lastname"
+                            class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 @error('full_name') ring-2 ring-red-500 @enderror">
+                        
+                        @error('full_name') 
+                            {{-- FIX: Using {{ $message }} allows the 'already being used' text to appear --}}
+                            <span class="text-red-500 text-[10px] font-bold ml-2 italic">⚠️ {{ $message }}</span> 
+                        @enderror
                     </div>
-                    {{-- Hidden input ensures the value is still sent to the backend --}}
-                    <input type="hidden" wire:model="department">
-                @else
-                    {{-- Admin, Registrar, and Ass. Dean can select --}}
-                    <select wire:model="department" 
-                            class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 appearance-none @error('department') ring-2 ring-red-500 @enderror">
-                        <option value="">Select Department</option>
-                        <option value="CCS">CCS</option>
-                        <option value="CTE">CTE</option>
-                        <option value="COC">COC</option>
-                        <option value="SHTM">SHTM</option>
-                    </select>
-                @endif
-                
-                @error('department') 
-                    <span class="text-red-500 text-[10px] font-bold ml-2">⚠️ Department is required.</span> 
-                @enderror
-            </div>
 
-            <button wire:click="{{ $isEditMode ? 'updateFaculty' : 'saveFaculty' }}" 
-                    class="w-full py-5 mt-4 bg-blue-600 text-white rounded-[1.5rem] font-black uppercase text-xs shadow-xl hover:bg-blue-700 transition-all active:scale-95">
-                {{ $isEditMode ? 'Save Changes' : 'Confirm Registration' }}
-            </button>
-            
-            <button @click="open = false" 
-                    type="button"
-                    class="w-full py-2 text-slate-400 font-black uppercase text-[10px] hover:text-red-500 transition-colors">
-                Close
-            </button>
+                    {{-- Email Input --}}
+                    <div>
+                        <label class="text-[10px] font-black text-slate-400 uppercase ml-2 block">Email Address</label>
+                        <input type="email" 
+                            wire:model.blur="email" 
+                            placeholder="example@email.com"
+                            class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 @error('email') ring-2 ring-red-500 @enderror">
+                        
+                        @error('email') 
+                            {{-- FIX: This will now show the specific email duplicate error --}}
+                            <span class="text-red-500 text-[10px] font-bold ml-2 italic">⚠️ {{ $message }}</span> 
+                        @enderror
+                    </div>
+                
+                {{-- Department: Role-based Logic --}}
+                <div>
+                    <label class="text-[10px] font-black text-slate-400 uppercase ml-2 block">Department</label>
+                    
+                    {{-- Check if the user is a dean OR has a department assigned (OIC logic) --}}
+                    @if(auth()->user()->role === 'dean' || auth()->user()->department)
+                        {{-- Locked UI for Deans/OICs --}}
+                        <div class="w-full px-6 py-4 bg-slate-100 border-none rounded-2xl font-black text-blue-600 flex items-center justify-between">
+                            <span>{{ auth()->user()->department }}</span>
+                            <span class="text-[9px] bg-blue-100 px-2 py-1 rounded-lg">LOCKED</span>
+                        </div>
+                        {{-- Hidden input ensures Livewire stays synced --}}
+                        <input type="hidden" wire:model="department">
+                    @else
+                        {{-- Full access for Admin/Registrar/Associate Dean --}}
+                        <div class="relative">
+                            <select wire:model="department" 
+                                    class="w-full px-6 py-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 appearance-none @error('department') ring-2 ring-red-500 @enderror">
+                                <option value="">Select Department</option>
+                                <option value="CCS">CCS</option>
+                                <option value="CTE">CTE</option>
+                                <option value="COC">COC</option>
+                                <option value="SHTM">SHTM</option>
+                            </select>
+                            <div class="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none">
+                                <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                                </svg>
+                            </div>
+                        </div>
+                    @endif
+                    
+                    @error('department') 
+                        <span class="text-red-500 text-[10px] font-bold ml-2">⚠️ {{ $message }}</span> 
+                    @enderror
+                </div>
+
+                <button wire:click="{{ $isEditMode ? 'updateFaculty' : 'saveFaculty' }}" 
+                        class="w-full py-5 mt-4 bg-blue-600 text-white rounded-[1.5rem] font-black uppercase text-xs shadow-xl hover:bg-blue-700 transition-all active:scale-95">
+                    {{ $isEditMode ? 'Save Changes' : 'Confirm Registration' }}
+                </button>
+                
+                <button @click="open = false" 
+                        type="button"
+                        class="w-full py-2 text-slate-400 font-black uppercase text-[10px] hover:text-red-500 transition-colors">
+                    Close
+                </button>
+            </div>
         </div>
     </div>
-</div>
 
     {{-- MODAL: Bulk Import --}}
     <div x-show="bulk" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md" x-cloak x-transition>

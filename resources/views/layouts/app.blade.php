@@ -20,36 +20,31 @@
 
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
     <script>
-    document.addEventListener('livewire:init', () => {
-        Livewire.on('toast', (event) => {
-            // This line ensures it works with Livewire v3's array wrapper
-            const data = Array.isArray(event) ? event[0] : event;
-
-            const Toast = Swal.mixin({
-                toast: true,
-                position: 'top-end',
-                showConfirmButton: false,
-                timer: 3000,
-                timerProgressBar: true,
-                didOpen: (toast) => {
-                    // This makes it visible over EVERYTHING (Modals, Dashboards, etc.)
-                    toast.style.zIndex = "10000"; 
-                    toast.addEventListener('mouseenter', Swal.stopTimer)
-                    toast.addEventListener('mouseleave', Swal.resumeTimer)
-                }
-            });
-
-            Toast.fire({
-                icon: data.type, 
-                title: data.message,
-                text: data.detail || '',
-                // Keeps your minimalist/dark mode styling intact
-                background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
-                color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#1e293b',
+        document.addEventListener('livewire:init', () => {
+            Livewire.on('toast', (event) => {
+                const data = Array.isArray(event) ? event[0] : event;
+                const Toast = Swal.mixin({
+                    toast: true,
+                    position: 'top-end',
+                    showConfirmButton: false,
+                    timer: 3000,
+                    timerProgressBar: true,
+                    didOpen: (toast) => {
+                        toast.style.zIndex = "10000"; 
+                        toast.addEventListener('mouseenter', Swal.stopTimer)
+                        toast.addEventListener('mouseleave', Swal.resumeTimer)
+                    }
+                });
+                Toast.fire({
+                    icon: data.type, 
+                    title: data.message,
+                    text: data.detail || '',
+                    background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
+                    color: document.documentElement.classList.contains('dark') ? '#f8fafc' : '#1e293b',
+                });
             });
         });
-    });
-</script>
+    </script>
 </head>
 <body 
     x-data="{ 
@@ -149,8 +144,36 @@
                     <span class="text-xl flex shrink-0 justify-center transition-transform group-hover:scale-110" :class="sidebarOpen ? 'mr-3' : 'w-full'">⚙️</span>
                     <span x-show="sidebarOpen" x-transition.opacity class="font-bold text-[14px] tracking-tight whitespace-nowrap">Settings</span>
                 </a>
-                 @endif
+                @endif
             </nav>
+
+            <div class="shrink-0 p-4 border-t border-slate-800/50 bg-[#0f172a]">
+                <a href="/manage-account" wire:navigate 
+                   class="flex items-center gap-3 p-3 rounded-2xl bg-slate-400/5 hover:bg-slate-400/10 transition-all duration-500 group border border-slate-700/30 hover:border-blue-500/40 backdrop-blur-md shadow-sm">
+                    
+                    <div class="relative shrink-0">
+                        <div class="w-10 h-10 rounded-xl bg-slate-700/50 group-hover:bg-blue-600 text-slate-300 group-hover:text-white flex items-center justify-center text-[10px] font-black transition-all duration-500 border border-slate-600/30">
+                            {{ auth()->user()->initials() }}
+                        </div>
+                        <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#0f172a] rounded-full"></div>
+                    </div>
+
+                    <div x-show="sidebarOpen" x-transition.opacity class="flex flex-col min-w-0">
+                        <span class="text-[10px] font-black text-slate-300 group-hover:text-blue-400 uppercase tracking-[0.12em] leading-none mb-1 transition-colors">
+                            Manage Account
+                        </span>
+                        <span class="text-[9px] font-bold text-slate-500 uppercase tracking-widest truncate group-hover:text-slate-300 transition-colors">
+                            {{ auth()->user()->role }}
+                        </span>
+                    </div>
+
+                    <span x-show="sidebarOpen" class="ml-auto opacity-40 group-hover:opacity-100 group-hover:translate-x-1 transition-all duration-300 text-slate-400 group-hover:text-blue-400">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                    </span>
+                </a>
+            </div>
 
             <button 
                 @click="sidebarOpen = !sidebarOpen" 
@@ -163,7 +186,6 @@
         </aside>
 
         <div class="flex-1 flex flex-col min-w-0">
-            
             <header class="h-20 flex items-center justify-between px-10 bg-[#0f172a] text-white shrink-0 z-30 shadow-2xl relative border-b border-slate-800/50">
                 <div class="flex flex-col">
                     <h3 class="text-base font-black text-slate-100 tracking-tight uppercase">Professional Academy of the Philippines</h3>
@@ -212,4 +234,3 @@
     @livewireScripts
 </body>
 </html>
-

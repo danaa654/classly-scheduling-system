@@ -13,11 +13,29 @@ class DepartmentAccess
      *
      * @param  Closure(Request): (Response)  $next
      */
-    public function handle($request, Closure $next) {
-    // If user is a Dean/OIC, they must have a department assigned
-    if (in_array(auth()->user()->role, ['dean', 'oic']) && !auth()->user()->department) {
-        abort(403, 'Department not assigned to this official.');
+    public function handle(Request $request, Closure $next, ...$roles)
+{
+    if (!auth()->check()) {
+        return redirect()->route('login');
     }
-    return $next($request);
+
+    $user = auth()->user();
+
+    // If the route doesn't specify roles (like a general /dashboard), just let them in
+    if (empty($roles)) {
+        return $next($request);
+    }
+
+    // Bridge OIC to Dean
+    if ($user->role === 'oic' && in_array('dean', $roles)) {
+        return $next($request);
+    }
+
+    // Direct match for associate_dean, etc.
+    if (in_array($user->role, $roles)) {
+        return $next($request);
+    }
+
+    abort(403, "Role mismatch: Found '{$user->role}'. Expected: " . implode(', ', $roles));
 }
 }

@@ -39,27 +39,51 @@ class ManageFaculty extends Component
         'search' => ['except' => ''],
         'filterDepartment' => ['except' => ''],
     ];
+    private function isGlobalViewer()
+    {
+        return in_array(auth()->user()->role, ['admin', 'registrar', 'associate_dean']);
+    }
+    private function isAdminOrRegistrar()
+    {
+        return in_array(auth()->user()->role, ['admin', 'registrar']);
+    }
 
-    public function updatedSelectAll($value)
+   public function updatedSelectAll($value)
 {
     if ($value) {
+        $user = auth()->user();
+        
         $this->selectedFaculty = Faculty::query()
+            // Admins and Registrars get everything (Approved + Rejected)
             ->whereIn('status', ['approved', 'rejected'])
-            ->when(!$this->isAdminOrRegistrar(), function($q) {
-                // DEAN RESTRICTION: Only allow selecting 'rejected' ones for deletion
-                $q->where('department', auth()->user()->department)
-                  ->where('status', 'rejected');
+            
+            // Apply restrictions for Deans, OICs, and Associate Deans
+            ->when(!$this->isAdminOrRegistrar(), function($q) use ($user) {
+                
+                // 1. Associate Dean: Can select ANY rejected faculty (all depts)
+                if ($user->role === 'associate_dean') {
+                    return $q->where('status', 'rejected');
+                }
+
+                // 2. Department Deans/OICs: Only their own department's rejected records
+                return $q->where('department', $user->department)
+                         ->where('status', 'rejected');
             })
             ->pluck('id')
             ->map(fn($id) => (string)$id)
             ->toArray();
-            
-        // If a Dean tried to select all but nothing is rejected, give them a hint
+       
+        // UI Feedback: If they tried to select all but nothing is deletable for their role
         if(!$this->isAdminOrRegistrar() && empty($this->selectedFaculty)) {
-             $this->dispatch('swal', title: 'No Records Selected', text: 'Deans can only bulk-delete rejected records.', icon: 'info');
+             $this->dispatch('swal', [
+                 'title' => 'No Records Selected', 
+                 'text' => 'There are no "Rejected" records available for you to delete.', 
+                 'icon' => 'info'
+             ]);
              $this->selectAll = false;
         }
     } else {
+        // Uncheck everything
         $this->selectedFaculty = [];
     }
 }
@@ -75,58 +99,38 @@ class ManageFaculty extends Component
     ]);
 }
 
-    private function isAdminOrRegistrar()
-    {
-        return in_array(auth()->user()->role, ['admin', 'registrar']);
-    }
-    private function isGlobalViewer()
-{
-    return in_array(auth()->user()->role, ['admin', 'registrar', 'assoc_dean']);
-}
-
     public function updatingSearch() { $this->resetPage(); }
     public function updatingFilterDepartment() { $this->resetPage(); }
 
-    // --- MODAL OPERATIONS ---
-    // --- MODAL OPERATIONS ---
 public function openModal() 
 {
-    // 1. Clear all fields and validation errors
     $this->reset(['employee_id', 'full_name', 'email', 'department', 'faculty_id']);
     $this->resetValidation();
-    
-    // 2. Set to New Registration mode
     $this->isEditMode = false;
 
-    // 3. Logic for "Next ID" (e.g., EMP001, EMP002)
     $lastFaculty = \App\Models\Faculty::orderBy('id', 'desc')->first();
-    
-    // Extract numbers only, increment, and pad with zeros
     $lastNum = $lastFaculty ? (int)filter_var($lastFaculty->employee_id, FILTER_SANITIZE_NUMBER_INT) : 0;
     $this->employee_id = "EMP" . str_pad($lastNum + 1, 3, '0', STR_PAD_LEFT);
 
     // 4. Auto-lock Department if the user is a Dean
-    if (auth()->user()->role === 'dean') {
+    if (auth()->user()->department) {
         $this->department = auth()->user()->department;
     }
 
-    // 5. Trigger UI visibility (matches your wire:click and @click)
     $this->showModal = true; 
 }
 
-// Updated Rules for stricter validation
-protected $rules = [
-    'employee_id' => 'required|unique:faculties,employee_id',
-    'full_name'   => 'required|min:5|regex:/(\s)/', // Requires First and Last name
-    'email'       => 'required|email|contains:@',
-    'department'  => 'required',
-];
+    protected $rules = [
+        'employee_id' => 'required|unique:faculties,employee_id',
+        'full_name'   => 'required|min:5|regex:/(\s)/',
+        'email'       => 'required|email|contains:@',
+        'department'  => 'required',
+    ];
 
    public function saveFaculty() 
 {
     $this->validate([
         'employee_id' => 'required|unique:faculties,employee_id',
-        // Rule order: Required first, then Unique check, then formatting
         'full_name'   => 'required|unique:faculties,full_name|min:5|regex:/(\s)/', 
         'email'       => 'required|unique:faculties,email|email', 
         'department'  => 'required',
@@ -162,7 +166,6 @@ protected $rules = [
 }
 
     $this->logAction($newFaculty->id, 'created', "Registered faculty: {$newFaculty->full_name}");
-    
     $this->showModal = false;
     $this->dispatch('toast', [
     'type' => 'success', 
@@ -234,76 +237,131 @@ protected $rules = [
     $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
 }
     public function editFaculty($id) 
-    {
-        $this->resetValidation();
-        $f = Faculty::findOrFail($id);
-        $this->faculty_id  = $f->id;
-        $this->employee_id = $f->employee_id;
-        $this->full_name   = $f->full_name;
-        $this->email       = $f->email;
-        $this->department  = $f->department;
-        $this->isEditMode = true;
-        $this->showModal  = true;
-    }
+{
+    $this->resetValidation();
+    $f = Faculty::findOrFail($id);
+    
+    $this->faculty_id  = $f->id;
+    $this->employee_id = $f->employee_id;
+    $this->full_name   = $f->full_name;
+    $this->email       = $f->email; // <-- Check if this is being set
+    $this->department  = $f->department;
+    
+    $this->isEditMode = true;
+    $this->showModal  = true;
+}
 
     public function updateFaculty() 
-    {
-        $this->validate([
-        'employee_id' => 'required|unique:faculties,employee_id',
-        'full_name'   => 'required|min:5|regex:/(\s)/|unique:faculties,full_name', 
-        'email'       => 'required|email|contains:@|unique:faculties,email',
-        'department'  => 'required',
-    ], [
-        // Custom Error Messages for your Issue #2
-        'full_name.unique' => 'That name is already being used.',
-        'email.unique'     => 'That email address is already being used.',
-        'full_name.regex'  => 'Please enter your complete full name (First and Last).',
-    ]);
-
-        $faculty = Faculty::findOrFail($this->faculty_id);
-        $faculty->update([
-            'employee_id' => $this->employee_id,
-            'full_name'   => $this->full_name,
-            'email'       => $this->email,
-            'department'  => $this->department,
-        ]);
-
-        $this->logAction($faculty->id, 'updated', "Modified record: {$faculty->full_name}");
-
-        if ($this->isAdminOrRegistrar()) {
-            $dean = User::where('role', 'dean')->where('department', $faculty->department)->first();
-            if ($dean) {
-                $dean->notify(new FacultyRequestNotification($faculty, auth()->user()->name, 'edited'));
-            }
-        }
-
-        $this->showModal = false;
-        $this->dispatch('toast', [
-            'type' => 'success', 
-            'message' => 'Record Updated', 
-            'detail' => 'The faculty details have been successfully modified.'
-        ]);
-        $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
+{
+    // 0. SAFETY CHECK: Ensure we actually have an ID to work with
+    if (!$this->faculty_id) {
+        $this->dispatch('toast', ['type' => 'error', 'message' => 'Error', 'detail' => 'Record ID not found.']);
+        return;
     }
 
+    // 1. VALIDATION WITH UNIQUE IGNORE
+    // We wrap everything in an array to ensure Laravel processes the Rule::unique correctly.
+    $this->validate([
+        'employee_id' => [
+            'required', 
+            Rule::unique('faculties', 'employee_id')->ignore($this->faculty_id)
+        ],
+        'full_name' => [
+            'required', 
+            'min:5', 
+            'regex:/(\s)/', 
+            Rule::unique('faculties', 'full_name')->ignore($this->faculty_id)
+        ],
+        'email' => [
+            'required', 
+            'email', 
+            Rule::unique('faculties', 'email')->ignore($this->faculty_id)
+        ],
+        'department' => 'required',
+    ], [
+        'full_name.unique'   => '⚠️ That name is already being used by another record.',
+        'email.unique'       => '⚠️ That email address is already being used by another record.',
+        'employee_id.unique' => '⚠️ That Employee ID is already assigned.',
+        'full_name.regex'    => '⚠️ Please enter the complete full name (First and Last).',
+        'email.required'     => '⚠️ The email address is required.',
+    ]);
+
+    // 2. FIND AND UPDATE
+    $faculty = \App\Models\Faculty::findOrFail($this->faculty_id);
+    
+    $faculty->update([
+        'employee_id' => $this->employee_id,
+        'full_name'   => $this->full_name,
+        'email'       => $this->email,
+        'department'  => $this->department,
+    ]);
+
+    // 3. LOG ACTION
+    $this->logAction($faculty->id, 'updated', "Modified record: {$faculty->full_name}");
+
+    // 4. BROADCAST NOTIFICATIONS (Admin/Registrar only)
+    if ($this->isAdminOrRegistrar()) {
+        $actorName = auth()->user()->name;
+
+        // Notify Dept Dean
+        $dean = \App\Models\User::where('role', 'dean')
+                    ->where('department', $faculty->department)
+                    ->first();
+        if ($dean) {
+            $dean->notify(new \App\Notifications\FacultyRequestNotification($faculty, $actorName, 'edited'));
+        }
+
+        // Notify Associate Dean
+        $assocDean = \App\Models\User::where('role', 'associate_dean')->first();
+        if ($assocDean) {
+            $assocDean->notify(new \App\Notifications\FacultyRequestNotification($faculty, $actorName, 'edited'));
+        }
+    }
+
+    // 5. UI FEEDBACK & REFRESH
+    $this->showModal = false;
+    
+    $this->dispatch('toast', [
+        'type' => 'success', 
+        'message' => 'Record Updated', 
+        'detail' => "Details for {$this->full_name} have been updated successfully."
+    ]);
+
+    // Signal Notification Center and Tables to refresh
+    $this->dispatch('facultyUpdated')->to(\App\Livewire\NotificationCenter::class);
+}
     public function deleteFaculty($id)
 {
-    // Ensure only authorized roles can perform the deletion
-    if (!in_array(auth()->user()->role, ['admin', 'registrar'])) return;
-
     $faculty = Faculty::findOrFail($id);
+    $actor = auth()->user();
     
-    // 1. Capture details before deletion
+    // --- PERMISSION GATE ---
+    $isAdminOrRegistrar = in_array($actor->role, ['admin', 'registrar']);
+    $isAssociateDean = ($actor->role === 'associate_dean');
+    $isDeptDean = ($actor->role === 'dean' && $faculty->department === $actor->department);
+    $isRejected = ($faculty->status === 'rejected');
+
+    // Logic: Admin/Registrar can delete anything. 
+    // Associate Dean and Dept Deans can ONLY delete if the status is 'rejected'.
+    if (!$isAdminOrRegistrar && !(($isAssociateDean || $isDeptDean) && $isRejected)) {
+        $this->dispatch('toast', [
+            'type' => 'error', 
+            'message' => 'Access Denied', 
+            'detail' => 'You do not have permission to delete active records.'
+        ]);
+        return;
+    }
+
+    // 1. Capture details before deletion (to avoid the "Deleted Record" crash)
     $name = $faculty->full_name;
     $dept = $faculty->department;
     $status = strtoupper($faculty->status);
-    $actor = auth()->user();
     $actorRole = strtoupper($actor->role); 
 
-    // 2. Clear old logs for this specific faculty ID
+    // 2. Clear old logs for this specific faculty ID to prevent foreign key errors
     \App\Models\FacultyLog::where('faculty_id', $id)->delete();
 
-    // 3. Log the action in the system logs
+    // 3. Log the action in the system audit trail
     $this->logAction(
         null, 
         'deleted', 
@@ -311,38 +369,35 @@ protected $rules = [
         $dept
     );
 
-    // 4. Send Notifications to Database for other roles
-    // We target admin, registrar, dean, and assistant dean
-    $targetRoles = ['admin', 'registrar', 'dean', 'assistant dean'];
+    // 4. Send Notifications
+    // We notify other relevant roles that a record was removed
+    $targetRoles = ['admin', 'registrar', 'dean', 'associate_dean'];
     
     $recipients = \App\Models\User::whereIn('role', $targetRoles)
-        ->where('id', '!=', $actor->id) // DO NOT notify the person doing the work
+        ->where('id', '!=', $actor->id) // Don't notify the person who deleted it
         ->get();
 
     foreach ($recipients as $recipient) {
-        // Assuming you have a Notification model or a relation
-        // Replace this with your actual notification creation logic
-        \App\Models\Notification::create([
-            'user_id' => $recipient->id,
-            'title' => 'Faculty Deleted',
-            'message' => "{$name} was removed by {$actor->name} ({$actorRole})",
-            'type' => 'deletion',
-            'is_read' => false,
-        ]);
+        // Pass $name as a string so the notification doesn't try to find the deleted model
+        $recipient->notify(new \App\Notifications\FacultyRequestNotification(
+            $name, 
+            $actor->name, 
+            'deleted'
+        ));
     }
 
     // 5. Delete the record
     $faculty->delete();
 
-    // 6. Dispatch Toast (Using Livewire v3 named parameters)
-    $this->dispatch('toast', 
-        type: 'warning', 
-        message: 'Faculty Removed', 
-        description: "{$name} has been removed and logs updated."
-    );
+    // 6. Dispatch Toast notification
+    $this->dispatch('toast', [
+        'type' => 'warning', 
+        'message' => 'Faculty Removed', 
+        'detail' => "{$name} has been removed from the system."
+    ]);
 
-    // 7. Refresh the notification bell/center
-    $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
+    // 7. Refresh components
+    $this->dispatch('facultyUpdated')->to(\App\Livewire\NotificationCenter::class);
 }
 
     public function updatedImportFile()
@@ -437,7 +492,6 @@ protected $rules = [
             }
         });
 
-        // --- NOTIFICATION LOGIC ---
         if ($importCount > 0) {
             $sender = auth()->user()->name;
             $uniqueDepts = array_unique($importedDepartments);
@@ -577,7 +631,8 @@ public function render()
     $user = auth()->user();
 
     // 1. AUTO-FILTER LOGIC
-    // If not a global viewer (e.g., a Dean), lock them to their own department
+    // If NOT a global viewer, lock them to their own department
+    // Associate Deans will bypass this because isGlobalViewer() returns true
     if (!$this->isGlobalViewer()) { 
         $this->filterDepartment = $user->department; 
     }
@@ -585,8 +640,8 @@ public function render()
     // 2. PENDING REQUESTS
     $pendingRequests = Faculty::where('status', 'pending')
         ->when(!$this->isAdminOrRegistrar(), function ($q) use ($user) {
-            // Deans and Assoc Deans only see pending requests they personally created
-            // They cannot see or approve other people's pending requests
+            // Deans see only their own requests. 
+            // Registrar/Admin/Assoc Dean see ALL pending requests to approve them.
             return $q->where('requested_by', $user->id);
         })->orderBy('created_at', 'desc')->get();
 
@@ -594,11 +649,11 @@ public function render()
     $faculties = Faculty::query()
         ->whereIn('status', ['approved', 'rejected']) 
         ->when(!$this->isGlobalViewer(), function ($q) use ($user) {
-            // If they aren't a Global Viewer, only show their department
+            // Only lock to department if NOT a Global Viewer
             return $q->where('department', $user->department);
         })
-        ->when($this->filterDepartment, function ($q) {
-            // Allow Global Viewers to use the dropdown to filter by any department
+        ->when($this->filterDepartment && $this->isGlobalViewer(), function ($q) {
+            // Allow Global Viewers to use the dropdown to filter
             return $q->where('department', $this->filterDepartment);
         })
         ->when($this->search, function ($q) {
@@ -612,10 +667,10 @@ public function render()
     $recentLogs = FacultyLog::with(['user', 'faculty'])
         ->where(function ($q) use ($user) {
             if ($this->isGlobalViewer()) {
-                // Registrar, Admin, and Assoc. Dean see the global audit trail
+                // Global Viewers see everything
                 $q->whereRaw('1=1'); 
             } else {
-                // Deans only see their own actions or actions within their department
+                // Local Deans only see their department logs
                 $q->where('user_id', $user->id)
                   ->orWhereHas('faculty', function ($f) use ($user) {
                       $f->where('department', $user->department);

@@ -170,7 +170,7 @@ class ManageRooms extends Component
     }
     private function notifyManagement($message, $type)
 {
-    $managementRoles = ['dean', 'oic', 'ass.dean', 'registrar', 'admin'];
+    $managementRoles = ['dean', 'oic', 'associate_dean', 'registrar', 'admin'];
 
     $usersToNotify = User::whereIn('role', $managementRoles)
         ->where('id', '!=', auth()->id()) 
