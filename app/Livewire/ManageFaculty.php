@@ -129,27 +129,26 @@ public function openModal()
 
    public function saveFaculty() 
 {
+    // 1. Validation
     $this->validate([
         'employee_id' => 'required|unique:faculties,employee_id',
         'full_name'   => 'required|unique:faculties,full_name|min:5|regex:/(\s)/', 
         'email'       => 'required|unique:faculties,email|email', 
         'department'  => 'required',
     ], [
-        // Duplicate Indicators
         'full_name.unique'   => '⚠️ This name is already being used.',
         'email.unique'       => '⚠️ This email is already being used.',
         'employee_id.unique' => '⚠️ This ID is already assigned.',
-        
-        // Formatting Indicators
         'full_name.regex'    => '⚠️ Please enter your complete full name.',
         'email.email'        => "⚠️ Please enter a valid email containing '@'.",
         'full_name.min'      => '⚠️ Name is too short.',
         'email.required'     => '⚠️ The email address is required.',
     ]);
 
+    // 2. Define Status (Admins auto-approve, Deans/OICs stay pending)
     $status = $this->isAdminOrRegistrar() ? 'approved' : 'pending';
-    $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
 
+    // 3. Create the Record
     $newFaculty = Faculty::create([
         'employee_id'  => $this->employee_id,
         'full_name'    => $this->full_name,
@@ -158,84 +157,112 @@ public function openModal()
         'status'       => $status,
         'requested_by' => auth()->id(),
     ]);
-    if (!$this->isAdminOrRegistrar()) {
-    $admins = User::whereIn('role', ['admin', 'registrar'])->get();
-    foreach ($admins as $admin) {
-        $admin->notify(new FacultyRequestNotification($newFaculty, auth()->user()->name, 'pending'));
+
+    // 4. Notify Relevant Roles (Only if it's a request from a Dean/OIC)
+    // Find this part in saveFaculty() and replace the notification loop:
+if (!$this->isAdminOrRegistrar()) {
+    $allRecipients = $this->getStakeholders($newFaculty->department);
+    foreach ($allRecipients as $recipient) {
+        if ($recipient->id === auth()->id()) continue;
+        $recipient->notify(new FacultyRequestNotification($newFaculty, auth()->user()->name, 'pending'));
     }
 }
 
-    $this->logAction($newFaculty->id, 'created', "Registered faculty: {$newFaculty->full_name}");
+    // 5. Audit Trail & UI Updates
+    $this->logAction(
+        $newFaculty->id, 
+        'created', 
+        strtoupper(auth()->user()->role) . " added faculty: {$newFaculty->full_name}",
+        $newFaculty->department
+    );
+
     $this->showModal = false;
+
     $this->dispatch('toast', [
-    'type' => 'success', 
-    'message' => 'Faculty Registered', 
-    'detail' => "{$this->full_name} has been added to the registry."
-]);
+        'type' => 'success', 
+        'message' => 'Faculty Registered', 
+        'detail' => "{$this->full_name} has been added to the registry as " . strtoupper($status) . "."
+    ]);
+
+    // Refresh components
+    $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
 }
 
-    public function deleteSelected()
+   public function deleteSelected()
 {
     if (empty($this->selectedFaculty)) return;
 
-    $user = auth()->user();
-    if (!in_array($user->role, ['admin', 'registrar', 'dean'])) {
-        return;
-    }
-
-    $count = 0;
+    $actor = auth()->user();
     $faculties = Faculty::whereIn('id', $this->selectedFaculty)->get();
-    
-    $actorRole = strtoupper(auth()->user()->role); 
-    $actorName = auth()->user()->name;
+    $count = 0;
 
     foreach ($faculties as $faculty) {
-    if ($user->role === 'dean') {
-        if ($faculty->status !== 'rejected' || $faculty->department !== $user->department) {
-            continue; 
-        }
-        }
-        // 1. Notify the original requester
-        $admins = User::whereIn('role', ['admin', 'registrar'])->get();
-        foreach ($admins as $admin) {
-            // We pass $faculty->full_name as a string because it will be deleted soon
-            $admin->notify(new FacultyRequestNotification($faculty->full_name, auth()->user()->name, 'deleted'));
+        // --- PERMISSION GATE ---
+        $isAdminOrRegistrar = in_array($actor->role, ['admin', 'registrar']);
+        $isAssociateDean = ($actor->role === 'associate_dean');
+        $isDeptHead = in_array($actor->role, ['dean', 'oic']) && ($faculty->department === $actor->department);
+        $isRejected = ($faculty->status === 'rejected');
+
+        // Check if current actor can delete this specific record
+        if (!$isAdminOrRegistrar && !(($isAssociateDean || $isDeptHead) && $isRejected)) {
+            continue;
         }
 
-        // 2. Capture details for the replacement log
         $name = $faculty->full_name;
         $dept = $faculty->department;
-        $status = strtoupper($faculty->status);
 
-        // 3. REMOVE OLD LOGS (Cleans up the "Declined" entries)
+        // 1. Notify Stakeholders for this specific deletion
+        $recipients = User::query()
+            ->whereIn('role', ['admin', 'registrar', 'associate_dean'])
+            ->orWhere(function($q) use ($dept) {
+                $q->where('department', $dept)
+                  ->whereIn('role', ['dean', 'oic']);
+            })
+            ->get();
+
+        foreach ($recipients->unique('id') as $recipient) {
+            if ($recipient->id === $actor->id) continue;
+
+            $recipient->notify(new \App\Notifications\FacultyRequestNotification(
+                $name, 
+                $actor->name, 
+                'deleted'
+            ));
+        }
+
+        // 2. Cleanup Logs & Audit Trail
         \App\Models\FacultyLog::where('faculty_id', $faculty->id)->delete();
-
-        // 4. Create the NEW log (This triggers the RED color in your sidebar)
+        
         $this->logAction(
             null, 
             'deleted', 
-            "{$actorRole} ({$actorName}) removed the {$status} faculty: {$name}",
+            strtoupper($actor->role) . " ({$actor->name}) bulk-deleted faculty: {$name}",
             $dept
         );
 
-        // 5. Delete this specific record
         $faculty->delete();
         $count++;
     }
 
-    // 6. Reset UI
+    // Reset UI
     $this->reset(['selectedFaculty', 'selectAll', 'confirmingDeletion']);
     
     if ($count > 0) {
         $this->dispatch('toast', [
             'type'    => 'warning', 
             'message' => 'Bulk Deletion Complete', 
-            'detail'  => "$count faculty entries have been removed."
+            'detail'  => "$count records were removed. Relevant Department Heads notified."
+        ]);
+    } else {
+        $this->dispatch('toast', [
+            'type'    => 'info', 
+            'message' => 'No Records Deleted', 
+            'detail'  => "No records were removed due to permission restrictions."
         ]);
     }
 
-    $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
-}
+    $this->dispatch('facultyUpdated')->to(\App\Livewire\NotificationCenter::class);
+} 
     public function editFaculty($id) 
 {
     $this->resetValidation();
@@ -253,14 +280,13 @@ public function openModal()
 
     public function updateFaculty() 
 {
-    // 0. SAFETY CHECK: Ensure we actually have an ID to work with
+    // 1. Safety Check
     if (!$this->faculty_id) {
         $this->dispatch('toast', ['type' => 'error', 'message' => 'Error', 'detail' => 'Record ID not found.']);
         return;
     }
 
-    // 1. VALIDATION WITH UNIQUE IGNORE
-    // We wrap everything in an array to ensure Laravel processes the Rule::unique correctly.
+    // 2. Validation with Unique Ignore
     $this->validate([
         'employee_id' => [
             'required', 
@@ -286,8 +312,9 @@ public function openModal()
         'email.required'     => '⚠️ The email address is required.',
     ]);
 
-    // 2. FIND AND UPDATE
-    $faculty = \App\Models\Faculty::findOrFail($this->faculty_id);
+    // 3. Find and Update
+    $faculty = Faculty::findOrFail($this->faculty_id);
+    $actor = auth()->user();
     
     $faculty->update([
         'employee_id' => $this->employee_id,
@@ -296,39 +323,52 @@ public function openModal()
         'department'  => $this->department,
     ]);
 
-    // 3. LOG ACTION
-    $this->logAction($faculty->id, 'updated', "Modified record: {$faculty->full_name}");
+    // 4. Log Action
+    $this->logAction(
+        $faculty->id, 
+        'updated', 
+        strtoupper($actor->role) . " updated details for: {$faculty->full_name}",
+        $faculty->department
+    );
 
-    // 4. BROADCAST NOTIFICATIONS (Admin/Registrar only)
+    // 5. Smart Notifications (Inclusive of OIC)
+    // We notify stakeholders if an Admin/Registrar makes changes to a department record
     if ($this->isAdminOrRegistrar()) {
-        $actorName = auth()->user()->name;
+        
+        // Find everyone who needs to know:
+        // - Associate Dean (Global)
+        // - Dean/OIC of this specific department
+        $recipients = User::query()
+            ->where('role', 'associate_dean')
+            ->orWhere(function($query) use ($faculty) {
+                $query->where('department', $faculty->department)
+                      ->whereIn('role', ['dean', 'oic']);
+            })
+            ->get();
 
-        // Notify Dept Dean
-        $dean = \App\Models\User::where('role', 'dean')
-                    ->where('department', $faculty->department)
-                    ->first();
-        if ($dean) {
-            $dean->notify(new \App\Notifications\FacultyRequestNotification($faculty, $actorName, 'edited'));
-        }
+        foreach ($recipients->unique('id') as $recipient) {
+            // Don't notify the person who actually made the edit
+            if ($recipient->id === $actor->id) continue;
 
-        // Notify Associate Dean
-        $assocDean = \App\Models\User::where('role', 'associate_dean')->first();
-        if ($assocDean) {
-            $assocDean->notify(new \App\Notifications\FacultyRequestNotification($faculty, $actorName, 'edited'));
+            $recipient->notify(new FacultyRequestNotification(
+                $faculty, 
+                $actor->name, 
+                'edited'
+            ));
         }
     }
 
-    // 5. UI FEEDBACK & REFRESH
+    // 6. UI Feedback & State Reset
     $this->showModal = false;
     
     $this->dispatch('toast', [
-        'type' => 'success', 
+        'type'    => 'success', 
         'message' => 'Record Updated', 
-        'detail' => "Details for {$this->full_name} have been updated successfully."
+        'detail'  => "Details for {$this->full_name} have been updated successfully."
     ]);
 
-    // Signal Notification Center and Tables to refresh
-    $this->dispatch('facultyUpdated')->to(\App\Livewire\NotificationCenter::class);
+    // Refresh the notification bell and tables
+    $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
 }
     public function deleteFaculty($id)
 {
@@ -338,12 +378,12 @@ public function openModal()
     // --- PERMISSION GATE ---
     $isAdminOrRegistrar = in_array($actor->role, ['admin', 'registrar']);
     $isAssociateDean = ($actor->role === 'associate_dean');
-    $isDeptDean = ($actor->role === 'dean' && $faculty->department === $actor->department);
+    // Check if user is the Dean or OIC of the faculty's department
+    $isDeptHead = in_array($actor->role, ['dean', 'oic']) && ($faculty->department === $actor->department);
     $isRejected = ($faculty->status === 'rejected');
 
-    // Logic: Admin/Registrar can delete anything. 
-    // Associate Dean and Dept Deans can ONLY delete if the status is 'rejected'.
-    if (!$isAdminOrRegistrar && !(($isAssociateDean || $isDeptDean) && $isRejected)) {
+    // Admin/Registrar = Total Access. Others = Only if record is 'rejected'.
+    if (!$isAdminOrRegistrar && !(($isAssociateDean || $isDeptHead) && $isRejected)) {
         $this->dispatch('toast', [
             'type' => 'error', 
             'message' => 'Access Denied', 
@@ -352,16 +392,16 @@ public function openModal()
         return;
     }
 
-    // 1. Capture details before deletion (to avoid the "Deleted Record" crash)
+    // 1. Capture details for logs and notifications
     $name = $faculty->full_name;
     $dept = $faculty->department;
     $status = strtoupper($faculty->status);
     $actorRole = strtoupper($actor->role); 
 
-    // 2. Clear old logs for this specific faculty ID to prevent foreign key errors
+    // 2. Database Cleanup
     \App\Models\FacultyLog::where('faculty_id', $id)->delete();
 
-    // 3. Log the action in the system audit trail
+    // 3. System Log
     $this->logAction(
         null, 
         'deleted', 
@@ -369,16 +409,20 @@ public function openModal()
         $dept
     );
 
-    // 4. Send Notifications
-    // We notify other relevant roles that a record was removed
-    $targetRoles = ['admin', 'registrar', 'dean', 'associate_dean'];
-    
-    $recipients = \App\Models\User::whereIn('role', $targetRoles)
-        ->where('id', '!=', $actor->id) // Don't notify the person who deleted it
+    // 4. Inclusive Notification Flow
+    $recipients = User::query()
+        // Global Leaders
+        ->whereIn('role', ['admin', 'registrar', 'associate_dean'])
+        // Specific Department Leaders (Dean & OIC)
+        ->orWhere(function($q) use ($dept) {
+            $q->where('department', $dept)
+              ->whereIn('role', ['dean', 'oic']);
+        })
         ->get();
 
-    foreach ($recipients as $recipient) {
-        // Pass $name as a string so the notification doesn't try to find the deleted model
+    foreach ($recipients->unique('id') as $recipient) {
+        if ($recipient->id === $actor->id) continue; // Skip the actor
+
         $recipient->notify(new \App\Notifications\FacultyRequestNotification(
             $name, 
             $actor->name, 
@@ -386,17 +430,15 @@ public function openModal()
         ));
     }
 
-    // 5. Delete the record
+    // 5. Final Delete
     $faculty->delete();
 
-    // 6. Dispatch Toast notification
     $this->dispatch('toast', [
         'type' => 'warning', 
         'message' => 'Faculty Removed', 
-        'detail' => "{$name} has been removed from the system."
+        'detail' => "{$name} has been removed from the registry."
     ]);
 
-    // 7. Refresh components
     $this->dispatch('facultyUpdated')->to(\App\Livewire\NotificationCenter::class);
 }
 
@@ -450,22 +492,21 @@ public function openModal()
     $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
     }
 
-    public function processImport()
+   public function processImport()
 {
     try {
         $importCount = 0;
-        $importedDepartments = []; // To keep track of which deans to notify
+        $importedDepartments = [];
 
         \Illuminate\Support\Facades\DB::transaction(function () use (&$importCount, &$importedDepartments) {
             foreach ($this->importPreview as $data) {
-                // Duplicate Protection (Check ID or Email)
+                // Duplicate Protection
                 $exists = Faculty::where('employee_id', $data['employee_id'])
                     ->orWhere('email', $data['email'])
                     ->exists();
 
                 if ($exists) continue;
 
-                // 1. Create the Faculty Record
                 $faculty = Faculty::create([
                     'employee_id'  => $data['employee_id'],
                     'full_name'    => $data['full_name'],
@@ -475,15 +516,13 @@ public function openModal()
                     'requested_by' => auth()->id(),
                 ]);
 
-                // 2. Log the activity for the sidebar
                 $this->logAction(
                     $faculty->id, 
                     'created', 
-                    "CREATED BY " . strtoupper(auth()->user()->role) . ": {$faculty->full_name} ({$faculty->department})",
+                    strtoupper(auth()->user()->role) . " imported faculty: {$faculty->full_name}",
                     $faculty->department
                 );
 
-                // 3. Track department for summary notifications
                 if (!empty($data['department'])) {
                     $importedDepartments[] = $data['department'];
                 }
@@ -493,43 +532,48 @@ public function openModal()
         });
 
         if ($importCount > 0) {
-            $sender = auth()->user()->name;
+            $senderName = auth()->user()->name;
             $uniqueDepts = array_unique($importedDepartments);
 
-            // 1. Notify Department Deans (Only about their own departments)
+            // A. NOTIFY DEPARTMENT-SPECIFIC LEADERS (Dean & OIC)
             foreach ($uniqueDepts as $deptName) {
-                $dean = User::where('role', 'dean')->where('department', $deptName)->first();
-                if ($dean) {
-                    $dean->notify(new FacultyRequestNotification(
+                $deptLeaders = User::where('department', $deptName)
+                    ->whereIn('role', ['dean', 'oic'])
+                    ->get();
+
+                foreach ($deptLeaders as $leader) {
+                    if ($leader->id === auth()->id()) continue; // Don't notify the one who did the work
+
+                    $leader->notify(new FacultyRequestNotification(
                         "the $deptName Department", 
-                        $sender, 
+                        $senderName, 
                         'bulk_added'
                     ));
                 }
             }
 
-            // 2. Notify Associate Dean (Global oversight)
-            $assocDean = User::where('role', 'associate_dean')->first();
-            if ($assocDean) {
-                $assocDean->notify(new FacultyRequestNotification(
+            // B. NOTIFY GLOBAL LEADERS (Admin, Registrar, Assoc Dean)
+            $globalLeaders = User::whereIn('role', ['admin', 'registrar', 'associate_dean'])->get();
+            foreach ($globalLeaders as $global) {
+                if ($global->id === auth()->id()) continue;
+
+                $global->notify(new FacultyRequestNotification(
                     "$importCount Faculty Members", 
-                    $sender, 
+                    $senderName, 
                     'bulk_added'
                 ));
             }
 
-            // 3. Signal all NotificationCenter components to refresh
             $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
         }
 
-        // Cleanup UI State
         $this->reset(['importFile', 'importPreview', 'bulkOpen']); 
         $this->dispatch('close-import-modal'); 
 
         $this->dispatch('toast', [
             'type'    => 'success', 
             'message' => 'Import Successful', 
-            'detail'  => "Successfully added $importCount records and notified relevant Deans."
+            'detail'  => "Added $importCount records. Relevant Department Heads and Admins have been notified."
         ]);
 
     } catch (\Exception $e) {
@@ -537,66 +581,103 @@ public function openModal()
         $this->dispatch('toast', [
             'type'    => 'error', 
             'message' => 'Import Failed', 
-            'detail'  => 'Something went wrong while processing the CSV.'
+            'detail'  => 'An error occurred during processing.'
         ]);
     }
 }
-
-    public function approveFaculty($id) 
+public function approveFaculty($id) 
 {
     if (!$this->isAdminOrRegistrar()) return;
 
     $faculty = Faculty::findOrFail($id);
+    $actor = auth()->user();
+
     $faculty->update(['status' => 'approved']);
     
-    $this->logAction($faculty->id, 'approved', "Approved entry: {$faculty->full_name}");
+    $this->logAction(
+        $faculty->id, 
+        'approved', 
+        strtoupper($actor->role) . " approved faculty: {$faculty->full_name}",
+        $faculty->department
+    );
 
-    // Notify the Dean who requested this
-    $dean = User::find($faculty->requested_by);
-    if ($dean) {
-        $dean->notify(new FacultyRequestNotification($faculty, auth()->user()->name, 'approved'));
+    // 1. Get Recipients: Associate Dean + Dept Dean/OIC + Original Requester
+    $recipients = User::query()
+        ->where('role', 'associate_dean')
+        ->orWhere(function($q) use ($faculty) {
+            $q->where('department', $faculty->department)
+              ->whereIn('role', ['dean', 'oic']);
+        })
+        ->orWhere('id', $faculty->requested_by)
+        ->get();
+
+    // 2. Loop and Notify
+    foreach ($recipients->unique('id') as $recipient) {
+        if ($recipient->id === $actor->id) continue; // Skip the person who clicked 'Approve'
+
+        $recipient->notify(new FacultyRequestNotification(
+            $faculty, 
+            $actor->name, 
+            'approved'
+        ));
     }
-   $this->dispatch('toast', [
+
+    $this->dispatch('toast', [
         'type'    => 'success',
         'message' => 'Request Approved',
-        'detail'  => "{$faculty->full_name} is now active in the registry."
+        'detail'  => "{$faculty->full_name} is now active. Requester and Department Heads notified."
     ]);
 
     $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
 }
-    public function declineFaculty($id) 
+
+/**
+ * Decline/Reject a pending faculty registration request.
+ */
+public function declineFaculty($id) 
 {
     if (!$this->isAdminOrRegistrar()) return;
 
     $faculty = Faculty::findOrFail($id);
+    $actor = auth()->user();
     
-    // Update status to rejected
     $faculty->update(['status' => 'rejected']);
 
-    // Log the decline action BEFORE sending notifications
     $this->logAction(
         $faculty->id, 
         'rejected', 
-        "DECLINED BY " . strtoupper(auth()->user()->role) . ": {$faculty->full_name} ({$faculty->department})",
+        strtoupper($actor->role) . " declined registration: {$faculty->full_name}",
         $faculty->department
     );
     
-    // Notify the Dean who requested the faculty
-    $dean = User::find($faculty->requested_by);
-    if ($dean) {
-        $dean->notify(new FacultyRequestNotification($faculty, auth()->user()->name, 'rejected'));
+    // 1. Get Recipients: Associate Dean + Dept Dean/OIC + Original Requester
+    $recipients = User::query()
+        ->where('role', 'associate_dean')
+        ->orWhere(function($q) use ($faculty) {
+            $q->where('department', $faculty->department)
+              ->whereIn('role', ['dean', 'oic']);
+        })
+        ->orWhere('id', $faculty->requested_by)
+        ->get();
+
+    foreach ($recipients->unique('id') as $recipient) {
+        if ($recipient->id === $actor->id) continue; // Skip the person who clicked 'Decline'
+
+        $recipient->notify(new FacultyRequestNotification(
+            $faculty, 
+            $actor->name, 
+            'rejected'
+        ));
     }
     
-    // Dispatch Toast with the Array structure your script expects
     $this->dispatch('toast', [
         'type'    => 'info',
         'message' => 'Request Declined',
-        'detail'  => "The registration for {$faculty->full_name} was rejected."
+        'detail'  => "Registration for {$faculty->full_name} rejected. Requester notified."
     ]);
 
     $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
 }
-
     // --- EXPORT ---
     public function exportCSV() {
         $user = auth()->user();
@@ -626,6 +707,18 @@ public function openModal()
         return response()->stream($callback, 200, $headers);
     }
     
+    private function getStakeholders($department)
+{
+    return User::query()
+        ->whereIn('role', ['admin', 'registrar', 'associate_dean'])
+        ->orWhere(function($q) use ($department) {
+            $q->where('department', $department)
+              ->whereIn('role', ['dean', 'oic']);
+        })
+        ->get()
+        ->unique('id');
+}
+
 public function render()
 {
     $user = auth()->user();

@@ -3,48 +3,36 @@
 namespace App\Livewire;
 
 use Livewire\Component;
-use Livewire\Attributes\On; // Required for the modern refresh logic
+use Livewire\Attributes\On; 
 
 class NotificationCenter extends Component
 {
-    // The collection of notifications displayed in the dropdown
     public $notifications = [];
 
-    /**
-     * Listeners for Real-time updates.
-     * Includes Echo for broadcasting and local dispatchers for Rooms/Faculty.
-     */
     protected $listeners = [
         'echo:notifications,NotificationSent' => 'loadNotifications',
     ];
 
     /**
-     * Refreshes the notification list whenever faculty or rooms are updated.
-     * This handles the scenarios where Deans or Registrars perform bulk actions.
+     * Listen for any registry changes (Update, Import, Delete, Room changes)
      */
     #[On('facultyUpdated')]
+    #[On('facultyDeleted')] // Catching the new delete events
     #[On('roomImported')]
     public function loadNotifications()
     {
-        // Fetches both Faculty and Room notifications from the database
-        // Updated to latest() to ensure the most recent actions are at the top
+        // Get the latest 10 notifications for the authenticated user
         $this->notifications = auth()->user()->notifications()
             ->latest()
             ->take(10) 
             ->get();
     }
 
-    /**
-     * Initialize the component by loading current notifications.
-     */
     public function mount()
     {
         $this->loadNotifications();
     }
 
-    /**
-     * Marks a single notification as read and refreshes the list.
-     */
     public function markAsRead($id)
     {
         $notification = auth()->user()->notifications()->find($id);
@@ -54,9 +42,6 @@ class NotificationCenter extends Component
         }
     }
 
-    /**
-     * Permanently deletes a single notification from the database.
-     */
     public function deleteNotification($id)
     {
         $notification = auth()->user()->notifications()->find($id);
@@ -66,9 +51,6 @@ class NotificationCenter extends Component
         }
     }
 
-    /**
-     * Bulk deletes all notifications that have already been read.
-     */
     public function deleteAllRead()
     {
         auth()->user()->readNotifications()->delete();
@@ -81,9 +63,6 @@ class NotificationCenter extends Component
         ]);
     }
 
-    /**
-     * Marks every unread notification as read.
-     */
     public function markAllAsRead()
     {
         auth()->user()->unreadNotifications->markAsRead();
