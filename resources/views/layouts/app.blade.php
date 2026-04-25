@@ -233,4 +233,25 @@
 
     @livewireScripts
 </body>
+<div 
+    x-data="{ 
+        notifications: [], 
+        add(e) { 
+            // In Livewire v3, the data is inside e.detail[0] if sent as positional arguments
+            // or directly in e.detail if sent as named arguments.
+            const data = Array.isArray(e.detail) ? e.detail[0] : e.detail;
+            
+            this.notifications.push({
+                id: Date.now(),
+                type: data.type || 'info',
+                title: data.title || 'Notification',
+                message: data.message,
+            });
+            setTimeout(() => { this.notifications.shift() }, 5000);
+        } 
+    }" 
+    @notify.window="add($event)"
+    class="fixed bottom-10 right-10 z-[200] flex flex-col gap-3 w-full max-w-sm"
+>
+   </div>
 </html>

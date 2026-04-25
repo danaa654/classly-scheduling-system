@@ -180,43 +180,39 @@ x-data="{
                                         </td>
 
                                         {{-- 2. Actions Logic (Fixes the "Locked" issue) --}}
-                                        <td class="px-6 py-6 text-right space-x-4">
+                                        <td class="px-6 py-6 text-right space-x-4" wire:key="actions-{{ $faculty->id }}">
     @php
         $user = auth()->user();
         $isAdminOrRegistrar = in_array($user->role, ['admin', 'registrar']);
         $isAssocDean = $user->role === 'associate_dean';
-        // Check if user is the Dean or OIC of THIS specific faculty's department
         $isDeptHead = in_array($user->role, ['dean', 'oic']) && ($user->department === $faculty->department);
         $isRejected = $faculty->status === 'rejected';
     @endphp
 
     @if($isAdminOrRegistrar)
-        {{-- Admin/Registrar: Full Control --}}
         <button @click="open = true" wire:click="editFaculty({{ $faculty->id }})" 
-                class="text-blue-600 dark:text-blue-400 font-black text-xs uppercase hover:underline">
+                class="text-blue-600 font-black text-xs uppercase hover:underline">
             Edit
         </button>
+        {{-- Added wire:loading.attr="disabled" to prevent double clicks --}}
         <button wire:click="deleteFaculty({{ $faculty->id }})" 
                 wire:confirm="Permanently delete {{ $faculty->full_name }}?" 
-                class="text-slate-300 dark:text-slate-600 font-black text-xs uppercase hover:text-red-600 transition-colors">
+                wire:loading.attr="disabled"
+                class="text-slate-300 font-black text-xs uppercase hover:text-red-600 transition-colors">
             Delete
         </button>
 
     @elseif(($isAssocDean || $isDeptHead) && $isRejected)
-        {{-- Assoc Dean (All Depts) or Dean/OIC (Own Dept) can delete REJECTED only --}}
         <button wire:click="deleteFaculty({{ $faculty->id }})" 
                 wire:confirm="Remove this rejected application for {{ $faculty->full_name }}?" 
-                class="text-red-500 dark:text-red-400 font-black text-xs uppercase hover:underline">
+                wire:loading.attr="disabled"
+                class="text-red-500 font-black text-xs uppercase hover:underline">
             Delete
         </button>
 
     @else
-        {{-- Non-admins cannot edit/delete approved or pending records --}}
         <div class="flex items-center justify-end gap-1">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 text-slate-400" viewBox="0 0 20 20" fill="currentColor">
-                <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd" />
-            </svg>
-            <span class="text-[9px] text-slate-400 dark:text-slate-600 font-black uppercase italic tracking-tighter">Locked</span>
+            <span class="text-[9px] text-slate-400 font-black uppercase italic tracking-tighter">Locked</span>
         </div>
     @endif
 </td>

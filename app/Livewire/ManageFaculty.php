@@ -372,74 +372,95 @@ if (!$this->isAdminOrRegistrar()) {
 }
     public function deleteFaculty($id)
 {
-    $faculty = Faculty::findOrFail($id);
+    // 1. Locate the faculty or fail gracefully
+    $faculty = \App\Models\Faculty::findOrFail($id);
     $actor = auth()->user();
     
-    // --- PERMISSION GATE ---
+    // --- ROBUST PERMISSION CHECK ---
     $isAdminOrRegistrar = in_array($actor->role, ['admin', 'registrar']);
     $isAssociateDean = ($actor->role === 'associate_dean');
-    // Check if user is the Dean or OIC of the faculty's department
+    // Strict department matching for Dean/OIC
     $isDeptHead = in_array($actor->role, ['dean', 'oic']) && ($faculty->department === $actor->department);
     $isRejected = ($faculty->status === 'rejected');
 
-    // Admin/Registrar = Total Access. Others = Only if record is 'rejected'.
-    if (!$isAdminOrRegistrar && !(($isAssociateDean || $isDeptHead) && $isRejected)) {
+    // Determine if deletion is allowed
+    $canDelete = false;
+    if ($isAdminOrRegistrar) {
+        $canDelete = true; // Admins/Registrars can delete any record
+    } elseif (($isAssociateDean || $isDeptHead) && $isRejected) {
+        $canDelete = true; // Deans/OICs/Assoc Deans can ONLY delete rejected records
+    }
+
+    if (!$canDelete) {
         $this->dispatch('toast', [
             'type' => 'error', 
             'message' => 'Access Denied', 
-            'detail' => 'You do not have permission to delete active records.'
+            'detail' => 'You do not have permission to remove this specific record.'
         ]);
         return;
     }
 
-    // 1. Capture details for logs and notifications
-    $name = $faculty->full_name;
-    $dept = $faculty->department;
-    $status = strtoupper($faculty->status);
-    $actorRole = strtoupper($actor->role); 
+    // 2. Prepare data for logging and notifications
+    $facultyName = $faculty->full_name;
+    $facultyDept = $faculty->department;
+    $previousStatus = strtoupper($faculty->status);
+    $actorInfo = strtoupper($actor->role) . " ({$actor->name})";
 
-    // 2. Database Cleanup
-    \App\Models\FacultyLog::where('faculty_id', $id)->delete();
+    try {
+        // 3. Database Cleanup (Logs related to this faculty)
+        \App\Models\FacultyLog::where('faculty_id', $id)->delete();
 
-    // 3. System Log
-    $this->logAction(
-        null, 
-        'deleted', 
-        "{$actorRole} ({$actor->name}) removed the {$status} faculty: {$name}",
-        $dept
-    );
+        // 4. Record the system action
+        $this->logAction(
+            null, 
+            'deleted', 
+            "{$actorInfo} permanently removed the {$previousStatus} faculty record: {$facultyName}",
+            $facultyDept
+        );
 
-    // 4. Inclusive Notification Flow
-    $recipients = User::query()
-        // Global Leaders
-        ->whereIn('role', ['admin', 'registrar', 'associate_dean'])
-        // Specific Department Leaders (Dean & OIC)
-        ->orWhere(function($q) use ($dept) {
-            $q->where('department', $dept)
-              ->whereIn('role', ['dean', 'oic']);
-        })
-        ->get();
+        // 5. Notify relevant stakeholders
+        $recipients = \App\Models\User::query()
+            ->whereIn('role', ['admin', 'registrar', 'associate_dean'])
+            ->orWhere(function($q) use ($facultyDept) {
+                $q->where('department', $facultyDept)
+                  ->whereIn('role', ['dean', 'oic']);
+            })
+            ->get();
 
-    foreach ($recipients->unique('id') as $recipient) {
-        if ($recipient->id === $actor->id) continue; // Skip the actor
+        foreach ($recipients->unique('id') as $recipient) {
+            // Don't notify the person who performed the deletion
+            if ($recipient->id === $actor->id) continue;
 
-        $recipient->notify(new \App\Notifications\FacultyRequestNotification(
-            $name, 
-            $actor->name, 
-            'deleted'
-        ));
+            $recipient->notify(new \App\Notifications\FacultyRequestNotification(
+                $facultyName, 
+                $actor->name, 
+                'deleted'
+            ));
+        }
+
+        // 6. Perform the final deletion
+        $faculty->delete();
+
+        // 7. UI Feedback & Refresh
+        $this->dispatch('toast', [
+            'type' => 'warning', 
+            'message' => 'Record Deleted', 
+            'detail' => "{$facultyName} has been successfully removed."
+        ]);
+
+        // Refresh the notification center and the current table
+        $this->dispatch('facultyUpdated')->to(\App\Livewire\NotificationCenter::class);
+        
+        // If your table is a separate Livewire component, this ensures it refreshes
+        $this->dispatch('$refresh');
+
+    } catch (\Exception $e) {
+        $this->dispatch('toast', [
+            'type' => 'error',
+            'message' => 'Action Failed',
+            'detail' => 'An error occurred while trying to delete the record.'
+        ]);
     }
-
-    // 5. Final Delete
-    $faculty->delete();
-
-    $this->dispatch('toast', [
-        'type' => 'warning', 
-        'message' => 'Faculty Removed', 
-        'detail' => "{$name} has been removed from the registry."
-    ]);
-
-    $this->dispatch('facultyUpdated')->to(\App\Livewire\NotificationCenter::class);
 }
 
     public function updatedImportFile()

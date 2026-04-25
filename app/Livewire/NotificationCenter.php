@@ -19,6 +19,9 @@ class NotificationCenter extends Component
     #[On('facultyUpdated')]
     #[On('facultyDeleted')] // Catching the new delete events
     #[On('roomImported')]
+    #[On('subjectUpdated')] // Add this for Subjects
+    #[On('notify')]
+    
     public function loadNotifications()
     {
         // Get the latest 10 notifications for the authenticated user
