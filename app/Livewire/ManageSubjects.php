@@ -118,15 +118,17 @@ public function importSubjects()
 
         $rowDept = strtoupper(trim($row[4] ?? ''));
         
+        // Authorization check: Only allow import for their own department unless they are Power Users
         if (!$isPowerUser && $rowDept !== strtoupper($actor->department)) {
             continue; 
         }
 
+        // Capture the first department found in the file to use for the notification target
         if (!$detectedDept && !empty($rowDept)) {
             $detectedDept = $rowDept;
         }
 
-        // Mapping duration and type from CSV
+        // Mapping duration and type from CSV (Handling your specific column logic)
         $col5 = trim($row[5] ?? '');
         $col6 = trim($row[6] ?? '');
         $isCol5Duration = str_contains(strtolower($col5), 'hrs');
@@ -149,6 +151,7 @@ public function importSubjects()
     fclose($file);
 
     if ($count > 0) {
+        // Determine final department label for logs and notifications
         $targetDept = !empty($this->selectedDept) ? $this->selectedDept : ($detectedDept ?? $actor->department ?? 'General');
 
         // 1. Sidebar Activity Log
@@ -156,44 +159,54 @@ public function importSubjects()
             'user_id'     => $actor->id,
             'action'      => 'Import',
             'module'      => 'Subjects',
-            'description' => "Successfully imported {$count} subjects into the {$targetDept} department.",
+            'description' => "Successfully batch-imported {$count} subjects into the {$targetDept} department.",
         ]);
 
-        // 2. BROADCAST NOTIFICATION: Send to other admins, exclude the current user
-        $recipients = \App\Models\User::whereIn('role', ['admin', 'registrar', 'associate_dean'])
-            ->where('id', '!=', $actor->id)
+        // 2. SMART SCOPED NOTIFICATION (The "Hierarchical Flow")
+        // Logic: Notify Global Staff AND the specific Dean/OIC of the target department
+        $recipients = \App\Models\User::where('id', '!=', $actor->id)
+            ->where(function($query) use ($targetDept) {
+                $query->whereIn('role', ['admin', 'registrar', 'associate_dean']) // Global oversight
+                      ->orWhere(function($q) use ($targetDept) {
+                          $q->whereIn('role', ['dean', 'oic']) // Departmental Heads
+                            ->where('department', $targetDept); // Only for the affected department
+                      });
+            })
             ->get();
 
-        \Illuminate\Support\Facades\Notification::send($recipients, new \App\Notifications\SubjectUpdatedNotification(
-            (object)[
-                'subject_code' => 'BATCH IMPORT', 
-                'subject_description' => "{$count} Subjects added to {$targetDept}"
-            ], 
-            'subject_imported' // Corrected type name
-        ));
+        if ($recipients->count() > 0) {
+            \Illuminate\Support\Facades\Notification::send($recipients, new \App\Notifications\SubjectUpdatedNotification(
+                (object)[
+                    'subject_code' => 'BATCH IMPORT', 
+                    'subject_description' => "{$count} Subjects synchronized for {$targetDept}"
+                ], 
+                'subject_imported' 
+            ));
+        }
 
-        // 3. UI FEEDBACK: Popup notification (Top-Right)
+        // 3. UI FEEDBACK: Global Slide-in Notify
         $this->dispatch('notify', [
-            'type' => 'success', // Use 'success' for blue/green styling instead of room_import
+            'type' => 'success', 
             'title' => 'CATALOG SYNCED',
-            'message' => "successfully batch-imported {$count} subjects.",
+            'message' => "Successfully batch-imported {$count} subjects.",
             'sender_name' => $actor->name
         ]);
 
-        // 4. REFRESH: Tell the Bell Icon to update for everyone else
+        // 4. REFRESH: Sync Bell Icon and UI for everyone else
         $this->dispatch('subjectUpdated');
 
-        // 5. Toast Feedback
+        // 5. Toast Feedback for the person who uploaded the file
         $this->dispatch('toast', [
             'type' => 'success', 
             'message' => 'Import Complete', 
             'detail' => "{$count} subjects added/updated for {$targetDept}."
         ]);
+
     } else {
         $this->dispatch('toast', [
             'type' => 'error', 
             'message' => 'Import Failed', 
-            'detail' => "No valid subjects found."
+            'detail' => "No valid subjects found or unauthorized department access."
         ]);
     }
 
@@ -235,14 +248,14 @@ public function importSubjects()
         $this->showModal = true;
     }
 
-    public function saveSubject()
+   public function saveSubject()
 {
     $user = auth()->user();
     $userRole = strtolower($user->role ?? '');
     $powerRoles = ['admin', 'registrar', 'associate_dean'];
     $isPowerUser = in_array($userRole, $powerRoles);
 
-    // 1. Logic & Security: Force department for non-power users
+    // 1. Logic & Security: Force department for non-power users (Dean/OIC)
     if (!$isPowerUser) {
         $this->department = $user->department;
     }
@@ -281,10 +294,17 @@ public function importSubjects()
         ]
     );
 
-    // 4. BROADCAST NOTIFICATION: Send to OTHERS only
-    // This finds all power users EXCEPT the person currently saving
-    $recipients = \App\Models\User::whereIn('role', ['admin', 'registrar', 'associate_dean'])
-        ->where('id', '!=', $user->id)
+    // 4. SMART SCOPED NOTIFICATION
+    // Logic: Notify Global Tier (Admin/Reg/Assoc Dean) AND Department Tier (Dean/OIC of this dept)
+    // Constraint: Do NOT notify the current user ($user->id)
+    $recipients = \App\Models\User::where('id', '!=', $user->id)
+        ->where(function($query) use ($deptUpper) {
+            $query->whereIn('role', ['admin', 'registrar', 'associate_dean']) // Global Oversight
+                  ->orWhere(function($q) use ($deptUpper) {
+                      $q->whereIn('role', ['dean', 'oic']) // Department Head (treating Dean and OIC as same tier)
+                        ->where('department', $deptUpper); // Only for their department
+                  });
+        })
         ->get();
 
     if ($recipients->count() > 0) {
@@ -300,21 +320,21 @@ public function importSubjects()
         'action'      => $this->isEditMode ? 'Update' : 'Add',
         'module'      => 'Subjects',
         'description' => $this->isEditMode 
-            ? "Updated subject {$subject->subject_code} in the {$this->department} department."
-            : "Manually added {$subject->subject_code} to the {$this->department} catalog.",
+            ? "Updated subject {$subject->subject_code} in the {$deptUpper} department."
+            : "Manually added {$subject->subject_code} to the {$deptUpper} catalog.",
     ]);
 
-    // 6. UI FEEDBACK (Toast & Real-time Refresh)
+    // 6. UI FEEDBACK
     $this->showModal = false;
 
-    // Trigger the Toast (immediate popup for the person doing the work)
+    // Local Toast for the current user
     $this->dispatch('toast', [
         'type'    => 'success', 
         'message' => $this->isEditMode ? 'Subject Updated' : 'Subject Created', 
-        'detail'  => "{$subject->subject_code} is now active in the {$this->department} department."
+        'detail'  => "{$subject->subject_code} is now active in the {$deptUpper} department."
     ]);
 
-    // Trigger the Global Notification (the top-right slide-in)
+    // Global Notify slide-in
     $this->dispatch('notify', [
         'type'    => 'success', 
         'title'   => $this->isEditMode ? 'CATALOG UPDATED' : 'NEW SUBJECT ADDED', 
@@ -322,7 +342,7 @@ public function importSubjects()
         'sender_name' => $user->name
     ]);
 
-    // This triggers the #[On('subjectUpdated')] in NotificationCenter.php for everyone
+    // Trigger real-time refresh for components listening for 'subjectUpdated'
     $this->dispatch('subjectUpdated');
 
     // 7. Cleanup
@@ -347,54 +367,67 @@ public function updatedSelectAll($value)
         }
     }
 
-    public function deleteSelected()
+  /**
+ * BULK DELETE SELECTED SUBJECTS
+ */
+public function deleteSelected()
 {
     $count = count($this->selectedSubjects);
     $user = auth()->user();
     
     if ($count > 0) {
+        // Identify the department of the subjects being deleted for scoped notification
+        // We grab the department from the first selected subject as the target
+        $sampleSubject = \App\Models\Subject::whereIn('id', $this->selectedSubjects)->first();
+        $targetDept = $sampleSubject ? $sampleSubject->department : ($user->department ?? 'General');
+
         // 1. Database Operation
         \App\Models\Subject::whereIn('id', $this->selectedSubjects)->delete();
 
         // 2. Sidebar Activity Log
         \App\Models\Activity::create([
-            'user_id' => $user->id,
-            'action' => 'Delete',
-            'module' => 'Subjects',
-            'description' => "Bulk removed {$count} subjects from the central catalog.",
+            'user_id'     => $user->id,
+            'action'      => 'Delete',
+            'module'      => 'Subjects',
+            'description' => "Bulk removed {$count} subjects from the {$targetDept} catalog.",
         ]);
 
-        // 3. BROADCAST NOTIFICATION: Send to OTHERS only
-        $recipients = \App\Models\User::whereIn('role', ['admin', 'registrar', 'associate_dean'])
-            ->where('id', '!=', $user->id)
-            ->get();
+        // 3. SMART SCOPED NOTIFICATION (Hierarchical Flow)
+        $recipients = \App\Models\User::where('id', '!=', $user->id)
+            ->where(function($query) use ($targetDept) {
+                $query->whereIn('role', ['admin', 'registrar', 'associate_dean']) // Global oversight
+                      ->orWhere(function($q) use ($targetDept) {
+                          $q->whereIn('role', ['dean', 'oic']) // Department Head
+                            ->where('department', $targetDept); // Only notify the affected dept head
+                      });
+            })->get();
 
         if ($recipients->count() > 0) {
             \Illuminate\Support\Facades\Notification::send($recipients, new \App\Notifications\SubjectUpdatedNotification(
                 (object)[
                     'subject_code' => 'BATCH PURGE', 
-                    'subject_description' => "Multiple Subject Records"
+                    'subject_description' => "{$count} Records removed from {$targetDept}"
                 ], 
                 'deleted' 
             ));
         }
 
-        // 4. UI FEEDBACK: Global Notification (Top Right - immediate feedback for YOU)
+        // 4. UI FEEDBACK: Global Slide-in
         $this->dispatch('notify', [
-            'type' => 'error', 
-            'title' => 'REGISTRY PURGED', 
-            'message' => "Successfully removed {$count} subjects from the database.",
+            'type'        => 'error', 
+            'title'       => 'REGISTRY PURGED', 
+            'message'     => "Successfully removed {$count} subjects from the database.",
             'sender_name' => $user->name
         ]);
 
-        // 5. UI FEEDBACK: Toast (Bottom Right)
+        // 5. UI FEEDBACK: Local Toast
         $this->dispatch('toast', [
-            'type' => 'success', 
+            'type'    => 'success', 
             'message' => 'Batch Deleted', 
-            'detail' => "{$count} subjects successfully removed."
+            'detail'  => "{$count} subjects successfully removed."
         ]);
 
-        // 6. REFRESH: Sync UI for everyone
+        // 6. REFRESH: Sync for everyone
         $this->dispatch('subjectUpdated');
 
         // 7. Cleanup
@@ -402,17 +435,27 @@ public function updatedSelectAll($value)
     }
 }
 
+/**
+ * DELETE SINGLE SUBJECT
+ */
 public function deleteSubject($id)
 {
     $user = auth()->user();
     $subject = \App\Models\Subject::findOrFail($id);
     $subjectCode = $subject->subject_code;
     $subjectDesc = $subject->description;
+    $targetDept = $subject->department;
 
-    // 1. BROADCAST NOTIFICATION: Send to OTHERS only
-    $recipients = \App\Models\User::whereIn('role', ['admin', 'registrar', 'associate_dean'])
-        ->where('id', '!=', $user->id)
-        ->get();
+    // 1. SMART SCOPED NOTIFICATION (Hierarchical Flow)
+    // We send this BEFORE deletion so the notification can still access subject data if needed
+    $recipients = \App\Models\User::where('id', '!=', $user->id)
+        ->where(function($query) use ($targetDept) {
+            $query->whereIn('role', ['admin', 'registrar', 'associate_dean'])
+                  ->orWhere(function($q) use ($targetDept) {
+                      $q->whereIn('role', ['dean', 'oic'])
+                        ->where('department', $targetDept);
+                  });
+        })->get();
 
     if ($recipients->count() > 0) {
         \Illuminate\Support\Facades\Notification::send($recipients, new \App\Notifications\SubjectUpdatedNotification(
@@ -426,28 +469,28 @@ public function deleteSubject($id)
 
     // 3. Activity Log
     \App\Models\Activity::create([
-        'user_id' => $user->id,
-        'action' => 'Delete',
-        'module' => 'Subjects',
-        'description' => "Manually removed subject {$subjectCode} from the catalog.",
+        'user_id'     => $user->id,
+        'action'      => 'Delete',
+        'module'      => 'Subjects',
+        'description' => "Manually removed subject {$subjectCode} from the {$targetDept} catalog.",
     ]);
 
-    // 4. UI FEEDBACK: Global Notification
+    // 4. UI FEEDBACK: Global Slide-in
     $this->dispatch('notify', [
-        'type' => 'error', 
-        'title' => 'SUBJECT REMOVED', 
-        'message' => "{$subjectCode} has been deleted from the registry.",
+        'type'        => 'error', 
+        'title'       => 'SUBJECT REMOVED', 
+        'message'     => "{$subjectCode} has been deleted from the registry.",
         'sender_name' => $user->name
     ]);
 
-    // 5. UI FEEDBACK: Toast
+    // 5. UI FEEDBACK: Local Toast
     $this->dispatch('toast', [
-        'type' => 'warning', 
+        'type'    => 'warning', 
         'message' => 'Subject Deleted', 
-        'detail' => "{$subjectCode} - {$subjectDesc} removed."
+        'detail'  => "{$subjectCode} - {$subjectDesc} removed."
     ]);
 
-    // 6. REFRESH: Bell Icon for teammates
+    // 6. REFRESH: Sync Bell Icon and UI
     $this->dispatch('subjectUpdated');
 }
 
@@ -458,6 +501,32 @@ public function deleteSubject($id)
         $this->selectedDept = ''; // Admins start with "All"
     }
 }
+
+private function broadcastSubjectChange($subjectData, $actionType, $targetDept)
+{
+    $actor = auth()->user();
+
+    // 1. Identify recipients based on the 'Hybrid' flow
+    $recipients = \App\Models\User::where('id', '!=', $actor->id) // Rule: Skip the person who did the action
+        ->where(function($query) use ($targetDept) {
+            // Tier 1: Global Authorities (Always get notified)
+            $query->whereIn('role', ['admin', 'registrar', 'associate_dean']) 
+                  // Tier 2: Departmental Heads (Dean or OIC)
+                  ->orWhere(function($q) use ($targetDept) {
+                      $q->whereIn('role', ['dean', 'oic'])
+                        ->where('department', $targetDept); // Must match the subject's dept
+                  });
+        })->get();
+
+    // 2. Dispatch to the Notifications table
+    if ($recipients->count() > 0) {
+        \Illuminate\Support\Facades\Notification::send(
+            $recipients, 
+            new \App\Notifications\SubjectUpdatedNotification($subjectData, $actionType)
+        );
+    }
+}
+
 public function render()
 {
     $user = auth()->user();

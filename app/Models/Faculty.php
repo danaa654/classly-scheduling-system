@@ -15,6 +15,7 @@ class Faculty extends Model
      * @var array<int, string>
      */
     protected $fillable = [
+        'user_id', // Add this to link to the Users table
         'employee_id', 
         'full_name', 
         'email', 
@@ -24,9 +25,20 @@ class Faculty extends Model
         'rejection_reason',
     ];
 
+    /**
+     * Get the user account associated with this faculty member.
+     */
+    public function user()
+    {
+        // This is the missing link that was causing your error!
+        return $this->belongsTo(User::class);
+    }
+
+    /**
+     * A faculty member can be assigned to many subjects (schedules).
+     */
     public function subjects()
-{
-    // A faculty member can be assigned to many subjects (schedules)
-    return $this->hasMany(Subject::class); 
-}
+    {
+        return $this->hasMany(Subject::class); 
+    }
 }
