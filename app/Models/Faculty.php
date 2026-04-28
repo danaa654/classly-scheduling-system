@@ -29,10 +29,9 @@ class Faculty extends Model
      * Get the user account associated with this faculty member.
      */
     public function user()
-    {
-        // This is the missing link that was causing your error!
-        return $this->belongsTo(User::class);
-    }
+{
+    return $this->belongsTo(User::class);
+}
 
     /**
      * A faculty member can be assigned to many subjects (schedules).

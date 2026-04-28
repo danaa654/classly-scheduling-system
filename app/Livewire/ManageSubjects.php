@@ -9,6 +9,7 @@ use Livewire\WithPagination;
 use Illuminate\Support\Facades\Notification;
 use App\Notifications\SubjectUpdatedNotification;
 use App\Models\Subject;
+use App\Models\Activity;
 
 class ManageSubjects extends Component
 {
@@ -18,13 +19,14 @@ class ManageSubjects extends Component
     public $showModal = false;
     public $bulkOpen = false;
     public $isEditMode = false;
+    public $selectedSection = '';
     public $search = '';
     public $selectedDept = '';
     public $selectedYear = '';
     public $selectedMajor = '';
 
     // Form Fields
-    public $subjectId, $edp_code, $subject_code, $description, $department, $units;
+    public $subjectId, $edp_code, $subject_code, $section, $description, $department, $units;
     public $type = 'Major';
     public $duration_hours = 3;
 
@@ -33,12 +35,34 @@ class ManageSubjects extends Component
     public $previewData = [];
     public $selectedSubjects = [];
     public $selectAll = false;
+    public $showDuplicateConfirmModal = false;
+    public $duplicateCandidateId = null;
+    
+    
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
     public function updatedSearch() { $this->resetPage(); }
-    public function updatedSelectedDept() { $this->resetPage(); }
+    public function updatedSelectedDept($value)
+    {
+        $this->selectedMajor = '';
+        $this->resetPage();
+    }
 
+    public function updatedSelectedYear()
+    {
+        $this->resetPage();
+    }
+
+    public function updatedSelectedMajor()
+    {
+        $this->resetPage();
+    }
+
+    public function updatedSelectedSection()
+    {
+        $this->resetPage();
+    }
     
 public function updatedImportFile()
 {
@@ -69,7 +93,7 @@ public function updatedImportFile()
 
     // 2. STRICT SUBJECT HEADER VALIDATION
     // These must match your Subject database schema exactly
-    $expected = ['edp_code', 'subject_code', 'description', 'units', 'department', 'duration_hours', 'type'];
+    $expected = ['edp_code', 'subject_code', 'section', 'description', 'units', 'department', 'duration_hours', 'type'];
     
     if ($normalizedHeader !== $expected) {
         $this->abortImport('Invalid Subject Template');
@@ -77,7 +101,15 @@ public function updatedImportFile()
     }
 
     // 3. SUCCESS: Preview the data
-    $this->previewData = array_slice($data, 0, 10);
+    $this->previewData = collect(array_slice($data, 0, 10))->map(function ($row) {
+    $edp = strtoupper(trim($row[0] ?? ''));
+    $exists = \App\Models\Subject::where('edp_code', $edp)->exists();
+    return [
+        'edp_code' => $edp,
+        'subject' => $row[1] ?? '',
+        'exists' => $exists
+    ];
+})->toArray();
 }
 
 /**
@@ -116,42 +148,56 @@ public function importSubjects()
         if ($header) { $header = false; continue; }
         if (empty($row[0])) continue;
 
-        $rowDept = strtoupper(trim($row[4] ?? ''));
+        // --- Column Mapping based on Template ---
+        // 0: edp_code, 1: subject_code, 2: section, 3: description, 
+        // 4: units, 5: department, 6: duration, 7: type
+        $rowDept    = strtoupper(trim($row[5] ?? ''));
+        $rowSection = strtoupper(trim($row[2] ?? 'A'));
         
-        // Authorization check: Only allow import for their own department unless they are Power Users
+        // Authorization check: Deans/OICs can only import their own department
         if (!$isPowerUser && $rowDept !== strtoupper($actor->department)) {
             continue; 
         }
 
-        // Capture the first department found in the file to use for the notification target
+        // Detect the department for notification targeting
         if (!$detectedDept && !empty($rowDept)) {
             $detectedDept = $rowDept;
         }
 
-        // Mapping duration and type from CSV (Handling your specific column logic)
-        $col5 = trim($row[5] ?? '');
-        $col6 = trim($row[6] ?? '');
-        $isCol5Duration = str_contains(strtolower($col5), 'hrs');
-        $rawDuration = $isCol5Duration ? $col5 : $col6;
-        $rawType = $isCol5Duration ? $col6 : $col5;
+        $rawDuration = trim($row[6] ?? '3hrs');
+        $rawType     = trim($row[7] ?? 'Major');
+        $rawUnits = (int)$row[4];
+        $clampedUnits = max(3, min(5, $rawUnits));
 
-        \App\Models\Subject::updateOrCreate(
-            ['edp_code' => strtoupper(trim($row[0]))],
-            [
-                'subject_code'   => strtoupper(trim($row[1])),
-                'description'    => trim($row[2]),
-                'units'          => (int)($row[3]),
-                'department'     => $rowDept,
-                'duration_hours' => (int) filter_var($rawDuration, FILTER_SANITIZE_NUMBER_INT) ?: 3,
-                'type'           => !empty($rawType) ? ucfirst(strtolower($rawType)) : 'Major',
-            ]
-        );
+        $edpCode = strtoupper(trim($row[0]));
+$section = strtoupper(trim($row[2] ?? 'A'));
+
+// Check if subject already exists
+$exists = \App\Models\Subject::where('edp_code', $edpCode)
+    ->where('section', $section)
+    ->exists();
+
+if ($exists) {
+    // Log warning but continue with next row
+    \Log::warning("Subject {$edpCode} Section {$section} already exists. Skipping import.");
+    continue;
+}
+
+\App\Models\Subject::create([
+    'edp_code'       => $edpCode,
+    'subject_code'   => strtoupper(trim($row[1])),
+    'section'        => $section,
+    'description'    => trim($row[3]),
+    'units'          => $clampedUnits,
+    'department'     => $rowDept,
+    'duration_hours' => (int) filter_var($rawDuration, FILTER_SANITIZE_NUMBER_INT) ?: 3,
+    'type'           => ucfirst(strtolower($rawType)),
+]);
         $count++;
     }
     fclose($file);
 
     if ($count > 0) {
-        // Determine final department label for logs and notifications
         $targetDept = !empty($this->selectedDept) ? $this->selectedDept : ($detectedDept ?? $actor->department ?? 'General');
 
         // 1. Sidebar Activity Log
@@ -162,17 +208,15 @@ public function importSubjects()
             'description' => "Successfully batch-imported {$count} subjects into the {$targetDept} department.",
         ]);
 
-        // 2. SMART SCOPED NOTIFICATION (The "Hierarchical Flow")
-        // Logic: Notify Global Staff AND the specific Dean/OIC of the target department
+        // 2. SMART SCOPED NOTIFICATION (Hierarchical Flow)
         $recipients = \App\Models\User::where('id', '!=', $actor->id)
             ->where(function($query) use ($targetDept) {
-                $query->whereIn('role', ['admin', 'registrar', 'associate_dean']) // Global oversight
+                $query->whereIn('role', ['admin', 'registrar', 'associate_dean'])
                       ->orWhere(function($q) use ($targetDept) {
-                          $q->whereIn('role', ['dean', 'oic']) // Departmental Heads
-                            ->where('department', $targetDept); // Only for the affected department
+                          $q->whereIn('role', ['dean', 'oic'])
+                            ->where('department', $targetDept);
                       });
-            })
-            ->get();
+            })->get();
 
         if ($recipients->count() > 0) {
             \Illuminate\Support\Facades\Notification::send($recipients, new \App\Notifications\SubjectUpdatedNotification(
@@ -184,29 +228,29 @@ public function importSubjects()
             ));
         }
 
-        // 3. UI FEEDBACK: Global Slide-in Notify
+        // 3. UI FEEDBACK: Global Slide-in
         $this->dispatch('notify', [
-            'type' => 'success', 
-            'title' => 'CATALOG SYNCED',
-            'message' => "Successfully batch-imported {$count} subjects.",
+            'type'        => 'success', 
+            'title'       => 'CATALOG SYNCED',
+            'message'     => "Successfully batch-imported {$count} subjects.",
             'sender_name' => $actor->name
         ]);
 
-        // 4. REFRESH: Sync Bell Icon and UI for everyone else
+        // 4. REFRESH: Sync UI components
         $this->dispatch('subjectUpdated');
 
-        // 5. Toast Feedback for the person who uploaded the file
+        // 5. Local Toast
         $this->dispatch('toast', [
-            'type' => 'success', 
+            'type'    => 'success', 
             'message' => 'Import Complete', 
-            'detail' => "{$count} subjects added/updated for {$targetDept}."
+            'detail'  => "{$count} subjects added/updated for {$targetDept}."
         ]);
 
     } else {
         $this->dispatch('toast', [
-            'type' => 'error', 
+            'type'    => 'error', 
             'message' => 'Import Failed', 
-            'detail' => "No valid subjects found or unauthorized department access."
+            'detail'  => "No valid subjects found or unauthorized department access."
         ]);
     }
 
@@ -217,6 +261,7 @@ public function importSubjects()
     $this->resetValidation();
     $this->resetExcept(['selectedDept', 'search', 'selectedYear', 'selectedMajor']);
     $this->isEditMode = false;
+    $this->units = 3;
 
     $user = auth()->user();
     $userRole = strtolower($user->role);
@@ -239,8 +284,9 @@ public function importSubjects()
         $this->subjectId = $subject->id;
         $this->edp_code = $subject->edp_code;
         $this->subject_code = $subject->subject_code;
+        $this->section = $subject->section;
         $this->description = $subject->description;
-        $this->units = $subject->units;
+        $this->units = 3;
         $this->type = $subject->type ?? 'Major';
         $this->duration_hours = $subject->duration_hours ?? 3;
         $this->department = $subject->department;
@@ -248,44 +294,242 @@ public function importSubjects()
         $this->showModal = true;
     }
 
-   public function saveSubject()
+    public function updatedUnits($value)
+{
+    // Ensure it's a number; if empty or non-numeric, default to 3
+    if (!is_numeric($value) || $value < 3) {
+        $this->units = 3;
+    } elseif ($value > 5) {
+        $this->units = 5;
+    }
+}
+
+public function getEdpMajorMismatchProperty()
+{
+    if (empty($this->edp_code) || empty($this->subject_code)) {
+        return false;
+    }
+
+    $edpParts = explode('-', strtoupper($this->edp_code));
+    $edpMajor = $edpParts[1] ?? '';
+    $subjectCodeUpper = strtoupper($this->subject_code);
+
+    return !str_starts_with($subjectCodeUpper, $edpMajor);
+}
+
+// Available majors mapping
+private $majorsByDept = [
+    'CCS' => ['IT' => 'Information Technology', 'ACT' => 'Accounting'],
+    'SHTM' => ['HM' => 'Hospitality', 'TM' => 'Tourism'],
+    'COC' => ['FB' => 'Forensic Biology', 'LD' => 'Lie Detection', 'QD' => 'Questioned Documents'],
+    'CTE' => ['ED' => 'Education'],
+];
+
+public $selectedMajorCode = ''; // New property for major selection
+
+// Listen for major changes
+public function updatedSelectedMajorCode($value)
+{
+    if (empty($value) || empty($this->department)) {
+        $this->edp_code = '';
+        $this->subject_code = '';
+        return;
+    }
+
+    $deptUpper = strtoupper($this->department);
+    $majorUpper = strtoupper($value);
+
+    // Auto-populate EDP and Subject code prefixes
+    $this->edp_code = "{$deptUpper}-{$majorUpper}-";
+    $this->subject_code = "{$majorUpper}";
+}
+
+public function updatedDepartment($value)
+{
+    // Reset major when department changes
+    $this->selectedMajorCode = '';
+    $this->edp_code = '';
+    $this->subject_code = '';
+}
+
+// Get majors for current department
+public function getAvailableMajorsProperty()
+{
+    if (empty($this->department)) {
+        return [];
+    }
+
+    $dept = strtoupper($this->department);
+    return $this->majorsByDept[$dept] ?? [];
+}
+
+public function updatedEdpCode($value)
+{
+    $value = strtoupper(trim($value));
+    // Auto-update subject_code if major and numeric part are detectable
+    if (!empty($this->selectedMajorCode)) {
+        $major = strtoupper($this->selectedMajorCode);
+        // Match pattern like CCS-ACT-101-C or CCS-ACT-101
+        if (preg_match('/^[A-Z]+-[A-Z]+-(\d+)/', $value, $matches)) {
+            $number = $matches[1];
+            $this->subject_code = "{$major}{$number}";
+        }
+    }
+}
+
+public function updatedSubjectCode($value)
+{
+    $value = strtoupper(trim($value));
+    if (!empty($this->selectedMajorCode) && !empty($this->department)) {
+        $dept = strtoupper($this->department);
+        $major = strtoupper($this->selectedMajorCode);
+        // Extract numeric part from subject code (e.g., ACT101 → 101)
+        if (preg_match("/^{$major}(\d+)/i", $value, $matches)) {
+            $number = $matches[1];
+            // If section exists, include it; otherwise default to A
+            $section = strtoupper($this->section ?: 'A');
+            $this->edp_code = "{$dept}-{$major}-{$number}-{$section}";
+        }
+    }
+}
+
+
+public $showDuplicateModal = false;
+
+public function saveSubject()
 {
     $user = auth()->user();
     $userRole = strtolower($user->role ?? '');
     $powerRoles = ['admin', 'registrar', 'associate_dean'];
     $isPowerUser = in_array($userRole, $powerRoles);
 
-    // 1. Logic & Security: Force department for non-power users (Dean/OIC)
+    // 1. Enforce Department for non-power users
     if (!$isPowerUser) {
         $this->department = $user->department;
     }
 
     $edpUpper = strtoupper($this->edp_code);
+    $sectionUpper = strtoupper($this->section);
     $deptUpper = strtoupper($this->department);
+    $subjectCodeUpper = strtoupper($this->subject_code);
 
-    // EDP Code Validation (Specific to your institution's rule)
-    if (!str_starts_with($edpUpper, $deptUpper)) {
-        $this->addError('department', "Mismatch: EDP Code '{$edpUpper}' does not belong to {$deptUpper}.");
+    // 2. Initial Validation
+    $this->validate([
+        'edp_code'       => 'required',
+        'subject_code'   => 'required',
+        'section'        => 'required|max:10',
+        'department'     => 'required',
+    ]);
+
+    // 3. Extract department and major from EDP code
+    // Format: CCS-ACT-101-B -> [CCS, ACT, 101, B]
+    $edpParts = explode('-', $edpUpper);
+    
+    if (count($edpParts) < 3) {
+        $this->addError('edp_code', "Invalid EDP Code format. Expected: DEPT-MAJOR-YEAR-SECTION");
+        return;
+    }
+
+    $edpDept = $edpParts[0];
+    $edpMajor = $edpParts[1];
+
+    // 4. Department-EDP Mismatch Check
+    if ($edpDept !== $deptUpper) {
+        $this->addError('edp_code', "Mismatch: EDP Code '{$edpUpper}' belongs to {$edpDept}, not {$deptUpper}.");
         return; 
     }
 
-    // 2. Validation
+    // 5. Subject Code-Major Mismatch Check
+    // Subject code should start with the major from EDP (e.g., ACT101 starts with ACT)
+    if (!str_starts_with($subjectCodeUpper, $edpMajor)) {
+        $this->addError('subject_code', "Mismatch: Subject Code '{$subjectCodeUpper}' should start with {$edpMajor} to match EDP Code '{$edpUpper}'.");
+        return;
+    }
+
+    // 6. Section Validation - Check if section is sequential (ONLY for new subjects)
+    if (!$this->isEditMode) {
+        $existingSections = \App\Models\Subject::where('subject_code', $subjectCodeUpper)
+            ->pluck('section')
+            ->map(function($sec) {
+                return strtoupper($sec);
+            })
+            ->sort()
+            ->values()
+            ->toArray();
+
+        if (!empty($existingSections)) {
+            $validSections = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z'];
+            
+            $lastSection = end($existingSections);
+            $lastIndex = array_search($lastSection, $validSections);
+            
+            if ($lastIndex !== false) {
+                $expectedNextSection = $validSections[$lastIndex + 1] ?? null;
+                
+                if ($expectedNextSection && $sectionUpper !== $expectedNextSection) {
+                    $this->addError('section', "Invalid section '{$sectionUpper}'. Existing sections: " . implode(', ', $existingSections) . ". Next section must be '{$expectedNextSection}'.");
+                    return;
+                }
+            }
+        }
+    }
+
+    // 7. Check for duplicate EDP code + Section (only when creating, not editing)
+    $duplicate = \App\Models\Subject::where('edp_code', $edpUpper)
+        ->where('section', $sectionUpper)
+        ->when($this->isEditMode, function($q) {
+            $q->where('id', '!=', $this->subjectId);
+        })
+        ->first();
+
+    if ($duplicate && !$this->isEditMode) {
+        $this->showDuplicateModal = true;
+        return;
+    }
+
+    $this->executeSave();
+}
+public function executeSave()
+{
+    $user = auth()->user();
+    $deptUpper = strtoupper($this->department);
+    $edpUpper = strtoupper($this->edp_code);
+    $subjectCodeUpper = strtoupper($this->subject_code);
+
+    // Re-validate department matches EDP code
+    $edpParts = explode('-', $edpUpper);
+    $edpDept = $edpParts[0];
+    $edpMajor = $edpParts[1] ?? '';
+
+    if ($edpDept !== $deptUpper) {
+        $this->addError('edp_code', "Mismatch: EDP Code belongs to {$edpDept}, not {$deptUpper}.");
+        return;
+    }
+
+    if (!str_starts_with($subjectCodeUpper, $edpMajor)) {
+        $this->addError('subject_code', "Subject Code should start with {$edpMajor}.");
+        return;
+    }
+
+    // 1. Full Validation
     $this->validate([
-        'edp_code'       => 'required|unique:subjects,edp_code,' . $this->subjectId,
+        'edp_code'       => 'required',
         'subject_code'   => 'required',
+        'section'        => 'required|max:10',
         'description'    => 'required',
         'department'     => 'required',
-        'units'          => 'required|numeric',
+        'units'          => 'required|integer|min:3|max:5',
         'type'           => 'required|in:Major,Minor',
         'duration_hours' => 'required|numeric|min:1|max:10',
     ]);
 
-    // 3. Database Operation
+    // 2. Database Operation
     $subject = \App\Models\Subject::updateOrCreate(
         ['id' => $this->subjectId],
         [
             'edp_code'       => $edpUpper,
-            'subject_code'   => strtoupper($this->subject_code),
+            'subject_code'   => $subjectCodeUpper,
+            'section'        => strtoupper($this->section),
             'description'    => $this->description,
             'units'          => $this->units,
             'type'           => $this->type,
@@ -294,82 +538,290 @@ public function importSubjects()
         ]
     );
 
-    // 4. SMART SCOPED NOTIFICATION
-    // Logic: Notify Global Tier (Admin/Reg/Assoc Dean) AND Department Tier (Dean/OIC of this dept)
-    // Constraint: Do NOT notify the current user ($user->id)
-    $recipients = \App\Models\User::where('id', '!=', $user->id)
-        ->where(function($query) use ($deptUpper) {
-            $query->whereIn('role', ['admin', 'registrar', 'associate_dean']) // Global Oversight
-                  ->orWhere(function($q) use ($deptUpper) {
-                      $q->whereIn('role', ['dean', 'oic']) // Department Head (treating Dean and OIC as same tier)
-                        ->where('department', $deptUpper); // Only for their department
-                  });
-        })
-        ->get();
+    // 3. Activity Logging & Notifications
+    $this->logActivityAndNotify($subject, $user, $deptUpper);
 
-    if ($recipients->count() > 0) {
-        \Illuminate\Support\Facades\Notification::send($recipients, new \App\Notifications\SubjectUpdatedNotification(
-            $subject, 
-            $this->isEditMode ? 'updated' : 'created'
-        ));
-    }
+    // 4. UI Reset
+    $this->showDuplicateModal = false;
+    $this->showModal = false;
 
-    // 5. DETAILED ACTIVITY LOGGING (Sidebar)
+    $this->dispatch('toast', [
+        'type'    => 'success', 
+        'message' => $this->isEditMode ? 'Subject Updated' : 'Subject Created', 
+        'detail'  => "{$subject->subject_code} is now synchronized."
+    ]);
+
+    $this->dispatch('subjectUpdated');
+    $this->reset(['edp_code', 'subject_code', 'section', 'description', 'units', 'type', 'duration_hours', 'department', 'subjectId']);
+}
+
+private function logActivityAndNotify($subject, $user, $deptUpper)
+{
     \App\Models\Activity::create([
         'user_id'     => $user->id,
         'action'      => $this->isEditMode ? 'Update' : 'Add',
         'module'      => 'Subjects',
         'description' => $this->isEditMode 
-            ? "Updated subject {$subject->subject_code} in the {$deptUpper} department."
-            : "Manually added {$subject->subject_code} to the {$deptUpper} catalog.",
+            ? "Updated {$subject->subject_code} in {$deptUpper}."
+            : "Manually added {$subject->subject_code} to {$deptUpper}.",
     ]);
 
-    // 6. UI FEEDBACK
+    // Notification Logic (Your existing recipient logic)
+    $recipients = \App\Models\User::where('id', '!=', $user->id)
+        ->where(function($query) use ($deptUpper) {
+            $query->whereIn('role', ['admin', 'registrar', 'associate_dean'])
+                  ->orWhere(function($q) use ($deptUpper) {
+                      $q->whereIn('role', ['dean', 'oic'])->where('department', $deptUpper);
+                  });
+        })->get();
+
+    if ($recipients->count() > 0) {
+        \Illuminate\Support\Facades\Notification::send($recipients, 
+            new \App\Notifications\SubjectUpdatedNotification($subject, $this->isEditMode ? 'updated' : 'created')
+        );
+    }
+}
+
+public function duplicateSubject($id)
+{
+    $subject = \App\Models\Subject::findOrFail($id);
+
+    // Detect next section letter
+    $currentSection = strtoupper($subject->section ?? 'A');
+    
+    if ($currentSection === 'Z') {
+        $nextSection = 'AA';
+    } elseif ($currentSection === 'AA') {
+        $nextSection = 'AB';
+    } else {
+        $nextSection = chr(ord($currentSection) + 1);
+    }
+
+    // If the next section already exists, show warning
+    $parts = explode('-', $subject->edp_code);
+    $newEdp = $subject->edp_code;
+    
+    if (count($parts) >= 4) {
+        array_pop($parts);
+        $newEdp = implode('-', $parts) . '-' . $nextSection;
+    }
+
+    $exists = \App\Models\Subject::where('edp_code', $newEdp)->exists();
+
+    if ($exists) {
+        $this->dispatch('toast', [
+            'type' => 'warning',
+            'message' => 'Duplicate Aborted',
+            'detail' => "Section {$nextSection} already exists ({$newEdp})."
+        ]);
+        return;
+    }
+
+    // Continue normal flow
+    $this->duplicateCandidateId = $id;
+    $this->showDuplicateConfirmModal = true;
     $this->showModal = false;
+}
+public function confirmDuplicateSubject()
+{
+    if (!$this->duplicateCandidateId) {
+        return;
+    }
 
-    // Local Toast for the current user
-    $this->dispatch('toast', [
-        'type'    => 'success', 
-        'message' => $this->isEditMode ? 'Subject Updated' : 'Subject Created', 
-        'detail'  => "{$subject->subject_code} is now active in the {$deptUpper} department."
+    $original = \App\Models\Subject::findOrFail($this->duplicateCandidateId);
+
+    $this->subjectId = null;
+    $this->isEditMode = false;
+
+    $this->subject_code = $original->subject_code;
+    $this->description = $original->description;
+    $this->units = $original->units;
+    $this->type = $original->type;
+    $this->duration_hours = $original->duration_hours;
+    $this->department = $original->department;
+
+    $currentSection = strtoupper($original->section ?: 'A');
+
+    if ($currentSection === 'Z') {
+        $nextSection = 'AA';
+    } elseif ($currentSection === 'AA') {
+        $nextSection = 'AB';
+    } else {
+        $nextSection = chr(ord($currentSection) + 1);
+    }
+
+    $this->section = $nextSection;
+
+    $parts = explode('-', $original->edp_code);
+
+    if (count($parts) >= 4) {
+        array_pop($parts);
+        $this->edp_code = implode('-', $parts) . '-' . $nextSection;
+    } else {
+        $this->edp_code = $original->edp_code . '-' . $nextSection;
+    }
+
+    $this->showDuplicateConfirmModal = false;
+    $this->duplicateCandidateId = null;
+
+    $this->showModal = true;
+}
+public function bulkDuplicate()
+{
+    $count = count($this->selectedSubjects);
+    if ($count === 0) return;
+
+    $actor = auth()->user();
+    $duplicatedCount = 0;
+    $skippedCount = 0;
+
+    foreach ($this->selectedSubjects as $id) {
+        $original = \App\Models\Subject::find($id);
+        if (!$original) continue;
+
+        // 1. Calculate next section
+        $currentSection = strtoupper($original->section ?: 'A');
+        
+        // Handle Z -> AA transition
+        if ($currentSection === 'Z') {
+            $nextSection = 'AA';
+        } elseif ($currentSection === 'AA') {
+            $nextSection = 'AB';
+        } else {
+            $nextSection = chr(ord($currentSection) + 1);
+        }
+
+        // 2. Rebuild EDP Code (e.g., CCS-ACT-101-A -> CCS-ACT-101-B)
+        $parts = explode('-', $original->edp_code);
+        $newEdp = $original->edp_code; // Fallback
+        
+        if (count($parts) >= 4) {
+            // Replace only the last part (section)
+            array_pop($parts);
+            $newEdp = implode('-', $parts) . '-' . $nextSection;
+        } else {
+            $newEdp = $original->edp_code . '-' . $nextSection;
+        }
+
+        // 3. CHECK IF NEW EDP CODE ALREADY EXISTS
+        $exists = \App\Models\Subject::where('edp_code', $newEdp)->exists();
+        
+        if ($exists) {
+            $skippedCount++;
+            continue; // Skip this subject
+        }
+
+        // 4. Create the new record
+        \App\Models\Subject::create([
+            'edp_code'       => $newEdp,
+            'subject_code'   => $original->subject_code,
+            'section'        => $nextSection,
+            'description'    => $original->description,
+            'units'          => $original->units,
+            'department'     => $original->department,
+            'type'           => $original->type,
+            'duration_hours' => $original->duration_hours,
+        ]);
+
+        $duplicatedCount++;
+    }
+
+    // 5. Activity Logging
+    \App\Models\Activity::create([
+        'user_id'     => $actor->id,
+        'action'      => 'Bulk Duplicate',
+        'module'      => 'Subjects',
+        'description' => "Created {$duplicatedCount} new subject sections via bulk duplication." . ($skippedCount > 0 ? " ({$skippedCount} skipped - already exist)" : ""),
     ]);
 
-    // Global Notify slide-in
-    $this->dispatch('notify', [
-        'type'    => 'success', 
-        'title'   => $this->isEditMode ? 'CATALOG UPDATED' : 'NEW SUBJECT ADDED', 
-        'message' => "{$subject->subject_code} has been synchronized successfully.",
-        'sender_name' => $user->name
-    ]);
-
-    // Trigger real-time refresh for components listening for 'subjectUpdated'
+    // 6. UI Feedback
+    $this->reset(['selectedSubjects', 'selectAll']);
     $this->dispatch('subjectUpdated');
-
-    // 7. Cleanup
-    $this->reset(['edp_code', 'subject_code', 'description', 'units', 'type', 'duration_hours', 'department', 'subjectId']);
+    
+    // Show appropriate toast message
+    if ($skippedCount > 0) {
+        $this->dispatch('toast', [
+            'type'    => 'warning',
+            'message' => 'Bulk Duplicate Partial',
+            'detail'  => "{$duplicatedCount} subjects duplicated, {$skippedCount} skipped (already exist)."
+        ]);
+    } else {
+        $this->dispatch('toast', [
+            'type'    => 'success',
+            'message' => 'Bulk Duplicate Complete',
+            'detail'  => "{$duplicatedCount} subjects have been copied to the next section."
+        ]);
+    }
+}
+public function updatedSection($value)
+{
+    $newSection = strtoupper(trim($value));
+    if (!empty($this->edp_code)) {
+        $parts = explode('-', strtoupper($this->edp_code));
+        // Keep everything before section (Dept-Major-Number)
+        if (count($parts) >= 3) {
+            $base = implode('-', array_slice($parts, 0, 3));
+            $this->edp_code = $base . '-' . $newSection;
+        }
+    }
 }
 
 public function updatedSelectAll($value)
-    {
-        if ($value) {
-            // Get all IDs from the CURRENT filtered/searched list
-            $this->selectedSubjects = Subject::query()
-                ->where(function($query) {
-                    if (!in_array(strtolower(auth()->user()->role), ['admin', 'registrar', 'associate_dean'])) {
-                        $query->where('department', auth()->user()->department);
-                    }
-                })
-                ->pluck('id')
-                ->map(fn($id) => (string)$id)
-                ->toArray();
-        } else {
-            $this->selectedSubjects = [];
-        }
-    }
+{
+    if ($value) {
+        $user = auth()->user();
+        $userRole = strtolower($user->role ?? '');
+        $powerRoles = ['admin', 'registrar', 'associate_dean'];
+        $isPowerUser = in_array($userRole, $powerRoles);
 
-  /**
- * BULK DELETE SELECTED SUBJECTS
- */
+        $query = \App\Models\Subject::query();
+
+        // Role-Based Access
+        $query->where(function($q) use ($user, $isPowerUser) {
+            if (!$isPowerUser) {
+                $q->where('department', $user->department);
+            } elseif (!empty($this->selectedDept)) {
+                $q->where('department', $this->selectedDept);
+            }
+        });
+
+        // Section Filter
+        if (!empty($this->selectedSection)) {
+            $query->where('section', $this->selectedSection);
+        }
+
+        // Search Filter
+        if (!empty($this->search)) {
+            $query->where(function($q) {
+                $q->where('subject_code', 'like', "%{$this->search}%")
+                  ->orWhere('edp_code', 'like', "%{$this->search}%")
+                  ->orWhere('description', 'like', "%{$this->search}%");
+            });
+        }
+
+        // Year Filter - Extract from EDP code third segment
+        if (!empty($this->selectedYear)) {
+            $yearNumber = $this->selectedYear;
+            $query->whereRaw("SUBSTRING_INDEX(SUBSTRING_INDEX(edp_code, '-', 3), '-', -1) LIKE ?", ["{$yearNumber}%"]);
+        }
+
+        // Major Filter
+        if (!empty($this->selectedMajor)) {
+            $major = strtoupper($this->selectedMajor);
+            $query->where(function($q) use ($major) {
+                $q->where('subject_code', 'like', $major . '%')
+                  ->orWhere('edp_code', 'like', "%-{$major}-%");
+            });
+        }
+
+        $this->selectedSubjects = $query
+            ->pluck('id')
+            ->map(fn($id) => (string)$id)
+            ->toArray();
+    } else {
+        $this->selectedSubjects = [];
+    }
+}
 public function deleteSelected()
 {
     $count = count($this->selectedSubjects);
@@ -531,54 +983,75 @@ public function render()
 {
     $user = auth()->user();
     
-    // Normalize role from database (matches your 'associate_dean' screenshot)
-    $userRole = strtolower($user->role);
-    
-    // Define power roles
+    $userRole = strtolower($user->role ?? '');
     $powerRoles = ['admin', 'registrar', 'associate_dean'];
     $isPowerUser = in_array($userRole, $powerRoles);
 
+    // Build the base query
+    $query = \App\Models\Subject::query();
+
+    // Role-Based Access Scoping
+    $query->where(function($q) use ($user, $isPowerUser) {
+        if (!$isPowerUser) {
+            $q->where('department', $user->department);
+        } else {
+            if (!empty($this->selectedDept)) {
+                $q->where('department', $this->selectedDept);
+            }
+        }
+    });
+
+    // Section Filter
+    if (!empty($this->selectedSection)) {
+        $query->where('section', $this->selectedSection);
+    }
+
+    // Search Logic
+    if (!empty($this->search)) {
+        $query->where(function($q) {
+            $q->where('subject_code', 'like', "%{$this->search}%")
+              ->orWhere('edp_code', 'like', "%{$this->search}%")
+              ->orWhere('description', 'like', "%{$this->search}%");
+        });
+    }
+
+    // Year Filter - Extract year from EDP code (e.g., CCS-ACT-101-A -> 1st year, CCS-ACT-201-A -> 2nd year)
+    if (!empty($this->selectedYear)) {
+        $yearNumber = $this->selectedYear; // "1", "2", "3", or "4"
+        $query->whereRaw("SUBSTRING_INDEX(SUBSTRING_INDEX(edp_code, '-', 3), '-', -1) LIKE ?", ["{$yearNumber}%"]);
+    }
+
+    // Major Filter - Match subject_code or the major part in EDP code
+    if (!empty($this->selectedMajor)) {
+        $major = strtoupper($this->selectedMajor);
+        $query->where(function($q) use ($major) {
+            $q->where('subject_code', 'like', $major . '%')
+              ->orWhere('edp_code', 'like', "%-{$major}-%");
+        });
+    }
+
+    $subjects = $query->orderBy('edp_code', 'asc')->paginate(10);
+
     return view('livewire.manage-subjects', [
-        // 1. SUBJECTS QUERY
-        'subjects' => \App\Models\Subject::query()
-            // Role-Based Access Scoping
-            ->where(function($query) use ($user, $isPowerUser) {
-                if (!$isPowerUser) {
-                    // Regular Dean/OIC: Locked to their own department
-                    $query->where('department', $user->department);
-                } else {
-                    // Power Users: Filter by dropdown if selected, otherwise show all
-                    if (!empty($this->selectedDept)) {
-                        $query->where('department', $this->selectedDept);
-                    }
-                }
-            })
+        'subjects' => $subjects,
 
-            // Search Logic
-            ->when($this->search, function($query) {
-                $query->where(function($q) {
-                    $q->where('subject_code', 'like', "%{$this->search}%")
-                      ->orWhere('edp_code', 'like', "%{$this->search}%")
-                      ->orWhere('description', 'like', "%{$this->search}%");
-                });
-            })
-
-            // Year and Major Filters
-            ->when($this->selectedYear, function($query) {
-                $query->where('edp_code', 'like', '%-%-' . $this->selectedYear . '%');
-            })
-            ->when($this->selectedMajor, function($query) {
-                $query->where('subject_code', 'like', $this->selectedMajor . '%');
-            })
-            
-            ->orderBy('edp_code', 'asc')
-            ->paginate(10), // <--- This comma was the missing piece!
-
-        // 2. ACTIVITIES QUERY (Recent Activity Feed)
         'activities' => \App\Models\Activity::with('user')
             ->latest()
             ->take(10)
-            ->get()
-    ]);
+            ->get(),
+
+        'sections' => \App\Models\Subject::query()
+            ->when(!$isPowerUser, function($q) use ($user) {
+                $q->where('department', $user->department);
+            })
+            ->when(!empty($this->selectedDept) && $isPowerUser, function($q) {
+                $q->where('department', $this->selectedDept);
+            })
+            ->distinct()
+            ->pluck('section')
+            ->filter()
+            ->sort()
+            ->values()
+    ]); 
 }
 }

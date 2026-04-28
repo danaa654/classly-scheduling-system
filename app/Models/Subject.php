@@ -10,6 +10,7 @@ class Subject extends Model
     protected $fillable = [
     'edp_code', 
     'subject_code', 
+    'section',
     'description', 
     'units', 
     'department',
