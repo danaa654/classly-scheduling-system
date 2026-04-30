@@ -15,6 +15,7 @@ use App\Livewire\AssistantDeanDashboard;
 use App\Livewire\NotificationCenter;
 use App\Livewire\GlobalSettings;
 
+
 Route::get('/', function () {
     return view('welcome');
 })->name('home');
@@ -44,17 +45,19 @@ Route::middleware(['auth'])->group(function () {
     Route::middleware(['role:associate_dean'])->group(function () {
         Route::get('/assistant-dean/dashboard', AssistantDeanDashboard::class)->name('assistant-dean.dashboard');
     });
+    
 
-    // Management & Core System
     Route::get('/manage-users', ManageUsers::class)->name('manage-users');
     Route::get('/faculty', App\Livewire\ManageFaculty::class)->name('faculty.index');
     Route::get('/faculty-load', FacultyLoading::class)->name('faculty-loading');
     Route::get('/subjects', ManageSubjects::class)->name('subjects');
-     Route::get('/manage-rooms', \App\Livewire\ManageRooms::class)->name('manage.rooms');
+    Route::get('/manage-rooms', \App\Livewire\ManageRooms::class)->name('manage.rooms');
     Route::get('/master-grid', MasterGrid::class)->name('master-grid');
     Route::get('/notifications', \App\Livewire\NotificationCenter::class)->name('notifications');
     Route::get('/manage-account', \App\Livewire\ManageAccount::class)->name('manage-account');
+    Route::middleware(['auth'])->group(function () {
     Route::get('/settings', GlobalSettings::class)->name('settings');
+});
 
 
 });

@@ -29,6 +29,7 @@ class ManageSubjects extends Component
     public $subjectId, $edp_code, $subject_code, $section, $description, $department, $units;
     public $type = 'Major';
     public $duration_hours = 3;
+    public $meetings_per_week = 1;
 
     // CSV Import Logic
     public $importFile;
@@ -93,7 +94,7 @@ public function updatedImportFile()
 
     // 2. STRICT SUBJECT HEADER VALIDATION
     // These must match your Subject database schema exactly
-    $expected = ['edp_code', 'subject_code', 'section', 'description', 'units', 'department', 'duration_hours', 'type'];
+    $expected = ['edp_code', 'subject_code', 'section', 'description', 'units', 'department', 'duration_hours', 'type', 'meetings_per_week'];
     
     if ($normalizedHeader !== $expected) {
         $this->abortImport('Invalid Subject Template');
@@ -166,6 +167,7 @@ public function importSubjects()
 
         $rawDuration = trim($row[6] ?? '3hrs');
         $rawType     = trim($row[7] ?? 'Major');
+        $rawMeetings = (int)($row[8] ?? 1);
         $rawUnits = (int)$row[4];
         $clampedUnits = max(3, min(5, $rawUnits));
 
@@ -190,7 +192,8 @@ if ($exists) {
     'description'    => trim($row[3]),
     'units'          => $clampedUnits,
     'department'     => $rowDept,
-    'duration_hours' => (int) filter_var($rawDuration, FILTER_SANITIZE_NUMBER_INT) ?: 3,
+    'duration_hours' => (float) filter_var($rawDuration, FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION) ?: 3,
+    'meetings_per_week' => $rawMeetings,
     'type'           => ucfirst(strtolower($rawType)),
 ]);
         $count++;
@@ -289,6 +292,7 @@ if ($exists) {
         $this->units = 3;
         $this->type = $subject->type ?? 'Major';
         $this->duration_hours = $subject->duration_hours ?? 3;
+        $this->meetings_per_week = $subject->meetings_per_week ?? 1; 
         $this->department = $subject->department;
         
         $this->showModal = true;
@@ -521,6 +525,7 @@ public function executeSave()
         'units'          => 'required|integer|min:3|max:5',
         'type'           => 'required|in:Major,Minor',
         'duration_hours' => 'required|numeric|min:1|max:10',
+        'meetings_per_week' => 'required|integer|min:1|max:5',
     ]);
 
     // 2. Database Operation
@@ -534,6 +539,7 @@ public function executeSave()
             'units'          => $this->units,
             'type'           => $this->type,
             'duration_hours' => $this->duration_hours,
+            'meetings_per_week' => $this->meetings_per_week,
             'department'     => $deptUpper,
         ]
     );
@@ -582,46 +588,6 @@ private function logActivityAndNotify($subject, $user, $deptUpper)
     }
 }
 
-public function duplicateSubject($id)
-{
-    $subject = \App\Models\Subject::findOrFail($id);
-
-    // Detect next section letter
-    $currentSection = strtoupper($subject->section ?? 'A');
-    
-    if ($currentSection === 'Z') {
-        $nextSection = 'AA';
-    } elseif ($currentSection === 'AA') {
-        $nextSection = 'AB';
-    } else {
-        $nextSection = chr(ord($currentSection) + 1);
-    }
-
-    // If the next section already exists, show warning
-    $parts = explode('-', $subject->edp_code);
-    $newEdp = $subject->edp_code;
-    
-    if (count($parts) >= 4) {
-        array_pop($parts);
-        $newEdp = implode('-', $parts) . '-' . $nextSection;
-    }
-
-    $exists = \App\Models\Subject::where('edp_code', $newEdp)->exists();
-
-    if ($exists) {
-        $this->dispatch('toast', [
-            'type' => 'warning',
-            'message' => 'Duplicate Aborted',
-            'detail' => "Section {$nextSection} already exists ({$newEdp})."
-        ]);
-        return;
-    }
-
-    // Continue normal flow
-    $this->duplicateCandidateId = $id;
-    $this->showDuplicateConfirmModal = true;
-    $this->showModal = false;
-}
 public function confirmDuplicateSubject()
 {
     if (!$this->duplicateCandidateId) {
@@ -638,6 +604,7 @@ public function confirmDuplicateSubject()
     $this->units = $original->units;
     $this->type = $original->type;
     $this->duration_hours = $original->duration_hours;
+    $this->meetings_per_week = $original->meetings_per_week ?? 1;
     $this->department = $original->department;
 
     $currentSection = strtoupper($original->section ?: 'A');
@@ -721,6 +688,7 @@ public function bulkDuplicate()
             'department'     => $original->department,
             'type'           => $original->type,
             'duration_hours' => $original->duration_hours,
+            'meetings_per_week' => $original->meetings_per_week ?? 1,
         ]);
 
         $duplicatedCount++;

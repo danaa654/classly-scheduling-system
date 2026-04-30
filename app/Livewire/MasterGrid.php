@@ -18,7 +18,8 @@ class MasterGrid extends Component
 
     // Filtering properties
     public $searchSubject = ''; 
-    public $selectedDept = '';
+    public $search = '';
+    public $selectedDept = null;
     public $selectedYear = '';
     public $selectedMajor = '';
     public $roomType = '';
@@ -28,21 +29,33 @@ class MasterGrid extends Component
     public $selectedRoomId = null;
     public $selectedRoomName = null;
     public $selectedSection = 'A'; 
-    public $activeSubjectId = null; // Currently "held" subject for scheduling
+    public $activeSubjectId = null;
 
-    // Grid Config
+    // Grid Config - NOW DYNAMIC
     public $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     public $startTime = '07:00'; 
     public $endTime = '18:00';   
-    public $interval = 60; // 1 hour slots
+    public $slotDuration = 60; // Changed from 'interval'
 
     /**
-     * Initialize settings from database or defaults
+     * Load dynamic settings from database
      */
     public function mount()
     {
+        $this->loadSettings();
+    }
+
+    /**
+     * Load all settings from the Settings table
+     */
+    private function loadSettings()
+    {
         $this->startTime = Setting::where('key', 'start_time')->first()?->value ?? '07:00';
         $this->endTime = Setting::where('key', 'end_time')->first()?->value ?? '18:00';
+        
+        // Convert default_duration (hours like 1.0, 1.5) to minutes
+        $durationHours = floatval(Setting::where('key', 'default_duration')->first()?->value ?? '1.0');
+        $this->slotDuration = (int)($durationHours * 60); // Convert to minutes
     }
 
     // Reset page on search/filter change
@@ -75,34 +88,41 @@ class MasterGrid extends Component
     }
 
     /**
-     * Generates 12-hour format time slots dynamically
+     * Generates time slots dynamically based on settings
+     * Uses default_duration from settings for slot intervals
      * Skips 12:00 PM - 1:00 PM for lunch
      */
-    public function getTimeSlotsProperty()
+    public function generateTimeSlots()
     {
         $slots = [];
-        $current = strtotime($this->startTime);
-        $end = strtotime($this->endTime);
+        $current = Carbon::parse($this->startTime);
+        $end = Carbon::parse($this->endTime);
 
         while ($current < $end) {
-            $timeString = date('H:i', $current);
+            $timeString = $current->format('H:i');
 
-            // Skip Lunch Break
-            if ($timeString == '12:00') {
-                $current = strtotime('+1 hour', $current);
+            // Skip Lunch Break (12:00 PM - 1:00 PM)
+            if ($timeString === '12:00') {
+                $current->addMinutes($this->slotDuration);
                 continue;
             }
 
-            $next = strtotime('+' . $this->interval . ' minutes', $current);
+            $next = $current->copy()->addMinutes($this->slotDuration);
             
+            // Don't create a slot that goes past end time
+            if ($next > $end) {
+                break;
+            }
+
             $slots[] = [
-                'display' => date('h:i A', $current) . ' - ' . date('h:i A', $next),
-                'start' => date('H:i:s', $current),
-                'end' => date('H:i:s', $next),
+                'display' => $current->format('h:i A') . ' - ' . $next->format('h:i A'),
+                'start' => $current->format('H:i:s'),
+                'end' => $next->format('H:i:s'),
             ];
 
             $current = $next;
         }
+        
         return $slots;
     }
 
@@ -159,33 +179,45 @@ class MasterGrid extends Component
         $this->dispatch('notify', ['type' => 'info', 'message' => 'Schedule removed.']);
     }
 
-    public function render()    
+    public function getFilteredSubjects()
     {
-        $service = new ScheduleService();
-
-        $subjects = Subject::query()
-            ->when($this->searchSubject, fn($q) => 
-                $q->where('subject_code', 'like', "%{$this->searchSubject}%")
-                  ->orWhere('description', 'like', "%{$this->searchSubject}%")
-            )
-            ->when($this->selectedDept, fn($q) => $q->where('department', $this->selectedDept))
+        return Subject::query()
+            ->when(trim($this->searchSubject), function($query) {
+                $query->where(function($q) {
+                    $q->where('description', 'like', '%' . $this->searchSubject . '%')
+                      ->orWhere('subject_code', 'like', '%' . $this->searchSubject . '%')
+                      ->orWhere('edp_code', 'like', '%' . $this->searchSubject . '%');
+                });
+            })
+            ->when($this->selectedDept, function($query) {
+                $query->where('edp_code', 'like', $this->selectedDept . '%');
+            })
             ->orderBy('subject_code', 'asc')
             ->get();
+    }
+
+    public function render()    
+    {
+        // Reload settings in case they were changed elsewhere
+        $this->loadSettings();
+
+        $service = new ScheduleService();
+
+        $subjects = $this->getFilteredSubjects();
 
         $rooms = Room::all()->map(function($room) use ($service) {
             $room->utilization = $service->getRoomLoad($room->id);
             return $room;
         });
 
-        $schedules = Schedule::with(['subject'])
-            ->when($this->selectedRoomId, fn($q) => $q->where('room_id', $this->selectedRoomId))
-            ->get();
-
         return view('livewire.master-grid', [
+            'days' => ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'],
+            'gridSlots' => $this->generateTimeSlots(), // NOW DYNAMIC
+            'schedules' => Schedule::when($this->selectedRoomId, fn($q) => $q->where('room_id', $this->selectedRoomId))
+                            ->with(['subject'])
+                            ->get(),
             'subjects' => $subjects,
-            'rooms' => $rooms,
-            'schedules' => $schedules,
-            'gridSlots' => $this->timeSlots
+            'rooms' => Room::when($this->roomType, fn($q) => $q->where('type', $this->roomType))->get(),
         ]);
     }
 }

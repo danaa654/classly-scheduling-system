@@ -59,6 +59,12 @@ class User extends Authenticatable
         return $this->role === $role;
     }
 
+    public function isAdmin()
+{
+    // Adjust 'role' or 'is_admin' to match your database column
+    return $this->role === 'admin' || $this->is_admin === true;
+}
+
     /**
      * Helper to check if the user is an administrative official (Dean or OIC).
      */

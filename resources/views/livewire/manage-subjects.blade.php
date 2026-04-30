@@ -171,14 +171,7 @@
                                         </div>
                                     </td>
                                     <td class="px-6 py-5 text-right space-x-4 whitespace-nowrap">
-                                        <button 
-                                            wire:click="duplicateSubject({{ $subject->id }})" 
-                                            class="p-2 text-blue-600 hover:bg-blue-100 rounded-lg transition-colors"
-                                            title="Duplicate for another section">
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2" />
-                                            </svg>
-                                        </button>
+                                       
                                         <button wire:click="editSubject({{ $subject->id }})" class="text-blue-700 dark:text-indigo-400 font-extrabold text-xs uppercase hover:underline">Edit</button>
                                         <button wire:click="deleteSubject({{ $subject->id }})" wire:confirm="Are you sure?" class="text-red-500 dark:text-red-600 font-extrabold text-xs uppercase hover:text-red-700 transition-colors">Delete</button>
                                         
@@ -688,7 +681,7 @@
                     @endif
                 </div>
 
-                {{-- SECTION --}}
+                {{-- SECTION --}}   
                 <div class="relative">
                     <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block">Section</label>
                     <input type="text" 
@@ -726,8 +719,8 @@
                 placeholder="DESCRIPTION" 
                 class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 transition-all">
 
-            {{-- UNITS, TYPE, DURATION --}}
-            <div class="grid grid-cols-3 gap-2">
+            {{-- UNITS, TYPE, DURATION, MEETINGS --}}
+            <div class="grid grid-cols-4 gap-2">
                 <div>
                     <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block">Units</label>
                     <input type="number" 
@@ -754,6 +747,17 @@
                         <option value="3">3 Hrs</option>
                         <option value="4">4 Hrs</option>
                         <option value="5">5 Hrs</option>
+                    </select>
+                </div>
+
+                {{-- NEW: MEETINGS PER WEEK --}}
+                <div>
+                    <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block text-blue-500">Meetings</label>
+                    <select wire:model="meetings_per_week" 
+                        class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all border-l-2 border-blue-500">
+                        <option value="1">1x</option>
+                        <option value="2">2x</option>
+                        <option value="3">3x</option>
                     </select>
                 </div>
             </div>

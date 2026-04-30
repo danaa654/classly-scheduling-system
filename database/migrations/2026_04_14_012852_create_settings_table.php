@@ -30,4 +30,4 @@ return new class extends Migration
         Schema::dropIfExists('settings');
         Schema::dropIfExists('schedule_archives');
     }
-};
+};  

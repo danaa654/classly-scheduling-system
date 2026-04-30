@@ -18,8 +18,9 @@ return new class extends Migration
         $table->string('description');
         $table->integer('units')->default(3);
         $table->string('department')->nullable();
-        $table->integer('duration_hours')->default(3);
+        $table->decimal('duration_hours', 4, 2);
         $table->string('type')->default('Major'); 
+        $table->integer('meetings_per_week')->default(1);
         $table->timestamps();
     });
 }
