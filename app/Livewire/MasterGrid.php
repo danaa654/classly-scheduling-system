@@ -41,22 +41,33 @@ class MasterGrid extends Component
      * Load dynamic settings from database
      */
     public function mount()
-    {
-        $this->loadSettings();
-    }
+{
+    $this->loadSettings();
+    
+    // Listen for settings-updated event
+    $this->dispatch('listen-settings')->to(MasterGrid::class);
+}
 
-    /**
-     * Load all settings from the Settings table
-     */
+public function onSettingsUpdated()
+{
+    $this->loadSettings();
+    $this->dispatch('notify', [
+        'type' => 'info',
+        'message' => 'Grid configuration updated. Refresh to see changes.',
+    ]);
+}
     private function loadSettings()
-    {
-        $this->startTime = Setting::where('key', 'start_time')->first()?->value ?? '07:00';
-        $this->endTime = Setting::where('key', 'end_time')->first()?->value ?? '18:00';
-        
-        // Convert default_duration (hours like 1.0, 1.5) to minutes
-        $durationHours = floatval(Setting::where('key', 'default_duration')->first()?->value ?? '1.0');
-        $this->slotDuration = (int)($durationHours * 60); // Convert to minutes
-    }
+{
+    $this->startTime = Setting::where('key', 'start_time')->first()?->value ?? '07:00';
+    $this->endTime = Setting::where('key', 'end_time')->first()?->value ?? '18:00';
+    
+    $durationHours = floatval(Setting::where('key', 'default_duration')->first()?->value ?? '1.0');
+    $this->slotDuration = (int)($durationHours * 60);
+    
+    // NEW: Load lunch break from settings
+    $this->lunchStart = Setting::where('key', 'lunch_break_start')->first()?->value ?? '12:00';
+    $this->lunchEnd = Setting::where('key', 'lunch_break_end')->first()?->value ?? '13:00';
+}
 
     // Reset page on search/filter change
     public function updatedSearchSubject() { $this->resetPage(); }
@@ -87,44 +98,36 @@ class MasterGrid extends Component
         $this->dispatch('notify', ['type' => 'success', 'message' => 'Grid updated for the new semester!']);
     }
 
-    /**
-     * Generates time slots dynamically based on settings
-     * Uses default_duration from settings for slot intervals
-     * Skips 12:00 PM - 1:00 PM for lunch
-     */
     public function generateTimeSlots()
-    {
-        $slots = [];
-        $current = Carbon::parse($this->startTime);
-        $end = Carbon::parse($this->endTime);
+{
+    $slots = [];
+    $current = Carbon::parse($this->startTime);
+    $end = Carbon::parse($this->endTime);
+    $lunchStart = Carbon::parse($this->lunchStart);
+    $lunchEnd = Carbon::parse($this->lunchEnd);
 
-        while ($current < $end) {
-            $timeString = $current->format('H:i');
-
-            // Skip Lunch Break (12:00 PM - 1:00 PM)
-            if ($timeString === '12:00') {
-                $current->addMinutes($this->slotDuration);
-                continue;
-            }
-
-            $next = $current->copy()->addMinutes($this->slotDuration);
-            
-            // Don't create a slot that goes past end time
-            if ($next > $end) {
-                break;
-            }
-
-            $slots[] = [
-                'display' => $current->format('h:i A') . ' - ' . $next->format('h:i A'),
-                'start' => $current->format('H:i:s'),
-                'end' => $next->format('H:i:s'),
-            ];
-
-            $current = $next;
+    while ($current < $end) {
+        // Skip lunch break
+        if ($current >= $lunchStart && $current < $lunchEnd) {
+            $current->addMinutes($this->slotDuration);
+            continue;
         }
+
+        $next = $current->copy()->addMinutes($this->slotDuration);
         
-        return $slots;
+        if ($next > $end) break;
+
+        $slots[] = [
+            'display' => $current->format('h:i A') . ' - ' . $next->format('h:i A'),
+            'start' => $current->format('H:i:s'),
+            'end' => $next->format('H:i:s'),
+        ];
+
+        $current = $next;
     }
+    
+    return $slots;
+}
 
     public function selectRoom($id)
     {
