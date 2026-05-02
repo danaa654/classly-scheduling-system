@@ -14,26 +14,25 @@ use Carbon\Carbon;
 
 class GlobalSettings extends Component
 {
-    // SYSTEM CONFIG
-    public $start_time, $end_time, $semester_name, $default_duration;
+    // SYSTEM CONFIG - 30-minute brick philosophy
+    public const BRICK_DURATION = 0.5; // Hard-coded 30 minutes
     
-    // NEW: Access Control & Audit
+    // Institutional time settings
+    public $start_time, $end_time, $semester_name;
+    
+    // Access Control & Audit
     public $is_locked = true;
     public $last_updated_by;
     public $last_updated_at;
     
-    // NEW: Room Constraints
-    public $turnover_buffer = 10;
-    public $default_room_capacity = 40;
-    
-    // NEW: Lunch Break
+    // Lunch Break Configuration
     public $lunch_break_start = '12:00';
     public $lunch_break_end = '13:00';
     
-    // NEW: Maintenance Mode
+    // Maintenance Mode
     public $maintenance_mode = false;
     
-    // DEPARTMENT MANAGEMENT
+    // Department Management
     public $new_dept_name, $new_dept_code;
     
     // UI State
@@ -41,7 +40,7 @@ class GlobalSettings extends Component
     public $changeHistory = [];
 
     /**
-     * Security Gatekeeper: Ensure only Admin and Registrar can enter.
+     * Security Gatekeeper: Ensure only Admin and Registrar can access.
      */
     public function mount()
     {
@@ -56,26 +55,28 @@ class GlobalSettings extends Component
     }
 
     /**
-     * Load all settings from database with PAP standards defaults
+     * Load all settings from database with PAP standards defaults.
+     * Note: default_duration is now a system constant (0.5 hours = 30 minutes).
      */
     private function loadAllSettings()
     {
         $this->start_time = Setting::where('key', 'start_time')->first()?->value ?? '07:00';
         $this->end_time = Setting::where('key', 'end_time')->first()?->value ?? '20:00';
         $this->semester_name = Setting::where('key', 'semester_name')->first()?->value ?? 'First Semester 2026-2027';
-        $this->default_duration = Setting::where('key', 'default_duration')->first()?->value ?? '1.0';
         
-        // NEW SETTINGS
-        $this->is_locked = (bool)Setting::where('key', 'is_locked')->first()?->value ?? true;
-        $this->turnover_buffer = (int)Setting::where('key', 'turnover_buffer')->first()?->value ?? 10;
-        $this->default_room_capacity = (int)Setting::where('key', 'default_room_capacity')->first()?->value ?? 40;
+        // Lunch break settings
         $this->lunch_break_start = Setting::where('key', 'lunch_break_start')->first()?->value ?? '12:00';
         $this->lunch_break_end = Setting::where('key', 'lunch_break_end')->first()?->value ?? '13:00';
+        
+        // Access control
+        $this->is_locked = (bool)Setting::where('key', 'is_locked')->first()?->value ?? true;
+        
+        // Maintenance mode
         $this->maintenance_mode = (bool)Setting::where('key', 'maintenance_mode')->first()?->value ?? false;
     }
 
     /**
-     * Load change history for audit trail
+     * Load change history for audit trail (latest 10 changes).
      */
     private function loadChangeHistory()
     {
@@ -86,7 +87,34 @@ class GlobalSettings extends Component
     }
 
     /**
-     * Toggle the "Safe Mode" lock
+     * Validate that a time string is snapped to 30-minute increments.
+     * Valid: 07:00, 07:30, 08:00, 08:30, etc.
+     * Invalid: 07:15, 07:45, etc.
+     */
+    private function validateTimeIncrement(string $time): bool
+    {
+        $parts = explode(':', $time);
+        if (count($parts) !== 2) {
+            return false;
+        }
+        
+        $minutes = (int)$parts[1];
+        return in_array($minutes, [0, 30], true);
+    }
+
+    /**
+     * Validate that all time-based settings are aligned to 30-minute increments.
+     */
+    private function validateAllTimeIncrements(): bool
+    {
+        return $this->validateTimeIncrement($this->start_time)
+            && $this->validateTimeIncrement($this->end_time)
+            && $this->validateTimeIncrement($this->lunch_break_start)
+            && $this->validateTimeIncrement($this->lunch_break_end);
+    }
+
+    /**
+     * Toggle the "Safe Mode" lock.
      */
     public function toggleLock()
     {
@@ -94,24 +122,35 @@ class GlobalSettings extends Component
         
         $this->dispatch('notify', [
             'type' => 'info',
-            'message' => $this->is_locked ? 'Configuration locked. Changes are disabled.' : '⚠️ Configuration unlocked. Proceed with caution.',
+            'message' => $this->is_locked 
+                ? 'Configuration locked. Changes are disabled.' 
+                : '⚠️ Configuration unlocked. Proceed with caution.',
         ]);
     }
 
     /**
-     * Toggle Maintenance Mode (prevents Deans from adding subjects)
+     * Toggle Maintenance Mode (prevents Deans from modifying data).
      */
     public function toggleMaintenanceMode()
     {
         $this->maintenance_mode = !$this->maintenance_mode;
-        Setting::updateOrCreate(['key' => 'maintenance_mode'], ['value' => (string)$this->maintenance_mode]);
+        
+        Setting::updateOrCreate(
+            ['key' => 'maintenance_mode'],
+            ['value' => (string)$this->maintenance_mode]
+        );
         
         $this->dispatch('notify', [
             'type' => 'warning',
-            'message' => $this->maintenance_mode ? 'Maintenance mode ON. Deans cannot modify subjects.' : 'Maintenance mode OFF.',
+            'message' => $this->maintenance_mode 
+                ? 'Maintenance mode ON. Deans cannot modify subjects.' 
+                : 'Maintenance mode OFF.',
         ]);
     }
 
+    /**
+     * Save system configuration with comprehensive validation.
+     */
     public function save()
     {
         // GUARD: Check if locked
@@ -123,27 +162,46 @@ class GlobalSettings extends Component
             return;
         }
 
+        // Validation
         $this->validate([
-            'semester_name'       => 'required|string|min:3',
-            'start_time'          => 'required',
-            'end_time'            => 'required|after:start_time',
-            'default_duration'    => 'required|numeric|min:0.5|max:5',
-            'turnover_buffer'     => 'required|integer|min:0|max:30',
-            'default_room_capacity' => 'required|integer|min:10|max:200',
-            'lunch_break_start'   => 'required',
-            'lunch_break_end'     => 'required|after:lunch_break_start',
+            'semester_name'     => 'required|string|min:3',
+            'start_time'        => 'required|date_format:H:i',
+            'end_time'          => 'required|date_format:H:i|after:start_time',
+            'lunch_break_start' => 'required|date_format:H:i',
+            'lunch_break_end'   => 'required|date_format:H:i|after:lunch_break_start',
         ]);
 
-        // LOGIC CHECK: Day is long enough
+        // NEW: Validate 30-minute increments
+        if (!$this->validateAllTimeIncrements()) {
+            $this->dispatch('notify', [
+                'type' => 'error',
+                'message' => '⏰ All times must be aligned to 30-minute increments (:00 or :30).',
+            ]);
+            return;
+        }
+
+        // LOGIC CHECK: Day is long enough for at least one 30-minute brick
         $start = Carbon::parse($this->start_time);
         $end = Carbon::parse($this->end_time);
         $totalMinutesAvailable = $start->diffInMinutes($end);
-        $slotMinutesRequired = floatval($this->default_duration) * 60;
+        $brickMinutesRequired = self::BRICK_DURATION * 60; // 30 minutes
 
-        if ($totalMinutesAvailable < $slotMinutesRequired) {
+        if ($totalMinutesAvailable < $brickMinutesRequired) {
             $this->dispatch('notify', [
                 'type' => 'error',
-                'message' => 'The total school day is too short for the default class duration!',
+                'message' => 'The total school day is too short for a single 30-minute brick slot!',
+            ]);
+            return;
+        }
+
+        // Ensure lunch break is within school day
+        $lunchStart = Carbon::parse($this->lunch_break_start);
+        $lunchEnd = Carbon::parse($this->lunch_break_end);
+
+        if ($lunchStart->lessThan($start) || $lunchEnd->greaterThan($end)) {
+            $this->dispatch('notify', [
+                'type' => 'error',
+                'message' => 'Lunch break must fall within school operating hours.',
             ]);
             return;
         }
@@ -152,14 +210,11 @@ class GlobalSettings extends Component
         try {
             DB::transaction(function () {
                 $settingsToUpdate = [
-                    'semester_name'       => $this->semester_name,
-                    'start_time'          => $this->start_time,
-                    'end_time'            => $this->end_time,
-                    'default_duration'    => $this->default_duration,
-                    'turnover_buffer'     => $this->turnover_buffer,
-                    'default_room_capacity' => $this->default_room_capacity,
-                    'lunch_break_start'   => $this->lunch_break_start,
-                    'lunch_break_end'     => $this->lunch_break_end,
+                    'semester_name'     => $this->semester_name,
+                    'start_time'        => $this->start_time,
+                    'end_time'          => $this->end_time,
+                    'lunch_break_start' => $this->lunch_break_start,
+                    'lunch_break_end'   => $this->lunch_break_end,
                 ];
 
                 foreach ($settingsToUpdate as $key => $value) {
@@ -171,15 +226,17 @@ class GlobalSettings extends Component
                         'last_updated_at' => now(),
                     ]);
 
-                    // LOG CHANGE
-                    SettingChangeLog::create([
-                        'user_id' => auth()->id(),
-                        'setting_key' => $key,
-                        'old_value' => $oldValue,
-                        'new_value' => (string)$value,
-                        'action' => 'updated',
-                        'changed_at' => now(),
-                    ]);
+                    // LOG CHANGE only if value changed
+                    if ($oldValue !== (string)$value) {
+                        SettingChangeLog::create([
+                            'user_id' => auth()->id(),
+                            'setting_key' => $key,
+                            'old_value' => $oldValue,
+                            'new_value' => (string)$value,
+                            'action' => 'updated',
+                            'changed_at' => now(),
+                        ]);
+                    }
                 }
 
                 // RE-LOCK after save for safety
@@ -187,7 +244,7 @@ class GlobalSettings extends Component
                 $this->is_locked = true;
             });
 
-            // BROADCAST to MasterGrid
+            // BROADCAST to MasterGrid (if exists)
             $this->dispatch('settings-updated')->to(MasterGrid::class);
             
             $this->loadChangeHistory();
@@ -204,6 +261,9 @@ class GlobalSettings extends Component
         }
     }
 
+    /**
+     * Add a new department.
+     */
     public function addDepartment()
     {
         $this->validate([
@@ -217,12 +277,16 @@ class GlobalSettings extends Component
         ]);
 
         $this->reset(['new_dept_name', 'new_dept_code']);
+        
         $this->dispatch('notify', [
             'type' => 'success',
             'message' => 'New Department registered.',
         ]);
     }
 
+    /**
+     * Delete a department (with safety checks).
+     */
     public function deleteDepartment($id)
     {
         $dept = Department::findOrFail($id);
@@ -239,6 +303,7 @@ class GlobalSettings extends Component
         }
 
         $dept->delete();
+        
         $this->dispatch('notify', [
             'type' => 'success',
             'message' => 'Department successfully removed.',
@@ -246,7 +311,7 @@ class GlobalSettings extends Component
     }
 
     /**
-     * End of Semester: Archive current data and wipe the Grid
+     * End of Semester: Archive current data and wipe the Grid.
      */
     public function archiveAndReset()
     {
@@ -295,12 +360,16 @@ class GlobalSettings extends Component
         }
     }
 
+    /**
+     * Render the component with all necessary data.
+     */
     public function render()
     {
         return view('livewire.global-settings', [
             'departments' => Department::latest()->get(),
             'archives' => DB::table('schedule_archives')->latest()->get(),
             'changeHistory' => $this->changeHistory,
+            'brickDuration' => self::BRICK_DURATION,
         ])->layout('layouts.app');
     }
 }

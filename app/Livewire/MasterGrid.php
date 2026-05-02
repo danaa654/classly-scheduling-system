@@ -8,126 +8,364 @@ use App\Models\Subject;
 use App\Models\Room;
 use App\Models\Schedule;
 use App\Models\Setting;
-use App\Services\ScheduleService;
-use Livewire\WithPagination;
 use Carbon\Carbon;
+use Livewire\WithPagination;
 
 class MasterGrid extends Component
 {
     use WithPagination;
 
-    // Filtering properties
-    public $searchSubject = ''; 
-    public $search = '';
+    public $searchSubject = '';
     public $selectedDept = null;
     public $selectedYear = '';
     public $selectedMajor = '';
-    public $roomType = '';
-    
-    // UI State properties
+
     #[Url]
     public $selectedRoomId = null;
     public $selectedRoomName = null;
-    public $selectedSection = 'A'; 
-    public $activeSubjectId = null;
+    public $selectedRoomType = null;
+    public $selectedSection = 'A';
 
-    // Grid Config - NOW DYNAMIC
     public $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    public $startTime = '07:00'; 
-    public $endTime = '18:00';   
-    public $slotDuration = 60; // Changed from 'interval'
+    public $startTime = '07:00';
+    public $endTime = '21:00';
+    
+    // Lunch break times
+    public $lunchBreakStart = '12:00';
+    public $lunchBreakEnd = '13:00';
+    
+    // 30-minute brick constant
+    public const BRICK_DURATION_MINUTES = 30;
+    
+    // UI Constants
+    public const BRICK_HEIGHT_PX = 45;
+    public const TIME_COL_WIDTH = 'w-24';
+    public const DAY_COL_WIDTH = 'flex-1';
+    
+    // Time format constants
+    public const TIME_FORMAT_12H = 'h:i A';
+    public const TIME_FORMAT_24H = 'H:i:s';
 
-    /**
-     * Load dynamic settings from database
-     */
+    protected $listeners = ['refreshGrid' => '$refresh'];
+
     public function mount()
-{
-    $this->loadSettings();
-    
-    // Listen for settings-updated event
-    $this->dispatch('listen-settings')->to(MasterGrid::class);
-}
+    {
+        $this->startTime = Setting::where('key', 'start_time')->first()?->value ?? '07:00';
+        $this->endTime = Setting::where('key', 'end_time')->first()?->value ?? '21:00';
+        $this->lunchBreakStart = Setting::where('key', 'lunch_break_start')->first()?->value ?? '12:00';
+        $this->lunchBreakEnd = Setting::where('key', 'lunch_break_end')->first()?->value ?? '13:00';
+    }
 
-public function onSettingsUpdated()
-{
-    $this->loadSettings();
-    $this->dispatch('notify', [
-        'type' => 'info',
-        'message' => 'Grid configuration updated. Refresh to see changes.',
-    ]);
-}
-    private function loadSettings()
-{
-    $this->startTime = Setting::where('key', 'start_time')->first()?->value ?? '07:00';
-    $this->endTime = Setting::where('key', 'end_time')->first()?->value ?? '18:00';
-    
-    $durationHours = floatval(Setting::where('key', 'default_duration')->first()?->value ?? '1.0');
-    $this->slotDuration = (int)($durationHours * 60);
-    
-    // NEW: Load lunch break from settings
-    $this->lunchStart = Setting::where('key', 'lunch_break_start')->first()?->value ?? '12:00';
-    $this->lunchEnd = Setting::where('key', 'lunch_break_end')->first()?->value ?? '13:00';
-}
-
-    // Reset page on search/filter change
     public function updatedSearchSubject() { $this->resetPage(); }
     public function updatedSelectedYear() { $this->resetPage(); }
     public function updatedSelectedMajor() { $this->resetPage(); }
     public function updatedSelectedDept() { $this->selectedMajor = ''; $this->resetPage(); }
 
     /**
-     * Sets the subject that is currently being "held" to be scheduled
+     * Format time to 12-hour format with AM/PM
      */
-    public function selectSubject($id)
+    public function formatTime12h($time): string
     {
-        if ($this->activeSubjectId === $id) {
-            $this->activeSubjectId = null;
-        } else {
-            $this->activeSubjectId = $id;
-        }
+        return Carbon::parse($time)->format(self::TIME_FORMAT_12H);
     }
 
     /**
-     * Save global grid settings
+     * Format time range to 12-hour format
      */
-    public function saveSettings()
+    public function formatTimeRange12h($startTime, $endTime): string
     {
-        Setting::updateOrCreate(['key' => 'start_time'], ['value' => $this->startTime]);
-        Setting::updateOrCreate(['key' => 'end_time'], ['value' => $this->endTime]);
-        
-        $this->dispatch('notify', ['type' => 'success', 'message' => 'Grid updated for the new semester!']);
+        $start = Carbon::parse($startTime)->format(self::TIME_FORMAT_12H);
+        $end = Carbon::parse($endTime)->format(self::TIME_FORMAT_12H);
+        return "{$start} - {$end}";
     }
 
-    public function generateTimeSlots()
-{
-    $slots = [];
-    $current = Carbon::parse($this->startTime);
-    $end = Carbon::parse($this->endTime);
-    $lunchStart = Carbon::parse($this->lunchStart);
-    $lunchEnd = Carbon::parse($this->lunchEnd);
+    /**
+     * Calculate minutes per meeting.
+     */
+    public function calculateMinutesPerMeeting($subject): float
+    {
+        $totalMinutes = ($subject->duration_hours ?? 0) * 60;
+        $meetingsPerWeek = $subject->meetings_per_week ?? 1;
 
-    while ($current < $end) {
-        // Skip lunch break
-        if ($current >= $lunchStart && $current < $lunchEnd) {
-            $current->addMinutes($this->slotDuration);
-            continue;
+        if ($meetingsPerWeek <= 0) {
+            return self::BRICK_DURATION_MINUTES;
         }
 
-        $next = $current->copy()->addMinutes($this->slotDuration);
-        
-        if ($next > $end) break;
-
-        $slots[] = [
-            'display' => $current->format('h:i A') . ' - ' . $next->format('h:i A'),
-            'start' => $current->format('H:i:s'),
-            'end' => $next->format('H:i:s'),
-        ];
-
-        $current = $next;
+        return $totalMinutes / $meetingsPerWeek;
     }
-    
-    return $slots;
-}
+
+    /**
+     * Calculate remaining hours for a subject (as decimal).
+     */
+    public function getRemainingHoursDecimal($subjectId): float
+    {
+        $subject = Subject::find($subjectId);
+        if (!$subject) return 0;
+
+        $minutesPerMeeting = $this->calculateMinutesPerMeeting($subject);
+        $scheduledCount = $this->getScheduledCount($subjectId);
+        $usedMinutes = $minutesPerMeeting * $scheduledCount;
+        $totalMinutes = ($subject->duration_hours ?? 0) * 60;
+        $remainingMinutes = max(0, $totalMinutes - $usedMinutes);
+        
+        return round($remainingMinutes / 60, 1);
+    }
+
+    /**
+     * Calculate the number of bricks (30-min increments) needed.
+     */
+    public function calculateBrickCount($subject): int
+    {
+        $minutesPerMeeting = $this->calculateMinutesPerMeeting($subject);
+        return (int)ceil($minutesPerMeeting / self::BRICK_DURATION_MINUTES);
+    }
+
+    /**
+     * Calculate total height in pixels for a subject card.
+     */
+    public function calculateCardHeightPx($subject): int
+    {
+        $brickCount = $this->calculateBrickCount($subject);
+        return ($brickCount * self::BRICK_HEIGHT_PX) + ($brickCount - 1);
+    }
+
+    /**
+     * Calculate end time by adding minutes to start time.
+     */
+    public function calculateEndTime($startTime, $minutesToAdd): string
+    {
+        return Carbon::parse($startTime)
+            ->addMinutes($minutesToAdd)
+            ->format(self::TIME_FORMAT_24H);
+    }
+
+    /**
+     * Validate that a time is aligned to 30-minute increments.
+     */
+    private function isTimeAlignedTo30Min($time): bool
+    {
+        $minutes = (int)Carbon::parse($time)->format('i');
+        return in_array($minutes, [0, 30], true);
+    }
+
+    /**
+     * Get scheduled count for a subject.
+     */
+    public function getScheduledCount($subjectId): int
+    {
+        return Schedule::where('subject_id', $subjectId)->count();
+    }
+
+    /**
+     * Calculate remaining hours for a subject (legacy compatibility).
+     */
+    public function getRemainingHours($subjectId): float
+    {
+        return $this->getRemainingHoursDecimal($subjectId);
+    }
+
+    /**
+     * Get remaining meetings.
+     */
+    public function getRemainingMeetings($subject): int
+    {
+        $scheduledCount = $this->getScheduledCount($subject->id);
+        return max(0, ($subject->meetings_per_week ?? 1) - $scheduledCount);
+    }
+
+    /**
+     * Check if a time slot overlaps with lunch break.
+     */
+    private function overlapsLunchBreak($startTime, $endTime): bool
+    {
+        $lunchStart = Carbon::parse($this->lunchBreakStart);
+        $lunchEnd = Carbon::parse($this->lunchBreakEnd);
+        $slotStart = Carbon::parse($startTime);
+        $slotEnd = Carbon::parse($endTime);
+
+        return $slotStart < $lunchEnd && $slotEnd > $lunchStart;
+    }
+
+    /**
+     * Check if a time slot is within lunch break hours.
+     */
+    public function isLunchBreakTime($startTime, $endTime): bool
+    {
+        return $this->overlapsLunchBreak($startTime, $endTime);
+    }
+
+    /**
+     * Check if a time slot overlaps with existing schedules in the room.
+     */
+    private function hasRoomConflict($roomId, $day, $startTime, $endTime): bool
+    {
+        return Schedule::where('room_id', $roomId)
+            ->where('day', $day)
+            ->where(function ($query) use ($startTime, $endTime) {
+                $query->where('start_time', '<', $endTime)
+                      ->where('end_time', '>', $startTime);
+            })
+            ->exists();
+    }
+
+    /**
+     * Check if faculty member is double-booked.
+     */
+    private function hasFacultyConflict($subjectId, $day, $startTime, $endTime): bool
+    {
+        $subject = Subject::find($subjectId);
+        if (!$subject || !$subject->faculty_id) {
+            return false;
+        }
+
+        return Schedule::where('day', $day)
+            ->whereHas('subject', function ($query) use ($subject) {
+                $query->where('faculty_id', $subject->faculty_id);
+            })
+            ->where(function ($query) use ($startTime, $endTime) {
+                $query->where('start_time', '<', $endTime)
+                      ->where('end_time', '>', $startTime);
+            })
+            ->exists();
+    }
+
+    /**
+     * Generate hourly display slots (one row per 30-minute brick).
+     */
+    public function generateDisplaySlots()
+    {
+        $slots = [];
+        $current = Carbon::parse($this->startTime);
+        $end = Carbon::parse($this->endTime);
+        $lunchStart = Carbon::parse($this->lunchBreakStart);
+        $lunchEnd = Carbon::parse($this->lunchBreakEnd);
+
+        while ($current < $end) {
+            // Skip lunch break entirely
+            if ($current >= $lunchStart && $current < $lunchEnd) {
+                $current = $current->copy()->setTimeFromTimeString($this->lunchBreakEnd);
+                continue;
+            }
+
+            $next = $current->copy()->addMinutes(self::BRICK_DURATION_MINUTES);
+            if ($next > $end) break;
+
+            $slots[] = [
+                'display' => $this->formatTimeRange12h($current->format(self::TIME_FORMAT_24H), $next->format(self::TIME_FORMAT_24H)),
+                'start' => $current->format(self::TIME_FORMAT_24H),
+                'end' => $next->format(self::TIME_FORMAT_24H),
+            ];
+
+            $current = $next;
+        }
+
+        return $slots;
+    }
+
+    /**
+     * Get lunch break slots for special visual treatment.
+     */
+    public function getLunchBreakSlots()
+    {
+        $slots = [];
+        $current = Carbon::parse($this->lunchBreakStart);
+        $end = Carbon::parse($this->lunchBreakEnd);
+
+        while ($current < $end) {
+            $next = $current->copy()->addMinutes(self::BRICK_DURATION_MINUTES);
+            if ($next > $end) break;
+
+            $slots[] = [
+                'display' => $this->formatTimeRange12h($current->format(self::TIME_FORMAT_24H), $next->format(self::TIME_FORMAT_24H)),
+                'start' => $current->format(self::TIME_FORMAT_24H),
+                'end' => $next->format(self::TIME_FORMAT_24H),
+            ];
+
+            $current = $next;
+        }
+
+        return $slots;
+    }
+
+    /**
+     * NEW: Calculate room utilization based on bricks occupied in the entire week.
+     * 
+     * Logic:
+     * - Total Available Bricks = (Bricks per day) × (6 days/week)
+     * - Occupied Bricks = Sum of bricks used by all scheduled subjects in the room
+     * - Utilization % = (Occupied Bricks / Total Available Bricks) × 100
+     * 
+     * @param Room $room
+     * @return int Percentage (0-100)
+     */
+    public function calculateRoomUtilization($room): int
+    {
+        // Get all bricks available in one week (all days except lunch)
+        $totalBricksPerDay = count($this->generateDisplaySlots());
+        $totalDaysPerWeek = 6; // MON-SAT
+        $totalAvailableBricks = $totalBricksPerDay * $totalDaysPerWeek;
+
+        if ($totalAvailableBricks === 0) {
+            return 0;
+        }
+
+        // Calculate occupied bricks for this room
+        $scheduledSubjects = Schedule::where('room_id', $room->id)
+            ->with('subject')
+            ->get();
+
+        $occupiedBricks = 0;
+        foreach ($scheduledSubjects as $schedule) {
+            $subject = $schedule->subject;
+            if (!$subject) continue;
+
+            $brickCount = $this->calculateBrickCount($subject);
+            $occupiedBricks += $brickCount;
+        }
+
+        // Calculate percentage and cap at 100
+        $utilization = ($occupiedBricks / $totalAvailableBricks) * 100;
+        return min(100, (int)round($utilization));
+    }
+
+    /**
+     * Calculate the grid row span based on subject duration.
+     */
+    public function calculateGridRowSpan($subject): int
+    {
+        return $this->calculateBrickCount($subject);
+    }
+
+    /**
+     * Find the grid row index for a given start time.
+     */
+    public function findGridRowIndex($startTime): int
+    {
+        $slots = $this->generateDisplaySlots();
+        foreach ($slots as $index => $slot) {
+            if ($slot['start'] === $startTime) {
+                return $index;
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * NEW: Get room by ID with full details for tooltip display.
+     */
+    public function getRoomDetails($roomId): ?array
+    {
+        $room = Room::find($roomId);
+        if (!$room) return null;
+
+        return [
+            'id' => $room->id,
+            'name' => $room->room_name,
+            'type' => $room->type,
+            'capacity' => $room->capacity,
+            'utilization' => $this->calculateRoomUtilization($room),
+        ];
+    }
 
     public function selectRoom($id)
     {
@@ -135,92 +373,248 @@ public function onSettingsUpdated()
         if ($room) {
             $this->selectedRoomId = $id;
             $this->selectedRoomName = $room->room_name;
+            $this->selectedRoomType = $room->type;
+            
+            $this->dispatch('toast', [
+                'type' => 'success',
+                'message' => '✅ Room Selected',
+                'detail' => "Room {$room->room_name} is now active for scheduling"
+            ]);
         }
     }
 
-    public function assignSubject($subjectId, $day, $startTime, $endTime)
+    /**
+     * NEW: Validate room selection before assignment.
+     * Called from frontend to enforce "Room First" workflow.
+     */
+    public function validateRoomSelection(): bool
     {
-        // 1. Guard: Room and Subject must be selected
         if (!$this->selectedRoomId) {
-            $this->dispatch('notify', ['type' => 'error', 'message' => 'Please select a room first!']);
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => '⚠️ Select a Room First',
+                'detail' => 'Please select a room from the sidebar before assigning subjects to the grid.'
+            ]);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Assign subject to a time slot with comprehensive validation.
+     */
+    public function assignSubject($subjectId, $day, $startTime)
+    {
+        // Validation 1: Room selected
+        if (!$this->selectedRoomId) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => '⚠️ Select a Room First',
+                'detail' => 'Please select a room from the sidebar before assigning subjects.'
+            ]);
             return;
         }
 
+        // Validation 2: Valid subject ID
         if (!$subjectId) {
-            $this->dispatch('notify', ['type' => 'error', 'message' => 'Please select a subject from the sidebar!']);
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => '❌ Invalid Subject',
+                'detail' => 'Please select a valid subject!'
+            ]);
             return;
         }
 
-        // 2. Conflict Check (Same Room, Same Time, Same Day)
-        $exists = Schedule::where('room_id', $this->selectedRoomId)
-            ->where('day', $day)
-            ->where('start_time', $startTime)
-            ->exists();
-
-        if ($exists) {
-            $this->dispatch('notify', ['type' => 'warning', 'message' => 'This slot is already occupied!']);
+        // Validation 3: Subject exists
+        $subject = Subject::find($subjectId);
+        if (!$subject) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => '❌ Subject Not Found',
+                'detail' => 'The selected subject could not be found!'
+            ]);
             return;
         }
 
-        // 3. Create the Record
-        Schedule::create([
-            'subject_id' => $subjectId,
-            'room_id'    => $this->selectedRoomId,
-            'user_id'    => auth()->id() ?? 1, 
-            'day'        => $day,
-            'start_time' => $startTime,
-            'end_time'   => $endTime,
-            'section'    => $this->selectedSection ?: 'A',
-        ]);
+        // Validation 4: Remaining meetings
+        $remaining = $this->getRemainingMeetings($subject);
+        if ($remaining <= 0) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => '⏸️ No Meetings Left',
+                'detail' => "All {$subject->meetings_per_week} meetings for {$subject->subject_code} have been scheduled!"
+            ]);
+            return;
+        }
 
-        $this->dispatch('notify', ['type' => 'success', 'message' => 'Successfully assigned to ' . $day]);
+        // Validation 5: Time is aligned to 30-minute increments
+        if (!$this->isTimeAlignedTo30Min($startTime)) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => '🧱 Invalid Time Slot',
+                'detail' => 'Start time must align to 30-minute increments (:00 or :30).'
+            ]);
+            return;
+        }
+
+        // Calculate minutes and end time
+        $minutesPerMeeting = $this->calculateMinutesPerMeeting($subject);
+        $endTime = $this->calculateEndTime($startTime, $minutesPerMeeting);
+        $brickCount = $this->calculateBrickCount($subject);
+
+        // Validation 6: Check lunch break collision
+        if ($this->overlapsLunchBreak($startTime, $endTime)) {
+            $lunchDisplay = $this->formatTimeRange12h($this->lunchBreakStart, $this->lunchBreakEnd);
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => '🍽️ Lunch Break Blocked',
+                'detail' => "Cannot schedule during lunch break ({$lunchDisplay}). Please select another time."
+            ]);
+            return;
+        }
+
+        // Validation 7: Check room time conflict
+        if ($this->hasRoomConflict($this->selectedRoomId, $day, $startTime, $endTime)) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => '🔴 Room Time Conflict',
+                'detail' => 'This room is already occupied during this time. Choose another slot!'
+            ]);
+            return;
+        }
+
+        // Validation 8: Check faculty conflict
+        if ($this->hasFacultyConflict($subjectId, $day, $startTime, $endTime)) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => '👨‍🏫 Faculty Conflict',
+                'detail' => 'This faculty member is teaching another class at this time!'
+            ]);
+            return;
+        }
+
+        // All validations passed - create the schedule
+        try {
+            Schedule::create([
+                'subject_id' => $subjectId,
+                'room_id' => $this->selectedRoomId,
+                'user_id' => auth()->id() ?? 1,
+                'day' => $day,
+                'start_time' => $startTime,
+                'end_time' => $endTime,
+                'section' => $this->selectedSection ?: 'A',
+            ]);
+
+            $remainingHours = $this->getRemainingHoursDecimal($subjectId);
+            $remainingMeetings = $this->getRemainingMeetings($subject) - 1;
+
+            $this->dispatch('toast', [
+                'type' => 'success',
+                'message' => '✅ Subject Scheduled',
+                'detail' => "{$subject->subject_code} scheduled on {$day}. {$remainingMeetings} meetings remaining ({$remainingHours}h left)."
+            ]);
+
+            $this->dispatch('refreshGrid');
+        } catch (\Exception $e) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => '❌ Error',
+                'detail' => 'Failed to schedule subject: ' . $e->getMessage()
+            ]);
+        }
     }
 
-    public function removeAssignment($id)
+    /**
+     * Remove a schedule.
+     */
+    public function removeAssignment($scheduleId)
     {
-        Schedule::destroy($id);
-        $this->dispatch('notify', ['type' => 'info', 'message' => 'Schedule removed.']);
+        try {
+            $schedule = Schedule::find($scheduleId);
+            if ($schedule) {
+                $subject = $schedule->subject;
+                $schedule->delete();
+
+                $this->dispatch('toast', [
+                    'type' => 'info',
+                    'message' => '🗑️ Schedule Removed',
+                    'detail' => "{$subject->subject_code} has been removed from {$schedule->day}"
+                ]);
+
+                $this->dispatch('refreshGrid');
+            }
+        } catch (\Exception $e) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => '❌ Error',
+                'detail' => 'Failed to remove schedule: ' . $e->getMessage()
+            ]);
+        }
     }
+public function getFilteredSubjects()
+{
+    $subjects = Subject::query()
+        ->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'meetings_per_week', 'units', 'department', 'section')
+        ->when(trim($this->searchSubject), function ($query) {
+            $query->where(function ($q) {
+                $q->where('subject_code', 'like', '%' . $this->searchSubject . '%')
+                  ->orWhere('description', 'like', '%' . $this->searchSubject . '%')
+                  ->orWhere('edp_code', 'like', '%' . $this->searchSubject . '%');
+            });
+        })
+        ->when($this->selectedDept, function ($query) {
+            $query->where('department', $this->selectedDept);
+        })
+        ->when($this->selectedYear, function ($query) {
+            $query->whereRaw("SUBSTRING_INDEX(SUBSTRING_INDEX(edp_code, '-', 3), '-', -1) LIKE ?", ["{$this->selectedYear}%"]);
+        })
+        ->when($this->selectedMajor, function ($query) {
+            $major = strtoupper($this->selectedMajor);
+            $query->where(function ($q) use ($major) {
+                $q->where('subject_code', 'like', $major . '%')
+                  ->orWhere('edp_code', 'like', "%-{$major}-%");
+            });
+        })
+        ->where('meetings_per_week', '>', 0)
+        ->orderBy('subject_code', 'asc')
+        ->get()
+        ->filter(function($subject) {
+            return $this->getRemainingHours($subject->id) > 0;
+        });
 
-    public function getFilteredSubjects()
+    return $subjects;
+}
+
+    public function render()
     {
-        return Subject::query()
-            ->when(trim($this->searchSubject), function($query) {
-                $query->where(function($q) {
-                    $q->where('description', 'like', '%' . $this->searchSubject . '%')
-                      ->orWhere('subject_code', 'like', '%' . $this->searchSubject . '%')
-                      ->orWhere('edp_code', 'like', '%' . $this->searchSubject . '%');
-                });
-            })
-            ->when($this->selectedDept, function($query) {
-                $query->where('edp_code', 'like', $this->selectedDept . '%');
-            })
-            ->orderBy('subject_code', 'asc')
-            ->get();
-    }
-
-    public function render()    
-    {
-        // Reload settings in case they were changed elsewhere
-        $this->loadSettings();
-
-        $service = new ScheduleService();
-
         $subjects = $this->getFilteredSubjects();
 
-        $rooms = Room::all()->map(function($room) use ($service) {
-            $room->utilization = $service->getRoomLoad($room->id);
+        $rooms = Room::all()->map(function ($room) {
+            $room->utilization = $this->calculateRoomUtilization($room);
             return $room;
-        });
+        })->sortBy('room_name');
+
+        $schedules = $this->selectedRoomId
+            ? Schedule::where('room_id', $this->selectedRoomId)
+                ->with(['subject' => function ($query) {
+                    $query->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'department');
+                }])
+                ->get()
+            : collect();
+
+        $lunchSlots = $this->getLunchBreakSlots();
 
         return view('livewire.master-grid', [
             'days' => ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'],
-            'gridSlots' => $this->generateTimeSlots(), // NOW DYNAMIC
-            'schedules' => Schedule::when($this->selectedRoomId, fn($q) => $q->where('room_id', $this->selectedRoomId))
-                            ->with(['subject'])
-                            ->get(),
+            'displaySlots' => $this->generateDisplaySlots(),
+            'lunchSlots' => $lunchSlots,
+            'schedules' => $schedules,
             'subjects' => $subjects,
-            'rooms' => Room::when($this->roomType, fn($q) => $q->where('type', $this->roomType))->get(),
+            'rooms' => $rooms,
+            'lunchBreakStart' => $this->lunchBreakStart,
+            'lunchBreakEnd' => $this->lunchBreakEnd,
+            'brickDurationMinutes' => self::BRICK_DURATION_MINUTES,
+            'brickHeightPx' => self::BRICK_HEIGHT_PX,
         ]);
     }
 }
