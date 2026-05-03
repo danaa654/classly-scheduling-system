@@ -288,19 +288,10 @@ class MasterGrid extends Component
     }
 
     /**
-     * NEW: Calculate room utilization based on bricks occupied in the entire week.
-     * 
-     * Logic:
-     * - Total Available Bricks = (Bricks per day) × (6 days/week)
-     * - Occupied Bricks = Sum of bricks used by all scheduled subjects in the room
-     * - Utilization % = (Occupied Bricks / Total Available Bricks) × 100
-     * 
-     * @param Room $room
-     * @return int Percentage (0-100)
+     * Calculate room utilization based on bricks occupied in the entire week.
      */
     public function calculateRoomUtilization($room): int
     {
-        // Get all bricks available in one week (all days except lunch)
         $totalBricksPerDay = count($this->generateDisplaySlots());
         $totalDaysPerWeek = 6; // MON-SAT
         $totalAvailableBricks = $totalBricksPerDay * $totalDaysPerWeek;
@@ -309,7 +300,6 @@ class MasterGrid extends Component
             return 0;
         }
 
-        // Calculate occupied bricks for this room
         $scheduledSubjects = Schedule::where('room_id', $room->id)
             ->with('subject')
             ->get();
@@ -323,7 +313,6 @@ class MasterGrid extends Component
             $occupiedBricks += $brickCount;
         }
 
-        // Calculate percentage and cap at 100
         $utilization = ($occupiedBricks / $totalAvailableBricks) * 100;
         return min(100, (int)round($utilization));
     }
@@ -339,19 +328,22 @@ class MasterGrid extends Component
     /**
      * Find the grid row index for a given start time.
      */
-    public function findGridRowIndex($startTime): int
-    {
-        $slots = $this->generateDisplaySlots();
-        foreach ($slots as $index => $slot) {
-            if ($slot['start'] === $startTime) {
-                return $index;
-            }
-        }
-        return 0;
-    }
+    private function findGridRowIndex($time)
+{
+    $time = \Carbon\Carbon::parse($time);
+    $gridStart = \Carbon\Carbon::parse('07:00:00');
+    
+    // Calculate exact minutes from grid start
+    $diffMinutes = $gridStart->diffInMinutes($time);
+    
+    // Each slot is exactly 30 minutes = 45px
+    $slotIndex = round($diffMinutes / 30);
+    
+    return (int)$slotIndex;
+}
 
     /**
-     * NEW: Get room by ID with full details for tooltip display.
+     * Get room by ID with full details for tooltip display.
      */
     public function getRoomDetails($roomId): ?array
     {
@@ -384,8 +376,7 @@ class MasterGrid extends Component
     }
 
     /**
-     * NEW: Validate room selection before assignment.
-     * Called from frontend to enforce "Room First" workflow.
+     * Validate room selection before assignment.
      */
     public function validateRoomSelection(): bool
     {
@@ -551,39 +542,159 @@ class MasterGrid extends Component
             ]);
         }
     }
-public function getFilteredSubjects()
-{
-    $subjects = Subject::query()
-        ->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'meetings_per_week', 'units', 'department', 'section')
-        ->when(trim($this->searchSubject), function ($query) {
-            $query->where(function ($q) {
-                $q->where('subject_code', 'like', '%' . $this->searchSubject . '%')
-                  ->orWhere('description', 'like', '%' . $this->searchSubject . '%')
-                  ->orWhere('edp_code', 'like', '%' . $this->searchSubject . '%');
-            });
-        })
-        ->when($this->selectedDept, function ($query) {
-            $query->where('department', $this->selectedDept);
-        })
-        ->when($this->selectedYear, function ($query) {
-            $query->whereRaw("SUBSTRING_INDEX(SUBSTRING_INDEX(edp_code, '-', 3), '-', -1) LIKE ?", ["{$this->selectedYear}%"]);
-        })
-        ->when($this->selectedMajor, function ($query) {
-            $major = strtoupper($this->selectedMajor);
-            $query->where(function ($q) use ($major) {
-                $q->where('subject_code', 'like', $major . '%')
-                  ->orWhere('edp_code', 'like', "%-{$major}-%");
-            });
-        })
-        ->where('meetings_per_week', '>', 0)
-        ->orderBy('subject_code', 'asc')
-        ->get()
-        ->filter(function($subject) {
-            return $this->getRemainingHours($subject->id) > 0;
-        });
 
-    return $subjects;
-}
+    public function getFilteredSubjects()
+    {
+        $subjects = Subject::query()
+            ->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'meetings_per_week', 'units', 'department', 'section')
+            ->when(trim($this->searchSubject), function ($query) {
+                $query->where(function ($q) {
+                    $q->where('subject_code', 'like', '%' . $this->searchSubject . '%')
+                      ->orWhere('description', 'like', '%' . $this->searchSubject . '%')
+                      ->orWhere('edp_code', 'like', '%' . $this->searchSubject . '%');
+                });
+            })
+            ->when($this->selectedDept, function ($query) {
+                $query->where('department', $this->selectedDept);
+            })
+            ->when($this->selectedYear, function ($query) {
+                $query->whereRaw("SUBSTRING_INDEX(SUBSTRING_INDEX(edp_code, '-', 3), '-', -1) LIKE ?", ["{$this->selectedYear}%"]);
+            })
+            ->when($this->selectedMajor, function ($query) {
+                $major = strtoupper($this->selectedMajor);
+                $query->where(function ($q) use ($major) {
+                    $q->where('subject_code', 'like', $major . '%')
+                      ->orWhere('edp_code', 'like', "%-{$major}-%");
+                });
+            })
+            ->where('meetings_per_week', '>', 0)
+            ->orderBy('subject_code', 'asc')
+            ->get()
+            ->filter(function($subject) {
+                return $this->getRemainingHours($subject->id) > 0;
+            });
+
+        return $subjects;
+    }
+
+    /**
+     * Calculate the exact pixel height for a schedule card based on duration.
+     */
+    public function calculateScheduleHeightPx($startTime, $endTime): int
+    {
+        $durationMinutes = Carbon::parse($startTime)->diffInMinutes(Carbon::parse($endTime));
+        $brickCount = ceil($durationMinutes / self::BRICK_DURATION_MINUTES);
+        return ($brickCount * self::BRICK_HEIGHT_PX) + max(0, ($brickCount - 1));
+    }
+
+    /**
+     * Get the top offset (row index × 45px) for a schedule's start time.
+     */
+    public function getScheduleTopOffset($startTime): int
+    {
+        $slots = $this->generateDisplaySlots();
+        $index = 0;
+        
+        foreach ($slots as $i => $slot) {
+            if ($slot['start'] === $startTime) {
+                $index = $i;
+                break;
+            }
+        }
+        
+        return $index * self::BRICK_HEIGHT_PX;
+    }
+
+    /**
+     * Get display time for schedule card
+     */
+    public function getScheduleDisplayTime($startTime, $endTime): string
+    {
+        $start = Carbon::parse($startTime)->format('h:i A');
+        $end = Carbon::parse($endTime)->format('h:i A');
+        return "{$start} - {$end}";
+    }
+
+    /**
+     * Check if a schedule is the first occurrence in its slot
+     */
+    public function isScheduleStartingAtSlot($schedule, $slotStartTime): bool
+    {
+        return $schedule->start_time === $slotStartTime;
+    }
+
+    /**
+     * Check if a slot is within a schedule's time range
+     */
+    public function isSlotWithinSchedule($schedule, $slotStart, $slotEnd): bool
+    {
+        $schedStart = Carbon::parse($schedule->start_time);
+        $schedEnd = Carbon::parse($schedule->end_time);
+        $slotStartCarbon = Carbon::parse($slotStart);
+        $slotEndCarbon = Carbon::parse($slotEnd);
+        
+        return $schedStart <= $slotStartCarbon && $schedEnd > $slotStartCarbon;
+    }
+
+    /**
+     * NEW: Get overlapping schedules for a given day and time slot
+     * Returns array with position data for side-by-side rendering
+     */
+    public function getOverlappingSchedulesForSlot($day, $slotStart, $slotEnd): array
+    {
+        if (!$this->selectedRoomId) {
+            return [];
+        }
+
+        $schedules = Schedule::where('room_id', $this->selectedRoomId)
+            ->where('day', $day)
+            ->with('subject')
+            ->get()
+            ->filter(function ($schedule) use ($slotStart, $slotEnd) {
+                $schedStart = Carbon::parse($schedule->start_time);
+                $schedEnd = Carbon::parse($schedule->end_time);
+                $slotStartCarbon = Carbon::parse($slotStart);
+                $slotEndCarbon = Carbon::parse($slotEnd);
+                
+                return $schedStart < $slotEndCarbon && $schedEnd > $slotStartCarbon;
+            })
+            ->values();
+
+        // Calculate positions for each overlapping schedule
+        $result = [];
+        $totalOverlaps = $schedules->count();
+
+        foreach ($schedules as $index => $schedule) {
+            $result[] = [
+                'schedule' => $schedule,
+                'position' => $index,
+                'totalOverlaps' => $totalOverlaps,
+                'leftPercent' => ($index / $totalOverlaps) * 100,
+                'widthPercent' => (100 / $totalOverlaps),
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
+     * Get all schedules for a specific day and time that overlap
+     */
+    public function getSchedulesAtSlot($day, $slotStart, $slotEnd): array
+    {
+        if (!$this->selectedRoomId) {
+            return [];
+        }
+
+        return Schedule::where('room_id', $this->selectedRoomId)
+            ->where('day', $day)
+            ->with('subject')
+            ->whereRaw('start_time < ? AND end_time > ?', [$slotEnd, $slotStart])
+            ->get()
+            ->toArray();
+    }
+
+    
 
     public function render()
     {

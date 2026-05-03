@@ -1,278 +1,423 @@
-<div class="w-full h-full bg-white/40 dark:bg-slate-900/30 rounded-xl border-2 border-slate-300 dark:border-slate-700 shadow-sm backdrop-blur-sm overflow-hidden flex flex-col"
-     x-data="gridDragDrop()"
-     @dragstart.window="handleDragStart($event)"
-     @dragend.window="handleDragEnd($event)">
-    
-    {{-- GRID WRAPPER WITH HORIZONTAL SCROLL --}}
-    <div class="overflow-x-auto overflow-y-auto custom-scrollbar flex-1">
-        {{-- CSS GRID: 1 time col + 6 day cols --}}
-        <div class="grid grid-cols-[6rem_1fr_1fr_1fr_1fr_1fr_1fr] gap-0 w-full min-w-max bg-white/20 dark:bg-slate-900/20">
+<div 
+    x-data="scheduleGridApp()" 
+    x-init="initializeGrid()" 
+    class="relative w-full h-full bg-white/40 dark:bg-slate-900/30 backdrop-blur-sm rounded-xl border border-slate-300 dark:border-slate-700 overflow-hidden shadow-sm"
+>
+    {{-- SCROLLABLE GRID CONTAINER --}}
+    <div class="overflow-auto custom-scrollbar relative w-full h-full">
+        
+        {{-- MAIN GRID STRUCTURE --}}
+        <div class="relative inline-block w-full min-h-full">
             
-            {{-- HEADER: TIME COLUMN --}}
-            <div class="sticky top-0 z-30 h-14 bg-gradient-to-b from-slate-900 to-slate-800 dark:from-slate-950 dark:to-slate-900 border-r-2 border-slate-600 dark:border-slate-700 flex items-center justify-center flex-shrink-0">
-                <span class="text-[11px] font-black text-white uppercase tracking-tight">Time</span>
-            </div>
-
-            {{-- HEADER: DAY COLUMNS --}}
-            @foreach($days as $day)
-                <div class="sticky top-0 z-30 h-14 bg-gradient-to-b from-slate-900 to-slate-800 dark:from-slate-950 dark:to-slate-900 border-r-2 border-slate-600/50 dark:border-slate-700/50 flex items-center justify-center">
-                    <span class="text-[11px] font-black text-white uppercase tracking-wide">{{ $day }}</span>
-                </div>
-            @endforeach
-
-            {{-- GRID BODY: TIME SLOTS --}}
-            @foreach($displaySlots as $slotIndex => $slot)
-                {{-- TIME LABEL (LEFT COLUMN) --}}
-                <div class="sticky left-0 z-20 h-[45px] bg-gradient-to-r from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-900 border-r-2 border-slate-300 dark:border-slate-700 border-b-2 border-slate-300 dark:border-slate-700 flex items-center justify-center flex-shrink-0 px-1">
-                    <span class="text-[12px] font-black text-slate-900 dark:text-slate-100 uppercase tracking-tight text-center leading-tight">
-                        {{ $slot['display'] }}
-                    </span>
+            {{-- BASE GRID: TIME SLOTS + DAYS --}}
+            <div class="grid gap-0 auto-rows-[45px]" style="grid-template-columns: 6rem repeat(6, 1fr);">
+                
+                {{-- HEADER: TIME LABEL --}}
+                <div class="sticky top-0 left-0 z-30 h-14 flex items-center justify-center bg-gradient-to-b from-slate-900 to-slate-800 dark:from-slate-950 dark:to-slate-900 text-white text-[11px] font-black uppercase border-r-2 border-b-2 border-slate-700 dark:border-slate-600">
+                    Time
                 </div>
 
-                {{-- DAY CELLS (DROPPABLE) --}}
-                @foreach($days as $dayIndex => $day)
-                    @php
-                        $dayMap = ['MON' => 'Monday', 'TUE' => 'Tuesday', 'WED' => 'Wednesday', 'THU' => 'Thursday', 'FRI' => 'Friday', 'SAT' => 'Saturday'];
-                        $fullDay = $dayMap[$day] ?? $day;
-
-                        // Check if this slot is during lunch break
-                        $isLunchTime = in_array($slot['start'], array_column($lunchSlots, 'start'));
-
-                        // Find all overlapping schedules
-                        $overlappingSchedules = $schedules->filter(function($s) use ($fullDay, $slot) {
-                            return $s->day === $fullDay && 
-                                   Carbon\Carbon::parse($s->start_time) < Carbon\Carbon::parse($slot['end']) && 
-                                   Carbon\Carbon::parse($s->end_time) > Carbon\Carbon::parse($slot['start']);
-                        });
-
-                        // Find schedule that STARTS at this time
-                        $scheduleStarting = $overlappingSchedules->firstWhere('start_time', $slot['start']);
-                    @endphp
-
-                    {{-- EMPTY OR OCCUPIED CELL --}}
-                    <div 
-                        class="relative h-[45px] {{ $isLunchTime ? 'bg-amber-200/40 dark:bg-amber-900/50 border-amber-300 dark:border-amber-700' : 'bg-white/40 dark:bg-slate-800/30 hover:bg-blue-50/60 dark:hover:bg-blue-900/20' }} border-r-2 border-slate-300 dark:border-slate-700 border-b-2 border-slate-300 dark:border-slate-700 transition-colors group/slot"
-                        data-day="{{ $fullDay }}"
-                        data-start="{{ $slot['start'] }}"
-                        @if(!$isLunchTime)
-                            @dragover.prevent="
-                                if($event.dataTransfer.types.includes('subject_id')) {
-                                    $el.classList.add('ring-2', 'ring-blue-500', 'bg-blue-100/70', 'dark:bg-blue-900/40');
-                                }
-                            "
-                            @dragleave.prevent="
-                                $el.classList.remove('ring-2', 'ring-blue-500', 'bg-blue-100/70', 'dark:bg-blue-900/40');
-                            "
-                            @drop.prevent="
-                                $el.classList.remove('ring-2', 'ring-blue-500', 'bg-blue-100/70', 'dark:bg-blue-900/40');
-                                const subId = event.dataTransfer.getData('subject_id');
-                                if(subId) { 
-                                    $wire.assignSubject(subId, '{{ $fullDay }}', '{{ $slot['start'] }}'); 
-                                }
-                            "
-                        @endif>
-
-                        {{-- LUNCH BREAK INDICATOR --}}
-                        @if($isLunchTime)
-                            <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                <span class="text-[9px] font-black text-amber-900 dark:text-amber-200 opacity-70 uppercase tracking-tight">🍽️ LUNCH</span>
-                            </div>
-                        @else
-                            {{-- BACKGROUND SHADE FOR CONTINUATION ROWS --}}
-                            @if($overlappingSchedules->count() > 0 && !$scheduleStarting)
-                                @php
-                                    $shadeSub = $overlappingSchedules->first()->subject;
-                                    $shadeColorMap = [
-                                        'CCS' => 'bg-yellow-500/25 dark:bg-yellow-500/30',
-                                        'CTE' => 'bg-blue-500/25 dark:bg-blue-500/30',
-                                        'COC' => 'bg-purple-500/25 dark:bg-purple-500/30',
-                                        'SHTM' => 'bg-orange-500/25 dark:bg-orange-500/30',
-                                    ];
-                                    $shadeBg = $shadeColorMap[$shadeSub->department] ?? 'bg-slate-500/15';
-                                @endphp
-                                <div class="absolute inset-0 {{ $shadeBg }} pointer-events-none"></div>
-                            @endif
-
-                            {{-- SUBJECT CARD (STARTS HERE) --}}
-                            @if($scheduleStarting)
-                                @php
-                                    $subject = $scheduleStarting->subject;
-                                    
-                                    $brickCount = ceil((
-                                        Carbon\Carbon::parse($scheduleStarting->end_time)->diffInMinutes(
-                                            Carbon\Carbon::parse($scheduleStarting->start_time)
-                                        )
-                                    ) / 30);
-
-                                    $colorMap = [
-                                        'CCS' => [
-                                            'light' => 'bg-yellow-400/90 text-yellow-900 border-yellow-600 border-l-4 border-l-yellow-700',
-                                            'dark' => 'dark:bg-yellow-600/85 dark:text-yellow-50 dark:border-yellow-600 dark:border-l-yellow-400'
-                                        ],
-                                        'CTE' => [
-                                            'light' => 'bg-blue-400/90 text-blue-900 border-blue-600 border-l-4 border-l-blue-700',
-                                            'dark' => 'dark:bg-blue-600/85 dark:text-blue-50 dark:border-blue-600 dark:border-l-blue-400'
-                                        ],
-                                        'COC' => [
-                                            'light' => 'bg-purple-400/90 text-purple-900 border-purple-600 border-l-4 border-l-purple-700',
-                                            'dark' => 'dark:bg-purple-600/85 dark:text-purple-50 dark:border-purple-600 dark:border-l-purple-400'
-                                        ],
-                                        'SHTM' => [
-                                            'light' => 'bg-orange-400/90 text-orange-900 border-orange-600 border-l-4 border-l-orange-700',
-                                            'dark' => 'dark:bg-orange-600/85 dark:text-orange-50 dark:border-orange-600 dark:border-l-orange-400'
-                                        ],
-                                    ];
-                                    $colors = $colorMap[$subject->department] ?? [
-                                        'light' => 'bg-slate-400/90 text-slate-900 border-slate-600 border-l-4 border-l-slate-700',
-                                        'dark' => 'dark:bg-slate-600/85 dark:text-slate-50 dark:border-slate-600 dark:border-l-slate-400'
-                                    ];
-                                    
-                                    $cardHeight = ($brickCount * 45) + ($brickCount - 1);
-                                @endphp
-
-                                <div 
-                                    class="absolute inset-x-0 top-0 z-20 {{ $colors['light'] }} {{ $colors['dark'] }} border-2 rounded-r-lg shadow-md backdrop-blur-sm flex flex-col p-1 group/card transition-all hover:shadow-lg hover:z-40 overflow-hidden cursor-pointer"
-                                    style="height: {{ $cardHeight }}px;"
-                                    @mouseenter="
-                                        showTooltip(event, {
-                                            code: '{{ $subject->subject_code }}',
-                                            description: '{{ addslashes($subject->description) }}',
-                                            edp: '{{ $subject->edp_code }}',
-                                            section: '{{ $scheduleStarting->section }}',
-                                            room: '{{ $selectedRoomName }}',
-                                            time: '{{ $this->formatTime12h($scheduleStarting->start_time) }}-{{ $this->formatTime12h($scheduleStarting->end_time) }}',
-                                            duration: '{{ $subject->duration_hours }}h'
-                                        })
-                                    "
-                                    @mouseleave="hideTooltip()">
-
-                                    {{-- COMPACT CARD CONTENT --}}
-                                    <div class="flex items-start justify-between gap-1 h-full min-h-0">
-                                        {{-- LEFT: CODE & EDP --}}
-                                        <div class="flex-1 min-w-0 flex flex-col justify-between py-0.5">
-                                            <span class="text-[10px] font-black uppercase leading-tight truncate">
-                                                {{ $subject->subject_code }}
-                                            </span>
-                                            <span class="text-[8px] font-bold leading-tight truncate opacity-85">
-                                                {{ $subject->edp_code }}
-                                            </span>
-                                            <span class="text-[7px] font-semibold opacity-70 leading-tight">
-                                                {{ $this->formatTime12h($scheduleStarting->start_time) }}-{{ $this->formatTime12h($scheduleStarting->end_time) }}
-                                            </span>
-                                        </div>
-
-                                        {{-- RIGHT: SECTION BADGE & REMOVE BTN --}}
-                                        <div class="flex flex-col items-end gap-0.5 flex-shrink-0">
-                                            <span class="text-[7px] font-black bg-white/20 dark:bg-black/20 px-1 py-0 rounded border border-current/30 uppercase">
-                                                S{{ $scheduleStarting->section }}
-                                            </span>
-                                            <button 
-                                                wire:click="removeAssignment({{ $scheduleStarting->id }})" 
-                                                wire:confirm="Remove this schedule?"
-                                                class="opacity-0 group-hover/card:opacity-100 text-current/80 hover:text-current hover:scale-110 transition-all flex-shrink-0 text-[8px]">
-                                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"></path>
-                                                </svg>
-                                            </button>
-                                        </div>
-                                    </div>
-                                </div>
-                            @endif
-                        @endif
+                {{-- HEADER: DAY LABELS --}}
+                @foreach(['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as $dayLabel)
+                    <div class="sticky top-0 z-30 h-14 flex items-center justify-center bg-gradient-to-b from-slate-900 to-slate-800 dark:from-slate-950 dark:to-slate-900 text-white text-[11px] font-black uppercase border-r-2 border-b-2 border-slate-700 dark:border-slate-600">
+                        {{ $dayLabel }}
                     </div>
                 @endforeach
-            @endforeach
+
+                {{-- TIME SLOTS & DAY CELLS --}}
+                @foreach($displaySlots as $slotIndex => $slot)
+                    {{-- TIME LABEL COLUMN --}}
+                    <div class="sticky left-0 z-20 h-[45px] flex items-center justify-center text-[11px] font-black uppercase border-r-2 border-b border-slate-300 dark:border-slate-700 bg-gradient-to-r from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-900 text-slate-700 dark:text-slate-300 px-1">
+                        {{ $slot['display'] }}
+                    </div>
+
+                    {{-- DAY CELLS (6 columns) --}}
+                    @foreach(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as $dayIndex => $dayFull)
+                        @php
+                            $isLunch = $this->isLunchBreakTime($slot['start'], $slot['end']);
+                            $cellKey = "{$dayFull}-{$slot['start']}";
+                        @endphp
+
+                        <div 
+                            class="relative h-[45px] border-r border-b border-slate-300 dark:border-slate-700 transition-colors
+                                   {{ $isLunch 
+                                       ? 'bg-slate-300/50 dark:bg-slate-700/40 cursor-not-allowed' 
+                                       : 'bg-white/30 dark:bg-slate-800/20 hover:bg-blue-50/40 dark:hover:bg-blue-900/20 cursor-move' }}"
+                            wire:key="cell-{{ $cellKey }}"
+                            data-day="{{ $dayFull }}"
+                            data-day-short="{{ substr($dayFull, 0, 3) }}"
+                            data-start="{{ $slot['start'] }}"
+                            data-slot-index="{{ $slotIndex }}"
+                            @if(!$isLunch)
+                                @dragover.prevent="
+                                    $el.classList.add('ring-2', 'ring-blue-500', 'bg-blue-100/60', 'dark:bg-blue-900/30');
+                                "
+                                @dragleave.prevent="
+                                    $el.classList.remove('ring-2', 'ring-blue-500', 'bg-blue-100/60', 'dark:bg-blue-900/30');
+                                "
+                                @drop.prevent="
+                                    $el.classList.remove('ring-2', 'ring-blue-500', 'bg-blue-100/60', 'dark:bg-blue-900/30');
+                                    const subId = event.dataTransfer.getData('subject_id');
+                                    const subCode = event.dataTransfer.getData('subject_code');
+                                    if(subId) { 
+                                        $wire.assignSubject(subId, '{{ $dayFull }}', '{{ $slot['start'] }}');
+                                        showSuccessNotification('{{ substr($dayFull, 0, 3) }}', '{{ $slot['display'] }}', subCode);
+                                    }
+                                "
+                            @endif
+                        >
+                            @if($isLunch)
+                                <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                                    <span class="text-[9px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-tight">LUNCH</span>
+                                </div>
+                            @endif
+                        </div>
+                    @endforeach
+                @endforeach
+            </div>
+
+           {{-- ABSOLUTE POSITIONED SCHEDULE BLOCKS LAYER --}}
+<div class="absolute inset-0 pointer-events-none" style="top: 3.5rem;">
+    @foreach($schedules as $schedule)
+        @php
+            $subject = $schedule->subject;
+            if (!$subject) continue;
+
+            // 1. Parse times precisely
+            $startTime = \Carbon\Carbon::parse($schedule->start_time);
+            $endTime = \Carbon\Carbon::parse($schedule->end_time);
+            $gridStart = \Carbon\Carbon::parse('07:00:00');
+            
+            // 2. Calculate raw slot position
+            $minutesFromStart = $gridStart->diffInMinutes($startTime);
+            $rawSlotIndex = $minutesFromStart / 30;
+
+            /**
+             * FIX: ACCOUNT FOR THE 12:00 PM - 1:00 PM GAP
+             * If the schedule starts at or after 1:00 PM (13:00), 
+             * we must subtract 2 slots (60 minutes) from the index 
+             * because the visual grid skips the 12:00-1:00 hour.
+             */
+            $slotIndex = $rawSlotIndex;
+            if ($startTime->hour >= 13) {
+                $slotIndex -= 2; 
+            }
+            
+            // 3. Calculate height
+            $durationMinutes = $startTime->diffInMinutes($endTime);
+            $slotsSpanned = $durationMinutes / 30;
+            $heightPx = ($slotsSpanned * 45) - 4;
+
+            // 4. Day Index
+            $dayFull = $schedule->day;
+            $dayIndex = array_search($dayFull, ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
+            
+            // 5. Column positioning
+            $oneDayColumn = "((100% - 6rem) / 6)";
+            
+            $overlappingSchedules = $this->getSchedulesAtSlot($dayFull, $schedule->start_time, $schedule->end_time);
+            $totalOverlaps = count($overlappingSchedules);
+            
+            $myPosition = 0;
+            foreach ($overlappingSchedules as $index => $sched) {
+                if ($sched['id'] === $schedule->id) {
+                    $myPosition = $index;
+                    break;
+                }
+            }
+
+            $widthFactor = (1 / $totalOverlaps);
+            $offsetFactor = ($myPosition / $totalOverlaps);
+            
+            // 6. Colors
+            $colorMap = [
+                'CCS' => ['light' => 'bg-yellow-400/85 text-yellow-950', 'dark' => 'dark:bg-yellow-600/80 dark:text-yellow-50', 'border' => 'border-l-yellow-600'],
+                'CTE' => ['light' => 'bg-blue-400/85 text-blue-950', 'dark' => 'dark:bg-blue-600/80 dark:text-blue-50', 'border' => 'border-l-blue-600'],
+                'COC' => ['light' => 'bg-purple-400/85 text-purple-950', 'dark' => 'dark:bg-purple-600/80 dark:text-purple-50', 'border' => 'border-l-purple-600'],
+                'SHTM' => ['light' => 'bg-orange-400/85 text-orange-950', 'dark' => 'dark:bg-orange-600/80 dark:text-orange-50', 'border' => 'border-l-orange-600'],
+            ];
+            
+            $colors = $colorMap[$subject->department] ?? [
+                'light' => 'bg-slate-400/85 text-slate-950', 'dark' => 'dark:bg-slate-600/80 dark:text-slate-50', 'border' => 'border-l-slate-600'
+            ];
+
+            $instructor = $subject->faculty?->name ?? 'N/A';
+            $startTimeDisplay = $startTime->format('g:i A');
+            $endTimeDisplay = $endTime->format('g:i A');
+        @endphp
+
+        <div 
+            class="absolute pointer-events-auto z-20 rounded-r-lg border-2 border-r-slate-400 border-t-slate-300 border-b-slate-300 shadow-lg backdrop-blur-sm transition-all hover:shadow-2xl hover:z-40 group/card overflow-hidden flex flex-col items-center justify-center p-1.5 cursor-pointer 
+                   {{ $colors['light'] }} {{ $colors['dark'] }} {{ $colors['border'] }} border-l-4"
+            style="
+                /* Vertical: Use the adjusted slotIndex */
+                top: calc({{ $slotIndex }} * 45px);
+                
+                /* Horizontal Positioning */
+                left: calc(6rem + ({{ $dayIndex }} * {!! $oneDayColumn !!}) + ({!! $oneDayColumn !!} * {{ $offsetFactor }}));
+                
+                /* Width */
+                width: calc({!! $oneDayColumn !!} * {{ $widthFactor }});
+                
+                /* Height */
+                height: {{ $heightPx }}px;
+                
+                z-index: {{ 20 + $myPosition }};
+            "
+            wire:key="schedule-{{ $schedule->id }}"
+            @mouseenter="showSchedulePopover($event, {
+                code: '{{ $subject->subject_code }}',
+                description: '{{ addslashes($subject->description ?? '') }}',
+                edp: '{{ $schedule->edp_code ?? 'N/A' }}',
+                section: '{{ $schedule->section ?? 'N/A' }}',
+                instructor: '{{ addslashes($instructor) }}',
+                time: '{{ $startTimeDisplay }} - {{ $endTimeDisplay }}',
+                day: '{{ $dayFull }}'
+            })"
+            @mouseleave="hideSchedulePopover()"
+        >
+            <div class="text-center w-full space-y-0.5 pointer-events-none">
+                <div class="text-[10px] sm:text-[12px] font-black uppercase leading-tight line-clamp-2">
+                    {{ $subject->subject_code }}
+                </div>
+                <div class="text-[8px] font-semibold leading-tight opacity-90">
+                    {{ $startTimeDisplay }}<br>{{ $endTimeDisplay }}
+                </div>
+                <div class="text-[7px] font-bold leading-tight opacity-75 truncate">
+                    {{ strtoupper($selectedRoomType ?? 'LEC') }}
+                </div>
+            </div>
+
+            {{-- OVERLAP BADGE --}}
+            @if($totalOverlaps > 1)
+                <div class="absolute top-0.5 right-0.5 text-[6px] font-black bg-red-500/90 text-white px-1 py-0.5 rounded-full border border-red-600 w-4 h-4 flex items-center justify-center">
+                    {{ $totalOverlaps }}
+                </div>
+            @endif
+
+            {{-- SECTION BADGE --}}
+            <div class="absolute top-0.5 left-0.5 text-[6px] font-black bg-white/30 dark:bg-black/30 px-1 py-0.5 rounded border border-current/40 uppercase">
+                S{{ $schedule->section ?? 'N/A' }}
+            </div>
+
+            {{-- QUICK DELETE (HOVER) --}}
+            <button 
+                wire:click.stop="removeAssignment({{ $schedule->id }})"
+                wire:confirm="Remove this schedule?"
+                class="absolute bottom-0.5 right-0.5 opacity-0 group-hover/card:opacity-100 bg-red-500/80 hover:bg-red-600 text-white rounded p-0.5 transition-all shadow-sm"
+            >
+                <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                </svg>
+            </button>
+        </div>
+    @endforeach
+</div>
+
+            {{-- CURRENT TIME INDICATOR (RED LINE) --}}
+            @php
+                $now = \Carbon\Carbon::now();
+                $gridStart = \Carbon\Carbon::parse('07:00:00');
+                $gridEnd = \Carbon\Carbon::parse('18:00:00');
+                
+                if ($now >= $gridStart && $now < $gridEnd) {
+                    $elapsedMinutes = $gridStart->diffInMinutes($now);
+                    $topPercent = ($elapsedMinutes / 660) * 100;
+                } else {
+                    $topPercent = -1;
+                }
+            @endphp
+
+            @if($topPercent >= 0)
+                <div class="absolute left-0 right-0 pointer-events-none z-15" style="top: calc(3.5rem + {{ $topPercent }}% * (100vh - 3.5rem));">
+                    <div class="flex items-center gap-2">
+                        <div class="flex-1 h-1 bg-red-500 shadow-lg"></div>
+                        <span class="text-[10px] font-black text-white bg-red-500 px-2 py-0.5 rounded-sm whitespace-nowrap">
+                            {{ $now->format('h:i A') }}
+                        </span>
+                    </div>
+                </div>
+            @endif
         </div>
     </div>
 </div>
 
-{{-- FLOATING TOOLTIP POPOVER --}}
-<div id="subjectTooltip" 
-     class="hidden fixed z-[300] bg-slate-900/95 dark:bg-slate-950 text-white rounded-2xl shadow-2xl border-2 border-slate-700 dark:border-slate-600 backdrop-blur-xl p-3 w-64 pointer-events-none"
-     style="min-width: 280px;">
+{{-- COMPACT SCHEDULE DETAIL POPOVER --}}
+<div 
+    id="schedulePopover" 
+    class="hidden fixed z-[9999] w-72 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-3 backdrop-blur-sm pointer-events-auto"
+    style="max-width: calc(100vw - 16px);"
+>
     <div class="space-y-2">
-        <div class="flex items-start justify-between">
+        {{-- HEADER --}}
+        <div class="flex items-start justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-700">
+            <div class="flex-1 min-w-0">
+                <div class="text-[13px] font-black uppercase text-slate-900 dark:text-white line-clamp-1" id="popCode"></div>
+                <div class="text-[9px] font-semibold text-slate-600 dark:text-slate-300 mt-0.5 line-clamp-1" id="popDesc"></div>
+            </div>
+            <span class="text-[7px] font-bold px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 whitespace-nowrap flex-shrink-0" id="popType"></span>
+        </div>
+
+        {{-- INFO GRID (COMPACT) --}}
+        <div class="grid grid-cols-2 gap-2 text-[9px]">
             <div>
-                <div class="text-[11px] font-black uppercase leading-tight mb-0.5" id="tooltipCode"></div>
-                <div class="text-[9px] font-bold opacity-80 leading-tight" id="tooltipDescription"></div>
+                <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">EDP</span>
+                <span class="font-black text-slate-900 dark:text-slate-100 block truncate text-[8px]" id="popEdp">—</span>
+            </div>
+            <div>
+                <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Section</span>
+                <span class="font-black text-slate-900 dark:text-slate-100 block text-[8px]" id="popSection">—</span>
             </div>
         </div>
-        
-        <div class="border-t border-white/10 pt-2 space-y-1">
-            <div class="flex justify-between text-[8px] font-semibold">
-                <span class="text-slate-400">📍 EDP Code:</span>
-                <span id="tooltipEdp"></span>
+
+        {{-- SCHEDULE INFO (COMPACT) --}}
+        <div class="bg-slate-50 dark:bg-slate-900/50 rounded p-2 space-y-1 text-[8px]">
+            <div class="flex justify-between font-bold">
+                <span class="text-slate-600 dark:text-slate-400">Time:</span>
+                <span class="text-slate-900 dark:text-slate-100" id="popTime">—</span>
             </div>
-            <div class="flex justify-between text-[8px] font-semibold">
-                <span class="text-slate-400">📚 Section:</span>
-                <span id="tooltipSection"></span>
+            <div class="flex justify-between font-bold">
+                <span class="text-slate-600 dark:text-slate-400">Day:</span>
+                <span class="text-slate-900 dark:text-slate-100" id="popDay">—</span>
             </div>
-            <div class="flex justify-between text-[8px] font-semibold">
-                <span class="text-slate-400">🏢 Room:</span>
-                <span id="tooltipRoom"></span>
+            <div class="flex justify-between font-bold">
+                <span class="text-slate-600 dark:text-slate-400">Instructor:</span>
+                <span class="text-slate-900 dark:text-slate-100 truncate ml-1" id="popInstructor">—</span>
             </div>
-            <div class="flex justify-between text-[8px] font-semibold">
-                <span class="text-slate-400">⏰ Time:</span>
-                <span id="tooltipTime"></span>
-            </div>
-            <div class="flex justify-between text-[8px] font-semibold">
-                <span class="text-slate-400">📊 Duration:</span>
-                <span id="tooltipDuration"></span>
-            </div>
+        </div>
+
+        {{-- OVERLAP WARNING --}}
+        <div id="popOverlapWarning" class="hidden bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-700/50 rounded p-1.5 text-[8px] text-amber-800 dark:text-amber-200">
+            <span class="font-bold">⚠️ Overlap: </span><span id="popOverlapText"></span>
         </div>
     </div>
 </div>
+
+{{-- SUCCESS NOTIFICATION --}}
+<div 
+    id="successNotification"
+    class="hidden fixed bottom-4 right-4 z-50 bg-green-500 text-white px-3 py-2 rounded-lg shadow-lg font-semibold text-xs animate-pulse"
+></div>
 
 <script>
-    function gridDragDrop() {
+    function scheduleGridApp() {
         return {
-            handleDragStart(event) {
-                // Check if room is selected
-                if (!@json($selectedRoomId)) {
-                    event.preventDefault();
-                    // Dispatch Livewire warning
-                    Livewire.dispatch('validateRoomSelection');
-                }
+            initializeGrid() {
+                console.log('Schedule grid initialized');
             },
-            handleDragEnd(event) {
-                // Cleanup
+
+            showSchedulePopover(event, data) {
+                const popover = document.getElementById('schedulePopover');
+                if (!popover) return;
+
+                // Populate popover fields
+                document.getElementById('popCode').textContent = data.code;
+                document.getElementById('popDesc').textContent = data.description || 'No description';
+                document.getElementById('popType').textContent = data.type;
+                document.getElementById('popEdp').textContent = data.edp;
+                document.getElementById('popSection').textContent = `S${data.section}`;
+                document.getElementById('popInstructor').textContent = data.instructor;
+                document.getElementById('popTime').textContent = data.time;
+                document.getElementById('popDay').textContent = data.day;
+
+                // Show overlap warning if applicable
+                const overlapWarning = document.getElementById('popOverlapWarning');
+                if (data.totalOverlaps > 1) {
+                    document.getElementById('popOverlapText').textContent = 
+                        `${data.totalOverlaps} classes overlap (Slot ${data.position + 1}/${data.totalOverlaps})`;
+                    overlapWarning.classList.remove('hidden');
+                } else {
+                    overlapWarning.classList.add('hidden');
+                }
+
+                // Position popover relative to viewport
+                let x = event.clientX + 10;
+                let y = event.clientY - 120;
+
+                // Prevent popover from going off-screen (right edge)
+                const popoverWidth = 288; // w-72 = 288px
+                if (x + popoverWidth > window.innerWidth) {
+                    x = window.innerWidth - popoverWidth - 10;
+                }
+
+                // Prevent popover from going off-screen (left edge)
+                if (x < 10) {
+                    x = 10;
+                }
+
+                // Prevent popover from going off-screen (top edge)
+                if (y < 10) {
+                    y = event.clientY + 10;
+                }
+
+                // Prevent popover from going off-screen (bottom edge)
+                const popoverHeight = 280;
+                if (y + popoverHeight > window.innerHeight) {
+                    y = window.innerHeight - popoverHeight - 10;
+                }
+
+                popover.style.display = 'block';
+                popover.style.left = x + 'px';
+                popover.style.top = y + 'px';
+            },
+
+            hideSchedulePopover() {
+                const popover = document.getElementById('schedulePopover');
+                if (popover) {
+                    popover.style.display = 'none';
+                }
             }
-        }
+        };
     }
 
-    function showTooltip(event, data) {
-        const tooltip = document.getElementById('subjectTooltip');
-        if (!tooltip) return;
-
-        // Populate tooltip data
-        document.getElementById('tooltipCode').textContent = data.code;
-        document.getElementById('tooltipDescription').textContent = data.description;
-        document.getElementById('tooltipEdp').textContent = data.edp;
-        document.getElementById('tooltipSection').textContent = data.section;
-        document.getElementById('tooltipRoom').textContent = data.room;
-        document.getElementById('tooltipTime').textContent = data.time;
-        document.getElementById('tooltipDuration').textContent = data.duration;
-
-        // Position tooltip near mouse
-        tooltip.style.display = 'block';
-        tooltip.style.left = Math.min(event.clientX + 10, window.innerWidth - 300) + 'px';
-        tooltip.style.top = Math.max(event.clientY - 80, 10) + 'px';
-    }
-
-    function hideTooltip() {
-        const tooltip = document.getElementById('subjectTooltip');
-        if (tooltip) tooltip.style.display = 'none';
+    function showSuccessNotification(day, time, code) {
+        const notif = document.getElementById('successNotification');
+        if (!notif) return;
+        
+        notif.textContent = `✓ ${code} → ${day} ${time}`;
+        notif.classList.remove('hidden');
+        
+        setTimeout(() => {
+            notif.classList.add('hidden');
+        }, 2500);
     }
 </script>
 
 <style>
-    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 3px; }
-    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
+    .custom-scrollbar::-webkit-scrollbar {
+        width: 8px;
+        height: 8px;
+    }
+    
+    .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+    }
+    
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+    }
+    
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+    }
     
     @media (prefers-color-scheme: dark) {
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; }
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #64748B; }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #475569;
+        }
+        
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+    }
+
+    @keyframes pulse-subtle {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.7; }
+    }
+
+    .animate-pulse {
+        animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     }
 </style>
