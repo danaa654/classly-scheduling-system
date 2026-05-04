@@ -1,5 +1,6 @@
 <div class="flex h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 overflow-hidden"
-     x-data="{ roomsOpen: true, subjectsOpen: true }">
+     x-data="{ roomsOpen: true, subjectsOpen: true }" @room-selected.window="roomsOpen = false">
+     
 
     <main class="flex-1 flex flex-col min-w-0 relative h-full">
 

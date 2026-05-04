@@ -26,6 +26,7 @@ class Subject extends Model
         'duration_hours' => 'float',
         'meetings_per_week' => 'integer',
         'scheduled_hours' => 'float',
+        'type' => 'string',
     ];
 
     // ============================================================

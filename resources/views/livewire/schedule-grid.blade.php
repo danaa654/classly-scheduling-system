@@ -34,7 +34,7 @@
                     {{-- DAY CELLS (6 columns) --}}
                     @foreach(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as $dayIndex => $dayFull)
                         @php
-                            $isLunch = $this->isLunchBreakTime($slot['start'], $slot['end']);
+                            $isLunch = $slot['isLunch'] ?? false;
                             $cellKey = "{$dayFull}-{$slot['start']}";
                         @endphp
 
@@ -66,178 +66,210 @@
                                 "
                             @endif
                         >
-                            @if($isLunch)
-                                <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
-                                    <span class="text-[9px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-tight">LUNCH</span>
-                                </div>
-                            @endif
                         </div>
                     @endforeach
                 @endforeach
             </div>
 
-           {{-- ABSOLUTE POSITIONED SCHEDULE BLOCKS LAYER --}}
-<div class="absolute inset-0 pointer-events-none" style="top: 3.5rem;">
-    @foreach($schedules as $schedule)
-        @php
-            $subject = $schedule->subject;
-            if (!$subject) continue;
-
-            // 1. Parse times precisely
-            $startTime = \Carbon\Carbon::parse($schedule->start_time);
-            $endTime = \Carbon\Carbon::parse($schedule->end_time);
-            $gridStart = \Carbon\Carbon::parse('07:00:00');
-            
-            // 2. Calculate raw slot position
-            $minutesFromStart = $gridStart->diffInMinutes($startTime);
-            $rawSlotIndex = $minutesFromStart / 30;
-
-            /**
-             * FIX: ACCOUNT FOR THE 12:00 PM - 1:00 PM GAP
-             * If the schedule starts at or after 1:00 PM (13:00), 
-             * we must subtract 2 slots (60 minutes) from the index 
-             * because the visual grid skips the 12:00-1:00 hour.
-             */
-            $slotIndex = $rawSlotIndex;
-            if ($startTime->hour >= 13) {
-                $slotIndex -= 2; 
-            }
-            
-            // 3. Calculate height
-            $durationMinutes = $startTime->diffInMinutes($endTime);
-            $slotsSpanned = $durationMinutes / 30;
-            $heightPx = ($slotsSpanned * 45) - 4;
-
-            // 4. Day Index
-            $dayFull = $schedule->day;
-            $dayIndex = array_search($dayFull, ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
-            
-            // 5. Column positioning
-            $oneDayColumn = "((100% - 6rem) / 6)";
-            
-            $overlappingSchedules = $this->getSchedulesAtSlot($dayFull, $schedule->start_time, $schedule->end_time);
-            $totalOverlaps = count($overlappingSchedules);
-            
-            $myPosition = 0;
-            foreach ($overlappingSchedules as $index => $sched) {
-                if ($sched['id'] === $schedule->id) {
-                    $myPosition = $index;
-                    break;
-                }
-            }
-
-            $widthFactor = (1 / $totalOverlaps);
-            $offsetFactor = ($myPosition / $totalOverlaps);
-            
-            // 6. Colors
-            $colorMap = [
-                'CCS' => ['light' => 'bg-yellow-400/85 text-yellow-950', 'dark' => 'dark:bg-yellow-600/80 dark:text-yellow-50', 'border' => 'border-l-yellow-600'],
-                'CTE' => ['light' => 'bg-blue-400/85 text-blue-950', 'dark' => 'dark:bg-blue-600/80 dark:text-blue-50', 'border' => 'border-l-blue-600'],
-                'COC' => ['light' => 'bg-purple-400/85 text-purple-950', 'dark' => 'dark:bg-purple-600/80 dark:text-purple-50', 'border' => 'border-l-purple-600'],
-                'SHTM' => ['light' => 'bg-orange-400/85 text-orange-950', 'dark' => 'dark:bg-orange-600/80 dark:text-orange-50', 'border' => 'border-l-orange-600'],
-            ];
-            
-            $colors = $colorMap[$subject->department] ?? [
-                'light' => 'bg-slate-400/85 text-slate-950', 'dark' => 'dark:bg-slate-600/80 dark:text-slate-50', 'border' => 'border-l-slate-600'
-            ];
-
-            $instructor = $subject->faculty?->name ?? 'N/A';
-            $startTimeDisplay = $startTime->format('g:i A');
-            $endTimeDisplay = $endTime->format('g:i A');
-        @endphp
-
-        <div 
-            class="absolute pointer-events-auto z-20 rounded-r-lg border-2 border-r-slate-400 border-t-slate-300 border-b-slate-300 shadow-lg backdrop-blur-sm transition-all hover:shadow-2xl hover:z-40 group/card overflow-hidden flex flex-col items-center justify-center p-1.5 cursor-pointer 
-                   {{ $colors['light'] }} {{ $colors['dark'] }} {{ $colors['border'] }} border-l-4"
-            style="
-                /* Vertical: Use the adjusted slotIndex */
-                top: calc({{ $slotIndex }} * 45px);
+            {{-- ABSOLUTE POSITIONED SCHEDULE BLOCKS LAYER --}} 
+            <div class="absolute inset-0 pointer-events-none overflow-hidden" style="top: 3.5rem;">
                 
-                /* Horizontal Positioning */
-                left: calc(6rem + ({{ $dayIndex }} * {!! $oneDayColumn !!}) + ({!! $oneDayColumn !!} * {{ $offsetFactor }}));
-                
-                /* Width */
-                width: calc({!! $oneDayColumn !!} * {{ $widthFactor }});
-                
-                /* Height */
-                height: {{ $heightPx }}px;
-                
-                z-index: {{ 20 + $myPosition }};
-            "
-            wire:key="schedule-{{ $schedule->id }}"
-            @mouseenter="showSchedulePopover($event, {
-                code: '{{ $subject->subject_code }}',
-                description: '{{ addslashes($subject->description ?? '') }}',
-                edp: '{{ $schedule->edp_code ?? 'N/A' }}',
-                section: '{{ $schedule->section ?? 'N/A' }}',
-                instructor: '{{ addslashes($instructor) }}',
-                time: '{{ $startTimeDisplay }} - {{ $endTimeDisplay }}',
-                day: '{{ $dayFull }}'
-            })"
-            @mouseleave="hideSchedulePopover()"
-        >
-            <div class="text-center w-full space-y-0.5 pointer-events-none">
-                <div class="text-[10px] sm:text-[12px] font-black uppercase leading-tight line-clamp-2">
-                    {{ $subject->subject_code }}
+                {{-- LUNCH BREAK BAR (MINIMALIST FULL-WIDTH) --}}
+                @php
+                    // Calculate lunch break position: 12:00 PM is 5 hours = 300 minutes from 7:00 AM
+                    $gridStart = \Carbon\Carbon::parse('07:00:00');
+                    $lunchStart = \Carbon\Carbon::parse('12:00:00');
+                    $lunchEnd = \Carbon\Carbon::parse('13:00:00');
+                    
+                    $minutesFromStart = $gridStart->diffInMinutes($lunchStart);
+                    $lunchSlotIndex = $minutesFromStart / 30; // 10 slots (300 minutes / 30)
+                    $lunchDurationMinutes = $lunchStart->diffInMinutes($lunchEnd); // 60 minutes
+                    $lunchSlotsSpanned = $lunchDurationMinutes / 30; // 2 slots
+                    $lunchHeightPx = ($lunchSlotsSpanned * 45) - 4; // (2 * 45) - 4 = 86px
+                @endphp
+
+                <div 
+                    class="absolute left-0 right-0 pointer-events-none flex items-center justify-center bg-slate-200/60 dark:bg-slate-700/50 backdrop-blur-sm border-t-2 border-b-2 border-slate-400 dark:border-slate-600"
+                    style="
+                        top: calc(({{ $lunchSlotIndex }} * 45px) + 2px);
+                        left: 6rem;
+                        right: 0;
+                        height: {{ $lunchHeightPx }}px;
+                        z-index: 10;
+                    "
+                >
+                    <span class="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-widest">
+                        🍽️ Institutional Lunch Break
+                    </span>
                 </div>
-                <div class="text-[8px] font-semibold leading-tight opacity-90">
-                    {{ $startTimeDisplay }}<br>{{ $endTimeDisplay }}
-                </div>
-                <div class="text-[7px] font-bold leading-tight opacity-75 truncate">
-                    {{ strtoupper($selectedRoomType ?? 'LEC') }}
-                </div>
-            </div>
 
-            {{-- OVERLAP BADGE --}}
-            @if($totalOverlaps > 1)
-                <div class="absolute top-0.5 right-0.5 text-[6px] font-black bg-red-500/90 text-white px-1 py-0.5 rounded-full border border-red-600 w-4 h-4 flex items-center justify-center">
-                    {{ $totalOverlaps }}
-                </div>
-            @endif
+                {{-- SCHEDULE CARDS --}}
+                @foreach($schedules as $schedule)
+                    @php
+                        $subject = $schedule->subject;
+                        if (!$subject) continue;
 
-            {{-- SECTION BADGE --}}
-            <div class="absolute top-0.5 left-0.5 text-[6px] font-black bg-white/30 dark:bg-black/30 px-1 py-0.5 rounded border border-current/40 uppercase">
-                S{{ $schedule->section ?? 'N/A' }}
-            </div>
+                        // 1. Parse times precisely
+                        $startTime = \Carbon\Carbon::parse($schedule->start_time);
+                        $endTime = \Carbon\Carbon::parse($schedule->end_time);
+                        $gridStart = \Carbon\Carbon::parse('07:00:00');
+                        $gridEnd = \Carbon\Carbon::parse('21:00:00');
+                        
+                        // 2. Calculate raw slot position (30-min increments)
+                        $minutesFromStart = $gridStart->diffInMinutes($startTime);
+                        $rawSlotIndex = $minutesFromStart / 30;
+                        $slotIndex = $rawSlotIndex;
+                        
+                        // 3. Calculate height (45px per 30-min slot)
+                        $durationMinutes = $startTime->diffInMinutes($endTime);
+                        $slotsSpanned = $durationMinutes / 30;
+                        
+                        // Calculate the maximum available height from start to grid end
+                        $minutesToGridEnd = $startTime->diffInMinutes($gridEnd);
+                        $maxSlotsAvailable = $minutesToGridEnd / 30;
+                        
+                        // Use the smaller of calculated slots or max available slots
+                        $actualSlotsSpanned = min($slotsSpanned, $maxSlotsAvailable);
+                        
+                        // Height: 45px per slot minus 4px gap
+                        $heightPx = ($actualSlotsSpanned * 45) - 4;
+                        
+                        // Ensure minimum height visibility
+                        $heightPx = max(40, $heightPx);
 
-            {{-- QUICK DELETE (HOVER) --}}
-            <button 
-                wire:click.stop="removeAssignment({{ $schedule->id }})"
-                wire:confirm="Remove this schedule?"
-                class="absolute bottom-0.5 right-0.5 opacity-0 group-hover/card:opacity-100 bg-red-500/80 hover:bg-red-600 text-white rounded p-0.5 transition-all shadow-sm"
-            >
-                <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24">
-                    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
-                </svg>
-            </button>
-        </div>
-    @endforeach
-</div>
+                        // 4. Day Index for Horizontal placement
+                        $dayFull = $schedule->day;
+                        $dayIndex = array_search($dayFull, ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
+                        
+                        // 5. Column positioning math
+                        $oneDayColumn = "((100% - 6rem) / 6)";
+                        
+                        // Calculate Overlaps for side-by-side display
+                        $overlappingSchedules = $this->getSchedulesAtSlot($dayFull, $schedule->start_time, $schedule->end_time);
+                        $totalOverlaps = count($overlappingSchedules);
+                        
+                        $myPosition = 0;
+                        foreach ($overlappingSchedules as $index => $sched) {
+                            if ($sched['id'] === $schedule->id) {
+                                $myPosition = $index;
+                                break;
+                            }
+                        }
 
-            {{-- CURRENT TIME INDICATOR (RED LINE) --}}
-            @php
-                $now = \Carbon\Carbon::now();
-                $gridStart = \Carbon\Carbon::parse('07:00:00');
-                $gridEnd = \Carbon\Carbon::parse('18:00:00');
-                
-                if ($now >= $gridStart && $now < $gridEnd) {
-                    $elapsedMinutes = $gridStart->diffInMinutes($now);
-                    $topPercent = ($elapsedMinutes / 660) * 100;
-                } else {
-                    $topPercent = -1;
-                }
-            @endphp
+                        $widthFactor = (1 / $totalOverlaps);
+                        $offsetFactor = ($myPosition / $totalOverlaps);
+                        
+                        // 6. Color Mapping based on Department
+                        $colorMap = [
+                            'CCS'  => ['light' => 'bg-yellow-400/85 text-yellow-950', 'dark' => 'dark:bg-yellow-600/80 dark:text-yellow-50', 'border' => 'border-l-yellow-600'],
+                            'CTE'  => ['light' => 'bg-blue-400/85 text-blue-950', 'dark' => 'dark:bg-blue-600/80 dark:text-blue-50', 'border' => 'border-l-blue-600'],
+                            'COC'  => ['light' => 'bg-purple-400/85 text-purple-950', 'dark' => 'dark:bg-purple-600/80 dark:text-purple-50', 'border' => 'border-l-purple-600'],
+                            'SHTM' => ['light' => 'bg-orange-400/85 text-orange-950', 'dark' => 'dark:bg-orange-600/80 dark:text-orange-50', 'border' => 'border-l-orange-600'],
+                        ];
+                        
+                        $colors = $colorMap[$subject->department] ?? [
+                            'light' => 'bg-slate-400/85 text-slate-950', 'dark' => 'dark:bg-slate-600/80 dark:text-slate-50', 'border' => 'border-l-slate-600'
+                        ];
 
-            @if($topPercent >= 0)
-                <div class="absolute left-0 right-0 pointer-events-none z-15" style="top: calc(3.5rem + {{ $topPercent }}% * (100vh - 3.5rem));">
-                    <div class="flex items-center gap-2">
-                        <div class="flex-1 h-1 bg-red-500 shadow-lg"></div>
-                        <span class="text-[10px] font-black text-white bg-red-500 px-2 py-0.5 rounded-sm whitespace-nowrap">
-                            {{ $now->format('h:i A') }}
-                        </span>
+                        $instructor = $subject->faculty?->name ?? 'N/A';
+                        $startTimeDisplay = $startTime->format('g:i A');
+                        $endTimeDisplay = $endTime->format('g:i A');
+                    @endphp
+
+                    <div 
+                        class="absolute pointer-events-auto z-20 rounded-r-lg border-2 border-r-slate-400 border-t-slate-300 border-b-slate-300 shadow-lg backdrop-blur-sm transition-all hover:shadow-2xl hover:z-50 group/card overflow-hidden flex flex-col items-center justify-center p-1.5 cursor-pointer 
+                               {{ $colors['light'] }} {{ $colors['dark'] }} {{ $colors['border'] }} border-l-4"
+                        style="
+                            /* Vertical: Aligns with the 45px rows */
+                            top: calc(({{ $slotIndex }} * 45px) + 2px);
+                            
+                            /* Horizontal: Places class in correct day column */
+                            left: calc(6rem + ({{ $dayIndex }} * {!! $oneDayColumn !!}) + ({!! $oneDayColumn !!} * {{ $offsetFactor }}) + 2px);
+                            
+                            /* Width: Shrinks if there are overlaps */
+                            width: calc(({!! $oneDayColumn !!} * {{ $widthFactor }}) - 4px);
+                            
+                            /* Height: Spans multiple slots based on duration, clamped to grid */
+                            height: {{ $heightPx }}px;
+                            
+                            z-index: {{ 20 + $myPosition }};
+                        "
+                        wire:key="schedule-{{ $schedule->id }}"
+                        @mouseenter="showSchedulePopover($event, {
+                            code: '{{ $subject->subject_code }}',
+                            description: '{{ addslashes($subject->description ?? '') }}',
+                            edp: '{{ $schedule->edp_code ?? 'N/A' }}',
+                            section: '{{ $schedule->section ?? 'N/A' }}',
+                            instructor: '{{ addslashes($instructor) }}',
+                            time: '{{ $startTimeDisplay }} - {{ $endTimeDisplay }}',
+                            day: '{{ $dayFull }}'
+                        })"
+                        @mouseleave="hideSchedulePopover()"
+                    >
+                        <div class="text-center w-full space-y-0.5 pointer-events-none">
+                            <div class="text-[10px] sm:text-[11px] font-black uppercase leading-tight line-clamp-2">
+                                {{ $subject->subject_code }}
+                            </div>
+                            <div class="text-[8px] font-semibold leading-tight opacity-90">
+                                {{ $startTimeDisplay }} - {{ $endTimeDisplay }}
+                            </div>
+                        </div>
+
+                        {{-- OVERLAP BADGE --}}
+                        @if($totalOverlaps > 1)
+                            <div class="absolute top-0.5 right-0.5 text-[6px] font-black bg-red-500/90 text-white px-1 py-0.5 rounded-full border border-red-600 w-4 h-4 flex items-center justify-center">
+                                {{ $totalOverlaps }}
+                            </div>
+                        @endif
+
+                        {{-- SECTION BADGE --}}
+                        <div class="absolute top-0.5 left-0.5 text-[6px] font-black bg-white/30 dark:bg-black/30 px-1 py-0.5 rounded border border-current/40 uppercase">
+                            S{{ $schedule->section ?? 'N/A' }}
+                        </div>
+
+                        {{-- QUICK DELETE (HOVER) --}}
+                        <button 
+                            wire:click.stop="removeAssignment({{ $schedule->id }})"
+                            wire:confirm="Remove this schedule?"
+                            class="absolute bottom-0.5 right-0.5 opacity-0 group-hover/card:opacity-100 bg-red-500/80 hover:bg-red-600 text-white rounded p-0.5 transition-all shadow-sm"
+                        >
+                            <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24">
+                                <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                            </svg>
+                        </button>
                     </div>
-                </div>
-            @endif
+                @endforeach
+
+                {{-- CURRENT TIME INDICATOR (RED LINE) --}}
+                @php
+                    $now = \Carbon\Carbon::now();
+                    $gridStart = \Carbon\Carbon::parse('07:00:00');
+                    $gridEnd = \Carbon\Carbon::parse('21:00:00');
+                    
+                    if ($now >= $gridStart && $now < $gridEnd) {
+                        // Calculate elapsed minutes from grid start
+                        $elapsedMinutes = $gridStart->diffInMinutes($now);
+                        // Calculate which 30-minute slot and position within that slot
+                        $slotIndex = floor($elapsedMinutes / 30);
+                        $minutesWithinSlot = $elapsedMinutes % 30;
+                        // Calculate exact pixel position: each slot is 45px
+                        $topPx = ($slotIndex * 45) + ($minutesWithinSlot / 30 * 45);
+                    } else {
+                        $topPx = -1;
+                    }
+                @endphp
+
+                @if($topPx >= 0)
+                    <div class="absolute left-0 right-0 pointer-events-none z-15" style="top: {{ $topPx }}px;">
+                        <div class="flex items-center gap-2">
+                            <div class="flex-1 h-1 bg-red-500 shadow-lg"></div>
+                            <span class="text-[10px] font-black text-white bg-red-500 px-2 py-0.5 rounded-sm whitespace-nowrap">
+                                {{ $now->format('h:i A') }}
+                            </span>
+                        </div>
+                    </div>
+                @endif
+            </div>
         </div>
     </div>
 </div>

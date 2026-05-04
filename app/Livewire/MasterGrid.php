@@ -19,32 +19,35 @@ class MasterGrid extends Component
     public $selectedDept = null;
     public $selectedYear = '';
     public $selectedMajor = '';
+    public $selectedSection = null;
+    public $selectedType = '';
 
     #[Url]
     public $selectedRoomId = null;
     public $selectedRoomName = null;
     public $selectedRoomType = null;
-    public $selectedSection = 'A';
 
     public $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     public $startTime = '07:00';
     public $endTime = '21:00';
     
-    // Lunch break times
     public $lunchBreakStart = '12:00';
     public $lunchBreakEnd = '13:00';
     
-    // 30-minute brick constant
     public const BRICK_DURATION_MINUTES = 30;
     
-    // UI Constants
     public const BRICK_HEIGHT_PX = 45;
     public const TIME_COL_WIDTH = 'w-24';
     public const DAY_COL_WIDTH = 'flex-1';
     
-    // Time format constants
     public const TIME_FORMAT_12H = 'h:i A';
     public const TIME_FORMAT_24H = 'H:i:s';
+
+    public const DEPARTMENT_MAJORS = [
+        'CCS' => ['IT', 'ACT'],     
+        'COC' => ['FB', 'LD', 'QD'],
+        'SHTM' => ['HM', 'TM'],
+    ];
 
     protected $listeners = ['refreshGrid' => '$refresh'];
 
@@ -60,18 +63,51 @@ class MasterGrid extends Component
     public function updatedSelectedYear() { $this->resetPage(); }
     public function updatedSelectedMajor() { $this->resetPage(); }
     public function updatedSelectedDept() { $this->selectedMajor = ''; $this->resetPage(); }
+    public function updatedSelectedSection() { $this->resetPage(); }
+    public function updatedSelectedType() { $this->resetPage(); }
 
-    /**
-     * Format time to 12-hour format with AM/PM
-     */
+    public function hasFullAccess(): bool
+    {
+        $user = auth()->user();
+        if (!$user) return false;
+        
+        $role = $user->role ?? 'guest';
+        return in_array($role, ['admin', 'registrar', 'associate_dean']);
+    }
+
+    public function getUserDepartment(): ?string
+    {
+        $user = auth()->user();
+        return $user->department ?? null;
+    }
+
+    public function canDeleteSchedule($scheduleId): bool
+    {
+        if ($this->hasFullAccess()) {
+            return true;
+        }
+
+        $schedule = Schedule::find($scheduleId);
+        if (!$schedule || !$schedule->subject) {
+            return false;
+        }
+
+        $user = auth()->user();
+        $userRole = $user->role ?? 'guest';
+        $userDept = $user->department ?? null;
+
+        if (in_array($userRole, ['dean', 'oic'])) {
+            return $schedule->subject->department === $userDept;
+        }
+
+        return false;
+    }
+
     public function formatTime12h($time): string
     {
         return Carbon::parse($time)->format(self::TIME_FORMAT_12H);
     }
 
-    /**
-     * Format time range to 12-hour format
-     */
     public function formatTimeRange12h($startTime, $endTime): string
     {
         $start = Carbon::parse($startTime)->format(self::TIME_FORMAT_12H);
@@ -79,9 +115,6 @@ class MasterGrid extends Component
         return "{$start} - {$end}";
     }
 
-    /**
-     * Calculate minutes per meeting.
-     */
     public function calculateMinutesPerMeeting($subject): float
     {
         $totalMinutes = ($subject->duration_hours ?? 0) * 60;
@@ -94,9 +127,6 @@ class MasterGrid extends Component
         return $totalMinutes / $meetingsPerWeek;
     }
 
-    /**
-     * Calculate remaining hours for a subject (as decimal).
-     */
     public function getRemainingHoursDecimal($subjectId): float
     {
         $subject = Subject::find($subjectId);
@@ -111,27 +141,18 @@ class MasterGrid extends Component
         return round($remainingMinutes / 60, 1);
     }
 
-    /**
-     * Calculate the number of bricks (30-min increments) needed.
-     */
     public function calculateBrickCount($subject): int
     {
         $minutesPerMeeting = $this->calculateMinutesPerMeeting($subject);
         return (int)ceil($minutesPerMeeting / self::BRICK_DURATION_MINUTES);
     }
 
-    /**
-     * Calculate total height in pixels for a subject card.
-     */
     public function calculateCardHeightPx($subject): int
     {
         $brickCount = $this->calculateBrickCount($subject);
         return ($brickCount * self::BRICK_HEIGHT_PX) + ($brickCount - 1);
     }
 
-    /**
-     * Calculate end time by adding minutes to start time.
-     */
     public function calculateEndTime($startTime, $minutesToAdd): string
     {
         return Carbon::parse($startTime)
@@ -139,43 +160,28 @@ class MasterGrid extends Component
             ->format(self::TIME_FORMAT_24H);
     }
 
-    /**
-     * Validate that a time is aligned to 30-minute increments.
-     */
     private function isTimeAlignedTo30Min($time): bool
     {
         $minutes = (int)Carbon::parse($time)->format('i');
         return in_array($minutes, [0, 30], true);
     }
 
-    /**
-     * Get scheduled count for a subject.
-     */
     public function getScheduledCount($subjectId): int
     {
         return Schedule::where('subject_id', $subjectId)->count();
     }
 
-    /**
-     * Calculate remaining hours for a subject (legacy compatibility).
-     */
     public function getRemainingHours($subjectId): float
     {
         return $this->getRemainingHoursDecimal($subjectId);
     }
 
-    /**
-     * Get remaining meetings.
-     */
     public function getRemainingMeetings($subject): int
     {
         $scheduledCount = $this->getScheduledCount($subject->id);
         return max(0, ($subject->meetings_per_week ?? 1) - $scheduledCount);
     }
 
-    /**
-     * Check if a time slot overlaps with lunch break.
-     */
     private function overlapsLunchBreak($startTime, $endTime): bool
     {
         $lunchStart = Carbon::parse($this->lunchBreakStart);
@@ -186,17 +192,11 @@ class MasterGrid extends Component
         return $slotStart < $lunchEnd && $slotEnd > $lunchStart;
     }
 
-    /**
-     * Check if a time slot is within lunch break hours.
-     */
     public function isLunchBreakTime($startTime, $endTime): bool
     {
         return $this->overlapsLunchBreak($startTime, $endTime);
     }
 
-    /**
-     * Check if a time slot overlaps with existing schedules in the room.
-     */
     private function hasRoomConflict($roomId, $day, $startTime, $endTime): bool
     {
         return Schedule::where('room_id', $roomId)
@@ -208,9 +208,6 @@ class MasterGrid extends Component
             ->exists();
     }
 
-    /**
-     * Check if faculty member is double-booked.
-     */
     private function hasFacultyConflict($subjectId, $day, $startTime, $endTime): bool
     {
         $subject = Subject::find($subjectId);
@@ -229,24 +226,13 @@ class MasterGrid extends Component
             ->exists();
     }
 
-    /**
-     * Generate hourly display slots (one row per 30-minute brick).
-     */
     public function generateDisplaySlots()
     {
         $slots = [];
         $current = Carbon::parse($this->startTime);
         $end = Carbon::parse($this->endTime);
-        $lunchStart = Carbon::parse($this->lunchBreakStart);
-        $lunchEnd = Carbon::parse($this->lunchBreakEnd);
 
         while ($current < $end) {
-            // Skip lunch break entirely
-            if ($current >= $lunchStart && $current < $lunchEnd) {
-                $current = $current->copy()->setTimeFromTimeString($this->lunchBreakEnd);
-                continue;
-            }
-
             $next = $current->copy()->addMinutes(self::BRICK_DURATION_MINUTES);
             if ($next > $end) break;
 
@@ -254,6 +240,7 @@ class MasterGrid extends Component
                 'display' => $this->formatTimeRange12h($current->format(self::TIME_FORMAT_24H), $next->format(self::TIME_FORMAT_24H)),
                 'start' => $current->format(self::TIME_FORMAT_24H),
                 'end' => $next->format(self::TIME_FORMAT_24H),
+                'isLunch' => $this->overlapsLunchBreak($current->format(self::TIME_FORMAT_24H), $next->format(self::TIME_FORMAT_24H)),
             ];
 
             $current = $next;
@@ -262,9 +249,6 @@ class MasterGrid extends Component
         return $slots;
     }
 
-    /**
-     * Get lunch break slots for special visual treatment.
-     */
     public function getLunchBreakSlots()
     {
         $slots = [];
@@ -287,13 +271,10 @@ class MasterGrid extends Component
         return $slots;
     }
 
-    /**
-     * Calculate room utilization based on bricks occupied in the entire week.
-     */
     public function calculateRoomUtilization($room): int
     {
         $totalBricksPerDay = count($this->generateDisplaySlots());
-        $totalDaysPerWeek = 6; // MON-SAT
+        $totalDaysPerWeek = 6;
         $totalAvailableBricks = $totalBricksPerDay * $totalDaysPerWeek;
 
         if ($totalAvailableBricks === 0) {
@@ -317,34 +298,22 @@ class MasterGrid extends Component
         return min(100, (int)round($utilization));
     }
 
-    /**
-     * Calculate the grid row span based on subject duration.
-     */
     public function calculateGridRowSpan($subject): int
     {
         return $this->calculateBrickCount($subject);
     }
 
-    /**
-     * Find the grid row index for a given start time.
-     */
     private function findGridRowIndex($time)
-{
-    $time = \Carbon\Carbon::parse($time);
-    $gridStart = \Carbon\Carbon::parse('07:00:00');
-    
-    // Calculate exact minutes from grid start
-    $diffMinutes = $gridStart->diffInMinutes($time);
-    
-    // Each slot is exactly 30 minutes = 45px
-    $slotIndex = round($diffMinutes / 30);
-    
-    return (int)$slotIndex;
-}
+    {
+        $time = \Carbon\Carbon::parse($time);
+        $gridStart = \Carbon\Carbon::parse('07:00:00');
+        
+        $diffMinutes = $gridStart->diffInMinutes($time);
+        $slotIndex = round($diffMinutes / 30);
+        
+        return (int)$slotIndex;
+    }
 
-    /**
-     * Get room by ID with full details for tooltip display.
-     */
     public function getRoomDetails($roomId): ?array
     {
         $room = Room::find($roomId);
@@ -367,17 +336,16 @@ class MasterGrid extends Component
             $this->selectedRoomName = $room->room_name;
             $this->selectedRoomType = $room->type;
             
+            $this->dispatch('room-selected');
+
             $this->dispatch('toast', [
                 'type' => 'success',
                 'message' => '✅ Room Selected',
-                'detail' => "Room {$room->room_name} is now active for scheduling"
+                'detail' => "Room {$room->room_name} is now active"
             ]);
         }
     }
 
-    /**
-     * Validate room selection before assignment.
-     */
     public function validateRoomSelection(): bool
     {
         if (!$this->selectedRoomId) {
@@ -391,12 +359,8 @@ class MasterGrid extends Component
         return true;
     }
 
-    /**
-     * Assign subject to a time slot with comprehensive validation.
-     */
     public function assignSubject($subjectId, $day, $startTime)
     {
-        // Validation 1: Room selected
         if (!$this->selectedRoomId) {
             $this->dispatch('toast', [
                 'type' => 'warning',
@@ -406,7 +370,6 @@ class MasterGrid extends Component
             return;
         }
 
-        // Validation 2: Valid subject ID
         if (!$subjectId) {
             $this->dispatch('toast', [
                 'type' => 'error',
@@ -416,7 +379,6 @@ class MasterGrid extends Component
             return;
         }
 
-        // Validation 3: Subject exists
         $subject = Subject::find($subjectId);
         if (!$subject) {
             $this->dispatch('toast', [
@@ -427,7 +389,6 @@ class MasterGrid extends Component
             return;
         }
 
-        // Validation 4: Remaining meetings
         $remaining = $this->getRemainingMeetings($subject);
         if ($remaining <= 0) {
             $this->dispatch('toast', [
@@ -438,7 +399,6 @@ class MasterGrid extends Component
             return;
         }
 
-        // Validation 5: Time is aligned to 30-minute increments
         if (!$this->isTimeAlignedTo30Min($startTime)) {
             $this->dispatch('toast', [
                 'type' => 'error',
@@ -448,12 +408,22 @@ class MasterGrid extends Component
             return;
         }
 
-        // Calculate minutes and end time
         $minutesPerMeeting = $this->calculateMinutesPerMeeting($subject);
         $endTime = $this->calculateEndTime($startTime, $minutesPerMeeting);
-        $brickCount = $this->calculateBrickCount($subject);
 
-        // Validation 6: Check lunch break collision
+        $gridEnd = Carbon::parse($this->endTime);
+        $calculatedEndTime = Carbon::parse($endTime);
+        
+        if ($calculatedEndTime > $gridEnd) {
+            $gridEndDisplay = $this->formatTime12h($this->endTime);
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => '⏰ End Time Out of Bounds',
+                'detail' => "This subject would end at {$this->formatTime12h($endTime)}, which exceeds the grid end time ({$gridEndDisplay}). Please select an earlier time slot."
+            ]);
+            return;
+        }
+
         if ($this->overlapsLunchBreak($startTime, $endTime)) {
             $lunchDisplay = $this->formatTimeRange12h($this->lunchBreakStart, $this->lunchBreakEnd);
             $this->dispatch('toast', [
@@ -464,7 +434,6 @@ class MasterGrid extends Component
             return;
         }
 
-        // Validation 7: Check room time conflict
         if ($this->hasRoomConflict($this->selectedRoomId, $day, $startTime, $endTime)) {
             $this->dispatch('toast', [
                 'type' => 'error',
@@ -474,7 +443,6 @@ class MasterGrid extends Component
             return;
         }
 
-        // Validation 8: Check faculty conflict
         if ($this->hasFacultyConflict($subjectId, $day, $startTime, $endTime)) {
             $this->dispatch('toast', [
                 'type' => 'error',
@@ -484,7 +452,6 @@ class MasterGrid extends Component
             return;
         }
 
-        // All validations passed - create the schedule
         try {
             Schedule::create([
                 'subject_id' => $subjectId,
@@ -515,11 +482,17 @@ class MasterGrid extends Component
         }
     }
 
-    /**
-     * Remove a schedule.
-     */
     public function removeAssignment($scheduleId)
     {
+        if (!$this->canDeleteSchedule($scheduleId)) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => '❌ Permission Denied',
+                'detail' => 'You don\'t have permission to delete this schedule. Only your department\'s schedules can be deleted.'
+            ]);
+            return;
+        }
+
         try {
             $schedule = Schedule::find($scheduleId);
             if ($schedule) {
@@ -545,28 +518,51 @@ class MasterGrid extends Component
 
     public function getFilteredSubjects()
     {
-        $subjects = Subject::query()
-            ->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'meetings_per_week', 'units', 'department', 'section')
-            ->when(trim($this->searchSubject), function ($query) {
-                $query->where(function ($q) {
-                    $q->where('subject_code', 'like', '%' . $this->searchSubject . '%')
-                      ->orWhere('description', 'like', '%' . $this->searchSubject . '%')
-                      ->orWhere('edp_code', 'like', '%' . $this->searchSubject . '%');
-                });
-            })
-            ->when($this->selectedDept, function ($query) {
-                $query->where('department', $this->selectedDept);
-            })
-            ->when($this->selectedYear, function ($query) {
-                $query->whereRaw("SUBSTRING_INDEX(SUBSTRING_INDEX(edp_code, '-', 3), '-', -1) LIKE ?", ["{$this->selectedYear}%"]);
-            })
-            ->when($this->selectedMajor, function ($query) {
-                $major = strtoupper($this->selectedMajor);
-                $query->where(function ($q) use ($major) {
-                    $q->where('subject_code', 'like', $major . '%')
-                      ->orWhere('edp_code', 'like', "%-{$major}-%");
-                });
-            })
+        $query = Subject::query()
+            ->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'meetings_per_week', 'units', 'department', 'section', 'type'); // ✅ Add type here
+
+        if (!$this->hasFullAccess()) {
+            $userDept = $this->getUserDepartment();
+            if ($userDept) {
+                $query->where('department', $userDept);
+            }
+        }
+
+        if (trim($this->searchSubject)) {
+            $query->where(function ($q) {
+                $q->where('subject_code', 'like', '%' . $this->searchSubject . '%')
+                  ->orWhere('description', 'like', '%' . $this->searchSubject . '%')
+                  ->orWhere('edp_code', 'like', '%' . $this->searchSubject . '%');
+            });
+        }
+
+        if ($this->selectedDept) {
+            $query->where('department', $this->selectedDept);
+        }
+
+        if ($this->selectedYear) {
+            $query->whereRaw("SUBSTRING_INDEX(SUBSTRING_INDEX(edp_code, '-', 3), '-', -1) LIKE ?", ["{$this->selectedYear}%"]);
+        }
+
+        if ($this->selectedMajor) {
+            $major = strtoupper($this->selectedMajor);
+            $query->where(function ($q) use ($major) {
+                $q->where('subject_code', 'like', $major . '%')
+                  ->orWhere('edp_code', 'like', "%-{$major}-%");
+            });
+        }
+
+        if ($this->selectedSection) {
+            $query->where('section', $this->selectedSection);
+        }
+
+        // ✅ Type filtering
+        if ($this->selectedType) {
+            $type = ucfirst(strtolower($this->selectedType));
+            $query->where('type', $type);
+        }
+
+        $subjects = $query
             ->where('meetings_per_week', '>', 0)
             ->orderBy('subject_code', 'asc')
             ->get()
@@ -577,9 +573,6 @@ class MasterGrid extends Component
         return $subjects;
     }
 
-    /**
-     * Calculate the exact pixel height for a schedule card based on duration.
-     */
     public function calculateScheduleHeightPx($startTime, $endTime): int
     {
         $durationMinutes = Carbon::parse($startTime)->diffInMinutes(Carbon::parse($endTime));
@@ -587,9 +580,6 @@ class MasterGrid extends Component
         return ($brickCount * self::BRICK_HEIGHT_PX) + max(0, ($brickCount - 1));
     }
 
-    /**
-     * Get the top offset (row index × 45px) for a schedule's start time.
-     */
     public function getScheduleTopOffset($startTime): int
     {
         $slots = $this->generateDisplaySlots();
@@ -605,9 +595,6 @@ class MasterGrid extends Component
         return $index * self::BRICK_HEIGHT_PX;
     }
 
-    /**
-     * Get display time for schedule card
-     */
     public function getScheduleDisplayTime($startTime, $endTime): string
     {
         $start = Carbon::parse($startTime)->format('h:i A');
@@ -615,17 +602,11 @@ class MasterGrid extends Component
         return "{$start} - {$end}";
     }
 
-    /**
-     * Check if a schedule is the first occurrence in its slot
-     */
     public function isScheduleStartingAtSlot($schedule, $slotStartTime): bool
     {
         return $schedule->start_time === $slotStartTime;
     }
 
-    /**
-     * Check if a slot is within a schedule's time range
-     */
     public function isSlotWithinSchedule($schedule, $slotStart, $slotEnd): bool
     {
         $schedStart = Carbon::parse($schedule->start_time);
@@ -636,10 +617,6 @@ class MasterGrid extends Component
         return $schedStart <= $slotStartCarbon && $schedEnd > $slotStartCarbon;
     }
 
-    /**
-     * NEW: Get overlapping schedules for a given day and time slot
-     * Returns array with position data for side-by-side rendering
-     */
     public function getOverlappingSchedulesForSlot($day, $slotStart, $slotEnd): array
     {
         if (!$this->selectedRoomId) {
@@ -660,7 +637,6 @@ class MasterGrid extends Component
             })
             ->values();
 
-        // Calculate positions for each overlapping schedule
         $result = [];
         $totalOverlaps = $schedules->count();
 
@@ -677,9 +653,6 @@ class MasterGrid extends Component
         return $result;
     }
 
-    /**
-     * Get all schedules for a specific day and time that overlap
-     */
     public function getSchedulesAtSlot($day, $slotStart, $slotEnd): array
     {
         if (!$this->selectedRoomId) {
@@ -694,8 +667,6 @@ class MasterGrid extends Component
             ->toArray();
     }
 
-    
-
     public function render()
     {
         $subjects = $this->getFilteredSubjects();
@@ -708,7 +679,7 @@ class MasterGrid extends Component
         $schedules = $this->selectedRoomId
             ? Schedule::where('room_id', $this->selectedRoomId)
                 ->with(['subject' => function ($query) {
-                    $query->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'department');
+                    $query->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'department', 'type'); // ✅ Add type
                 }])
                 ->get()
             : collect();
@@ -726,6 +697,8 @@ class MasterGrid extends Component
             'lunchBreakEnd' => $this->lunchBreakEnd,
             'brickDurationMinutes' => self::BRICK_DURATION_MINUTES,
             'brickHeightPx' => self::BRICK_HEIGHT_PX,
+            'hasFullAccess' => $this->hasFullAccess(),
+            'departmentMajors' => self::DEPARTMENT_MAJORS,
         ]);
     }
 }
