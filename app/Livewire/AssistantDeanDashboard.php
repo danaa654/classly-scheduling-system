@@ -22,7 +22,7 @@ class AssistantDeanDashboard extends Component
             'facultyMembers' => Faculty::with('user')->latest()->get(), 
             
             // Global Statistics (Across all Departments)
-            'minorSubjectsCount' => Subject::where('is_minor', true)->count(),
+            'minorSubjectsCount' => Subject::where('type', 'Minor')->count(),
             'totalRooms' => Room::count(),
             'totalFacultyCount' => Faculty::count(),
             'totalUsers' => User::count(), // Added to show total system accounts

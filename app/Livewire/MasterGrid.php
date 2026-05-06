@@ -47,6 +47,7 @@ class MasterGrid extends Component
         'CCS' => ['IT', 'ACT'],     
         'COC' => ['FB', 'LD', 'QD'],
         'SHTM' => ['HM', 'TM'],
+        'CTE' => ['ED'],
     ];
 
     protected $listeners = ['refreshGrid' => '$refresh'];
@@ -519,7 +520,7 @@ class MasterGrid extends Component
     public function getFilteredSubjects()
     {
         $query = Subject::query()
-            ->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'meetings_per_week', 'units', 'department', 'section', 'type'); // ✅ Add type here
+            ->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'meetings_per_week', 'units', 'department', 'section', 'type', 'major', 'year_level');
 
         if (!$this->hasFullAccess()) {
             $userDept = $this->getUserDepartment();
@@ -541,22 +542,18 @@ class MasterGrid extends Component
         }
 
         if ($this->selectedYear) {
-            $query->whereRaw("SUBSTRING_INDEX(SUBSTRING_INDEX(edp_code, '-', 3), '-', -1) LIKE ?", ["{$this->selectedYear}%"]);
+            $query->where('year_level', (int)$this->selectedYear);
         }
 
         if ($this->selectedMajor) {
             $major = strtoupper($this->selectedMajor);
-            $query->where(function ($q) use ($major) {
-                $q->where('subject_code', 'like', $major . '%')
-                  ->orWhere('edp_code', 'like', "%-{$major}-%");
-            });
+            $query->where('major', $major);
         }
 
         if ($this->selectedSection) {
             $query->where('section', $this->selectedSection);
         }
 
-        // ✅ Type filtering
         if ($this->selectedType) {
             $type = ucfirst(strtolower($this->selectedType));
             $query->where('type', $type);
@@ -679,7 +676,7 @@ class MasterGrid extends Component
         $schedules = $this->selectedRoomId
             ? Schedule::where('room_id', $this->selectedRoomId)
                 ->with(['subject' => function ($query) {
-                    $query->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'department', 'type'); // ✅ Add type
+                    $query->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'department', 'type', 'major', 'year_level');
                 }])
                 ->get()
             : collect();
@@ -699,6 +696,9 @@ class MasterGrid extends Component
             'brickHeightPx' => self::BRICK_HEIGHT_PX,
             'hasFullAccess' => $this->hasFullAccess(),
             'departmentMajors' => self::DEPARTMENT_MAJORS,
+            'selectedRoomId' => $this->selectedRoomId,
+            'selectedRoomName' => $this->selectedRoomName,
+            'selectedRoomType' => $this->selectedRoomType,
         ]);
     }
 }

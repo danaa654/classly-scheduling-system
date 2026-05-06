@@ -13,29 +13,26 @@ class Subject extends Model
         'subject_code',
         'section',
         'description',
-        'units',
+        'major',
+        'year_level',
         'department',
-        'type', // 'Lecture' or 'Laboratory'
+        'units',
         'duration_hours',
+        'type',
         'meetings_per_week',
-        'scheduled_hours',
     ];
 
     protected $casts = [
-        'units' => 'float',
+        'units' => 'integer',
+        'year_level' => 'integer',
         'duration_hours' => 'float',
         'meetings_per_week' => 'integer',
-        'scheduled_hours' => 'float',
-        'type' => 'string',
     ];
 
     // ============================================================
     // RELATIONSHIPS
     // ============================================================
     
-    /**
-     * A subject has many schedules
-     */
     public function schedules(): HasMany
     {
         return $this->hasMany(Schedule::class);
@@ -45,25 +42,11 @@ class Subject extends Model
     // SCOPES - Filtering & Querying
     // ============================================================
 
-    /**
-     * Filter subjects by department
-     */
     public function scopeByDepartment($query, $department)
     {
         return $query->where('department', $department);
     }
 
-    /**
-     * Filter subjects by type (Lecture/Laboratory)
-     */
-    public function scopeByType($query, $type)
-    {
-        return $query->where('type', $type);
-    }
-
-    /**
-     * Search subjects by code or description
-     */
     public function scopeSearch($query, $term)
     {
         return $query->where('subject_code', 'like', "%{$term}%")
@@ -71,49 +54,12 @@ class Subject extends Model
                      ->orWhere('edp_code', 'like', "%{$term}%");
     }
 
-    /**
-     * Get subjects that need more scheduling
-     */
-    public function scopeIncomplete($query)
-    {
-        return $query->whereRaw('scheduled_hours < (units * meetings_per_week)');
-    }
-
-    /**
-     * Get subjects that are fully scheduled
-     */
-    public function scopeComplete($query)
-    {
-        return $query->whereRaw('scheduled_hours >= (units * meetings_per_week)');
-    }
-
     // ============================================================
     // ACCESSORS & ATTRIBUTES
     // ============================================================
 
     /**
-     * Calculate remaining hours needed
-     */
-    public function remainingHours(): Attribute
-    {
-        return Attribute::make(
-            get: fn () => max(0, ($this->units * $this->meetings_per_week) - ($this->scheduled_hours ?? 0))
-        )->shouldCache();
-    }
-
-    /**
-     * Get scheduling progress percentage
-     */
-    public function schedulingProgress(): Attribute
-    {
-        $required = $this->units * $this->meetings_per_week;
-        return Attribute::make(
-            get: fn () => $required > 0 ? round((($this->scheduled_hours ?? 0) / $required) * 100, 2) : 0
-        )->shouldCache();
-    }
-
-    /**
-     * Get department color code
+     * Get department color code for the UI
      */
     public function departmentColor(): Attribute
     {
@@ -129,90 +75,27 @@ class Subject extends Model
         )->shouldCache();
     }
 
-    // ============================================================
-    // VALIDATION & CONSTRAINT METHODS
-    // ============================================================
-
     /**
-     * Check if subject can be scheduled in a specific room type
+     * Get subject card styling for MasterGrid
      */
-    public function canScheduleInRoomType(string $roomType): bool
+    public function getCardStyling(): array
     {
-        // Laboratory subjects can only go in Lab rooms
-        if ($this->type === 'Laboratory' && $roomType !== 'Laboratory') {
-            return false;
-        }
+        $styles = [
+            'CCS' => 'yellow',
+            'CTE' => 'blue',
+            'COC' => 'violet',
+            'SHTM' => 'orange',
+        ];
 
-        // Lecture subjects can go in Lecture rooms
-        if ($this->type === 'Lecture' && $roomType === 'Lecture') {
-            return true;
-        }
-
-        return true;
+        return [
+            'color' => $styles[$this->department] ?? 'gray',
+            'department' => $this->department,
+        ];
     }
 
-    /**
-     * Check if subject needs more meetings
-     */
-    public function needsMoreMeetings(): bool
+    public function getRemainingMeetings()
     {
-        $requiredHours = $this->units * $this->meetings_per_week;
-        return ($this->scheduled_hours ?? 0) < $requiredHours;
+        $scheduled = \App\Models\Schedule::where('subject_id', $this->id)->count();
+        return max(0, $this->meetings_per_week - $scheduled);
     }
-
-    /**
-     * Get count of scheduled meetings
-     */
-    public function scheduledMeetingsCount(): int
-    {
-        return $this->schedules()->count();
-    }
-
-    /**
-     * Get total meeting slots needed
-     */
-    public function totalMeetingsNeeded(): int
-    {
-        return $this->meetings_per_week;
-    }
-
-    /**
-     * Check if subject is fully scheduled
-     */
-    public function isFullyScheduled(): bool
-    {
-        return !$this->needsMoreMeetings();
-    }
-
-    /**
-     * Get remaining slots needed for this subject
-     */
-    public function remainingMeetingSlots(): int
-    {
-        $scheduled = $this->scheduledMeetingsCount();
-        return max(0, $this->totalMeetingsNeeded() - $scheduled);
-    }
-    /**
- * Get subject card styling
- */
-public function getCardStyling(): array
-{
-    $styles = [
-        'CCS' => 'yellow',
-        'CTE' => 'blue',
-        'COC' => 'violet',
-        'SHTM' => 'orange',
-    ];
-
-    return [
-        'color' => $styles[$this->department] ?? 'gray',
-        'department' => $this->department,
-    ];
-}
-public function getRemainingMeetings()
-{
-    // Logic to count existing schedules for this subject
-    $scheduled = \App\Models\Schedule::where('subject_id', $this->id)->count();
-    return max(0, $this->meetings_per_week - $scheduled);
-}
 }

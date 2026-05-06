@@ -59,7 +59,9 @@
                 <div class="rounded-[2.2rem] bg-rose-600 dark:bg-rose-500 p-6 flex flex-col justify-between shadow-lg shadow-rose-200 dark:shadow-none hover:scale-[1.02] transition-all duration-300">
                     <div>
                         <p class="text-[10px] font-bold text-rose-100 uppercase tracking-widest">Minor Subjects</p>
-                        <span class="text-4xl font-black text-white leading-none mt-2 block">{{ $minorSubjectsCount ?? 24 }}</span>
+                        <span class="text-4xl font-black text-white leading-none mt-2 block">
+                            {{ $minorSubjectsCount }}
+                        </span>
                     </div>
                     <div class="h-1 w-12 bg-white/30 rounded-full"></div>
                 </div>
