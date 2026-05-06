@@ -26,6 +26,9 @@ class MasterGrid extends Component
     public $selectedRoomId = null;
     public $selectedRoomName = null;
     public $selectedRoomType = null;
+    public $searchRoom = '';
+    public $selectedRoomTypeFilter = '';
+    public $selectedFloor = '';
 
     // Dynamic time bounds from settings
     public $dayStart = '07:00';
@@ -66,9 +69,6 @@ class MasterGrid extends Component
         $this->loadSettings();
     }
 
-    /**
-     * Load settings from database dynamically.
-     */
     public function loadSettings()
     {
         $this->dayStart = Setting::where('key', 'day_start')->first()?->value ?? '07:00';
@@ -84,6 +84,8 @@ class MasterGrid extends Component
     public function updatedSelectedDept() { $this->selectedMajor = ''; $this->resetPage(); }
     public function updatedSelectedSection() { $this->resetPage(); }
     public function updatedSelectedType() { $this->resetPage(); }
+    public function updatedSelectedRoomTypeFilter() { $this->resetPage(); }
+    public function updatedSelectedFloor() { $this->resetPage(); }
 
     public function hasFullAccess(): bool
     {
@@ -355,7 +357,8 @@ class MasterGrid extends Component
             $this->selectedRoomName = $room->room_name;
             $this->selectedRoomType = $room->type;
             
-            $this->dispatch('room-selected');
+            $this->dispatch('room-selected', roomId: $id); 
+            $this->dispatch('refreshGrid');
 
             $this->dispatch('toast', [
                 'type' => 'success',
@@ -389,16 +392,8 @@ class MasterGrid extends Component
             return;
         }
 
-        if (!$subjectId) {
-            $this->dispatch('toast', [
-                'type' => 'error',
-                'message' => '❌ Invalid Subject',
-                'detail' => 'Please select a valid subject!'
-            ]);
-            return;
-        }
-
         $subject = Subject::find($subjectId);
+
         if (!$subject) {
             $this->dispatch('toast', [
                 'type' => 'error',
@@ -406,6 +401,17 @@ class MasterGrid extends Component
                 'detail' => 'The selected subject could not be found!'
             ]);
             return;
+        }
+
+        $isLectureRoom = strtoupper($this->selectedRoomType) === 'LECTURE';
+        $isLabSubject = in_array(strtoupper($subject->type), ['LABORATORY', 'LAB']);
+
+        if ($isLectureRoom && $isLabSubject) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => '🔬 Compatibility Warning',
+                'detail' => 'You are placing a Lab subject in a Lecture room.'
+            ]);
         }
 
         $remaining = $this->getRemainingMeetings($subject);
@@ -682,46 +688,74 @@ class MasterGrid extends Component
             ->toArray();
     }
 
+    public function getAvailableFloors()
+    {
+        return Room::query()
+            ->whereNotNull('floor')
+            ->distinct()
+            ->pluck('floor')
+            ->sort()
+            ->values()
+            ->toArray();
+    }
+
     public function render()
     {
         $subjects = $this->getFilteredSubjects();
 
-        $rooms = Room::all()->map(function ($room) {
-            $room->utilization = $this->calculateRoomUtilization($room);
-            return $room;
-        })->sortBy('room_name');
+        $rooms = Room::query()
+            ->when($this->searchRoom, function($query) {
+                $query->where('room_name', 'like', '%' . $this->searchRoom . '%');
+            })
+            ->when($this->selectedRoomTypeFilter, function($query) {
+                $query->where('type', $this->selectedRoomTypeFilter);
+            })
+            ->when($this->selectedFloor, function($query) {
+                $query->where('floor', $this->selectedFloor);
+            })
+            ->get()
+            ->map(function ($room) {
+                $room->utilization = $this->calculateRoomUtilization($room);
+                return $room;
+            })
+            ->sortBy('room_name');
 
         $schedules = $this->selectedRoomId
             ? Schedule::where('room_id', $this->selectedRoomId)
                 ->with(['subject' => function ($query) {
-                    $query->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'department', 'type', 'major', 'year_level');
+                    $query->select(
+                        'id', 'subject_code', 'description', 'edp_code', 
+                        'duration_hours', 'department', 'type', 'major', 'year_level'
+                    );
                 }])
                 ->get()
             : collect();
 
         $lunchSlots = $this->getLunchBreakSlots();
+        $availableFloors = $this->getAvailableFloors();
 
         return view('livewire.master-grid', [
-            'days' => ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'],
-            'displaySlots' => $this->generateDisplaySlots(),
-            'lunchSlots' => $lunchSlots,
-            'schedules' => $schedules,
-            'subjects' => $subjects,
-            'rooms' => $rooms,
-            'lunchStart' => self::LUNCH_START,
-            'lunchEnd' => self::LUNCH_END,
+            'days'                 => ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'],
+            'displaySlots'         => $this->generateDisplaySlots(),
+            'lunchSlots'           => $lunchSlots,
+            'schedules'            => $schedules,
+            'subjects'             => $subjects,
+            'rooms'                => $rooms,
+            'availableFloors'      => $availableFloors,
+            'lunchStart'           => self::LUNCH_START,
+            'lunchEnd'             => self::LUNCH_END,
             'brickDurationMinutes' => self::BRICK_DURATION_MINUTES,
-            'brickHeightPx' => self::BRICK_HEIGHT_PX,
-            'hasFullAccess' => $this->hasFullAccess(),
-            'departmentMajors' => self::DEPARTMENT_MAJORS,
-            'selectedRoomId' => $this->selectedRoomId,
-            'selectedRoomName' => $this->selectedRoomName,
-            'selectedRoomType' => $this->selectedRoomType,
-            'dayStart' => $this->dayStart,
-            'dayEnd' => $this->dayEnd,
-            'schoolYear' => $this->schoolYear,
-            'semester' => $this->semester,
-            'semesterName' => $this->semesterName,
+            'brickHeightPx'        => self::BRICK_HEIGHT_PX,
+            'hasFullAccess'        => $this->hasFullAccess(),
+            'departmentMajors'     => self::DEPARTMENT_MAJORS,
+            'selectedRoomId'       => $this->selectedRoomId,
+            'selectedRoomName'     => $this->selectedRoomName,
+            'selectedRoomType'     => $this->selectedRoomType,
+            'dayStart'             => $this->dayStart,
+            'dayEnd'               => $this->dayEnd,
+            'schoolYear'           => $this->schoolYear,
+            'semester'             => $this->semester,
+            'semesterName'         => $this->semesterName,
         ]);
     }
 }

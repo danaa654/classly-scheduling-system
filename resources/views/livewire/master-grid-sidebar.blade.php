@@ -109,7 +109,6 @@
                     $remainingHours = $this->getRemainingHoursDecimal($subject->id) ?? 0;
                     $progressPercent = ($subject->meetings_per_week > 0) ? ($scheduledCount / $subject->meetings_per_week) * 100 : 0;
                     
-                    // Determine type indicator - use 'type' column
                     $typeValue = strtolower($subject->type ?? 'major');
                     $isMinor = $typeValue === 'minor';
                     $isMajor = $typeValue === 'major' || empty($subject->type);
@@ -122,12 +121,18 @@
                     <div 
                         draggable="true"
                         @dragstart="
+                            if(!$wire.selectedRoomId) {
+                                event.preventDefault();
+                                $dispatch('toast', {
+                                    type: 'warning',
+                                    message: '⚠️ Select a Room First',
+                                    detail: 'Please select a room from the sidebar before assigning subjects.'
+                                });
+                                return false;
+                            }
                             event.dataTransfer.effectAllowed = 'copy';
                             event.dataTransfer.setData('subject_id', '{{ $subject->id }}');
-                            if(!@json($selectedRoomId)) {
-                                event.preventDefault();
-                                $dispatch('room-first-warning');
-                            }
+                            event.dataTransfer.setData('subject_code', '{{ $subject->subject_code }}');
                         "
                         @dragend="$event.target.style.opacity = '1'"
                         class="p-2 {{ $color }} border-2 rounded-lg hover:shadow-md hover:scale-[1.01] transition-all cursor-grab active:cursor-grabbing group relative backdrop-blur-sm"
@@ -135,11 +140,9 @@
                         
                         {{-- TYPE INDICATOR (Top-right with blinking dot) --}}
                         <div class="absolute top-2 right-2 flex items-center gap-1.5 bg-white/40 dark:bg-black/40 px-1.5 py-0.5 rounded-full border border-current/30 backdrop-blur-sm">
-                            {{-- Blinking Dot --}}
                             <div class="w-2 h-2 rounded-full {{ $dotColor }} animate-pulse shadow-lg" 
                                  style="box-shadow: 0 0 8px {{ $isMinor ? 'rgba(34, 197, 94, 0.6)' : ($isMajor ? 'rgba(239, 68, 68, 0.6)' : 'rgba(107, 114, 128, 0.6)') }}">
                             </div>
-                            {{-- Type Text --}}
                             <span class="text-[7px] font-black uppercase tracking-tight {{ $isMinor ? 'text-green-700 dark:text-green-400' : ($isMajor ? 'text-red-700 dark:text-red-400' : 'text-gray-700 dark:text-gray-400') }}">
                                 {{ $typeText }}
                             </span>
@@ -216,9 +219,14 @@
          x-transition:leave="transition ease-in duration-200"
          x-transition:leave-start="translate-x-0 opacity-100"
          x-transition:leave-end="translate-x-full opacity-0"
-         class="w-[260px] flex flex-col bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl overflow-hidden"
-         x-data="{ noRoomSelected: !@json($selectedRoomId ?? null) }"
-         @room-first-warning.window="noRoomSelected = true; setTimeout(() => noRoomSelected = false, 2000)">
+         class="w-[280px] flex flex-col bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl overflow-hidden"
+         x-data="{ 
+        get isRoomActive() { return $wire.selectedRoomId !== null } 
+            }"
+            @room-first-warning.window="
+                $el.classList.add('ring-4', 'ring-red-500/50', 'animate-pulse');
+                setTimeout(() => $el.classList.remove('ring-4', 'ring-red-500/50', 'animate-pulse'), 2000)
+            ">
         
         {{-- HEADER --}}
         <div class="h-12 px-3 py-2 border-b-2 border-slate-300 dark:border-slate-700 flex items-center justify-between bg-gradient-to-r from-purple-500/20 to-purple-600/20 dark:from-purple-900/40 dark:to-purple-800/40 backdrop-blur-sm flex-shrink-0">
@@ -229,11 +237,37 @@
             <span class="text-[8px] font-bold text-white bg-purple-600 dark:bg-purple-700 px-1.5 py-0.5 rounded-full">{{ count($rooms ?? []) }}</span>
         </div>
 
+        {{-- ROOM FILTERS --}}
+        <div class="px-2.5 py-2 border-b-2 border-slate-300 dark:border-slate-700 space-y-1.5 bg-white/30 dark:bg-slate-800/30 backdrop-blur-sm flex-shrink-0">
+            {{-- Room Type Filter --}}
+            <select 
+                wire:model.live="selectedRoomTypeFilter"
+                class="w-full text-[8px] px-2 py-1 rounded-md border-2 border-slate-300 dark:border-slate-700 font-bold 
+                    bg-white/70 dark:bg-slate-700/70 text-slate-900 dark:text-slate-100 
+                    focus:ring-2 focus:ring-purple-500 transition-all backdrop-blur-sm uppercase">
+                <option value="">ALL TYPES</option>
+                <option value="LECTURE">LECTURE</option>
+                <option value="LAB">LAB</option>
+            </select>
+
+            {{-- Floor Filter --}}
+            <select 
+                wire:model.live="selectedFloor"
+                class="w-full text-[8px] px-2 py-1 rounded-md border-2 border-slate-300 dark:border-slate-700 font-bold 
+                    bg-white/70 dark:bg-slate-700/70 text-slate-900 dark:text-slate-100 
+                    focus:ring-2 focus:ring-purple-500 transition-all backdrop-blur-sm uppercase">
+                <option value="">ALL FLOORS</option>
+                @foreach($availableFloors ?? [] as $floor)
+                    <option value="{{ $floor }}">{{ $floor }}</option>
+                @endforeach
+            </select>
+        </div>
+
         {{-- ROOMS LIST --}}
         <div class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1.5">
             @forelse($rooms ?? [] as $room)
                 @php
-                    $isSelected = ($selectedRoomId ?? null) == $room->id;
+                    $isSelected = $selectedRoomId !== null && (int)$selectedRoomId === (int)$room->id;
                     $isLecture = strtoupper($room->type ?? '') === 'LECTURE';
                     
                     $cardClasses = $isSelected
@@ -255,8 +289,8 @@
                     @endif
 
                     {{-- Header: Name & Type Badge --}}
-                    <div class="flex justify-between items-start mb-3">
-                        <div class="flex flex-col">
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="flex flex-col flex-1">
                             <h4 class="font-black text-[11px] uppercase tracking-tighter {{ $isSelected ? 'text-blue-600 dark:text-blue-400' : '' }}">
                                 {{ $room->room_name }}
                             </h4>
@@ -266,6 +300,31 @@
                         <span class="text-[7px] font-black px-1.5 py-0.5 rounded-md border {{ $isLecture ? 'bg-emerald-500/20 border-emerald-500 text-emerald-700 dark:text-emerald-300' : 'bg-slate-500/20 border-slate-400 text-slate-100' }}">
                             {{ $isLecture ? 'LEC' : 'LAB' }}
                         </span>
+                    </div>
+
+                    {{-- Floor & Specialization Info --}}
+                    <div class="mb-2 space-y-1 text-[8px] font-bold">
+                        @if($room->floor)
+                            <div class="flex items-center gap-1">
+                                <span class="text-[7px]">📍</span>
+                                <span class="opacity-70">{{ $room->floor }}</span>
+                            </div>
+                        @endif
+                        @if($room->specialization)
+                            <div class="flex items-center gap-1">
+                                <span class="text-[7px]">🏷️</span>
+                                <span class="bg-white/30 dark:bg-black/30 px-1.5 py-0.5 rounded text-[7px] uppercase tracking-tight">
+                                    {{ $room->specialization }}
+                                </span>
+                            </div>
+                        @else
+                            <div class="flex items-center gap-1">
+                                <span class="text-[7px]">🏷️</span>
+                                <span class="bg-white/30 dark:bg-black/30 px-1.5 py-0.5 rounded text-[7px] uppercase tracking-tight opacity-60">
+                                    General
+                                </span>
+                            </div>
+                        @endif
                     </div>
 
                     {{-- Stats: Capacity & Progress --}}
@@ -312,6 +371,11 @@
         box-shadow: 0 0 20px rgba(37, 99, 235, 0.5);
     }
 
+    .ring-blue-600 {
+        box-shadow: 0 0 15px -3px rgba(37, 99, 235, 0.4), 0 4px 6px -2px rgba(37, 99, 235, 0.1);
+        border-color: #2563eb !important;
+    }
+
     .custom-scrollbar::-webkit-scrollbar { width: 4px; }
     .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 2px; }
@@ -327,7 +391,6 @@
         50% { opacity: 0.7; }
     }
 
-    /* Enhanced blinking dot animation */
     .animate-pulse {
         animation: pulse-enhanced 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     }
