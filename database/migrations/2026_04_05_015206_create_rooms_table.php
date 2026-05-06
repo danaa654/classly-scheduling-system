@@ -9,16 +9,18 @@ return new class extends Migration
     /**
      * Run the migrations.
      */
-        public function up(): void
-    {
-            Schema::create('rooms', function (Blueprint $table) {
-                $table->id();
-                $table->string('room_name')->unique(); // e.g., Room 201
-                $table->string('type')->default('Lecture'); // Lecture or Lab
-                $table->integer('capacity')->default(40);
-                $table->timestamps();
-            });
-    }
+    public function up(): void
+{
+    Schema::create('rooms', function (Blueprint $table) {
+        $table->id();
+        $table->string('room_name');
+        $table->integer('capacity');
+        $table->string('type'); // This is your Lab/Lecture
+        $table->string('specialization')->nullable(); // Add this line!
+        $table->string('floor');
+        $table->timestamps();
+    });
+}
 
     /**
      * Reverse the migrations.

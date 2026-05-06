@@ -12,7 +12,7 @@ class Room extends Model
         'room_name',
         'type', // 'Lecture' or 'Laboratory'
         'capacity',
-        'building',
+        'specialization',
         'floor',
     ];
 
@@ -62,7 +62,8 @@ class Room extends Model
     public function scopeSearch($query, $term)
     {
         return $query->where('room_name', 'like', "%{$term}%")
-                     ->orWhere('building', 'like', "%{$term}%");
+                     ->orWhere('specialization', 'like', "%{$term}%")
+                     ->orWhere('floor', 'like', "%{$term}%");
     }
 
     /**

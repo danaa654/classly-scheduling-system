@@ -28,6 +28,8 @@ class ManageRooms extends Component
     public $room_name;
     public $type = 'LECTURE';
     public $capacity = 40;
+    public $specialization = '';
+    public $floor = '';
     
     public $showModal = false;
     public $bulkOpen = false; 
@@ -43,8 +45,10 @@ class ManageRooms extends Component
     protected function rules() {
         return [
             'room_name' => 'required|unique:rooms,room_name,' . $this->room_id,
-            'type'      => 'required|in:LECTURE,LAB',
+            'type'      => 'required|in:LECTURE,LAB,Lecture,Lab',
             'capacity'  => 'required|integer|min:1',
+            'specialization' => 'nullable|string',
+            'floor' => 'nullable|string',
         ];
     }
 
@@ -90,8 +94,26 @@ class ManageRooms extends Component
             ]);
         }
 
-        // Invalid Headers (Warning Toast)
-        $required = ['room_name', 'capacity', 'type'];
+        // Invalid Headers (Warning Toast) - Check for required columns
+        $required = ['room_name', 'capacity'];
+        $roomTypeCol = null;
+        
+        // Support both 'type' and 'room_type' column names
+        if (in_array('type', $headers)) {
+            $roomTypeCol = 'type';
+        } elseif (in_array('room_type', $headers)) {
+            $roomTypeCol = 'room_type';
+        }
+
+        if (!$roomTypeCol) {
+            $this->reset(['importFile', 'importPreview']);
+            return $this->dispatch('toast', [
+                'type'    => 'error',
+                'message' => 'Invalid Format',
+                'detail'  => "Missing 'type' or 'room_type' column."
+            ]);
+        }
+
         foreach($required as $key) {
             if (!in_array($key, $headers)) {
                 $this->reset(['importFile', 'importPreview']);
@@ -103,16 +125,45 @@ class ManageRooms extends Component
             }
         }
 
+        // Get column indices
+        $roomNameIdx = array_search('room_name', $headers);
+        $capacityIdx = array_search('capacity', $headers);
+        $roomTypeIdx = array_search($roomTypeCol, $headers);
+        $specializationIdx = array_search('specialization', $headers);
+        $floorIdx = array_search('floor', $headers);
+
         // Preview Generation...
         $this->importPreview = [];
         foreach (array_slice($data, 1) as $row) {
-            if (empty($row) || count($row) < 3) continue;
+            if (empty($row) || empty(trim($row[0]))) continue;
+            
+            $roomName = trim($row[$roomNameIdx] ?? '');
+            $roomType = strtoupper(trim($row[$roomTypeIdx] ?? 'LECTURE'));
+            
+            // Normalize room type values
+            if ($roomType === 'LECTURE' || strtoupper($roomType) === 'LECTURE') {
+                $roomType = 'LECTURE';
+            } elseif ($roomType === 'LAB' || strtoupper($roomType) === 'LABORATORY') {
+                $roomType = 'LAB';
+            }
+
             $this->importPreview[] = [
-                'room_name' => trim($row[0]),
-                'capacity'  => trim($row[1]),
-                'type'      => strtoupper(trim($row[2])),
-                'status'    => Room::where('room_name', trim($row[0]))->exists() ? 'DUPLICATE' : 'READY',
+                'room_name' => $roomName,
+                'capacity'  => trim($row[$capacityIdx] ?? ''),
+                'type'      => $roomType,
+                'specialization' => $specializationIdx !== false ? trim($row[$specializationIdx] ?? '') : '',
+                'floor'     => $floorIdx !== false ? trim($row[$floorIdx] ?? '') : '',
+                'status'    => Room::where('room_name', $roomName)->exists() ? 'DUPLICATE' : 'READY',
             ];
+        }
+
+        if (empty($this->importPreview)) {
+            $this->reset(['importFile', 'importPreview']);
+            return $this->dispatch('toast', [
+                'type'    => 'error',
+                'message' => 'No valid data found',
+                'detail'  => "The CSV file appears to be empty or contains only headers."
+            ]);
         }
     }
 
@@ -123,8 +174,10 @@ class ManageRooms extends Component
             if ($data['status'] === 'READY') {
                 Room::create([
                     'room_name' => $data['room_name'],
-                    'capacity'  => $data['capacity'],
+                    'capacity'  => (int)$data['capacity'],
                     'type'      => $data['type'],
+                    'specialization' => $data['specialization'],
+                    'floor'     => $data['floor'],
                 ]);
                 $count++;
             }
@@ -168,88 +221,108 @@ class ManageRooms extends Component
             'detail'  => "Successfully removed $count records."
         ]);
     }
+    
     private function notifyManagement($message, $type)
-{
-    $managementRoles = ['dean', 'oic', 'associate_dean', 'registrar', 'admin'];
+    {
+        $managementRoles = ['dean', 'oic', 'associate_dean', 'registrar', 'admin'];
 
-    $usersToNotify = User::whereIn('role', $managementRoles)
-        ->where('id', '!=', auth()->id()) 
-        ->get();
+        $usersToNotify = User::whereIn('role', $managementRoles)
+            ->where('id', '!=', auth()->id()) 
+            ->get();
 
-    if ($usersToNotify->isNotEmpty()) {
-        Notification::send($usersToNotify, new GeneralNotification([
-            'title' => 'Room Registry Update',
-            'message' => $message,
-            'type' => $type,
-            'url' => url('/manage-rooms'),
-            'sender_name' => auth()->user()->name, 
-        ]));
+        if ($usersToNotify->isNotEmpty()) {
+            Notification::send($usersToNotify, new GeneralNotification([
+                'title' => 'Room Registry Update',
+                'message' => $message,
+                'type' => $type,
+                'url' => url('/manage-rooms'),
+                'sender_name' => auth()->user()->name, 
+            ]));
+        }
     }
-}
 
     // Modal & CRUD methods...
-    public function openModal() { $this->resetValidation(); $this->reset(['room_id', 'room_name', 'isEditMode', 'capacity', 'type']); $this->showModal = true; }
+    public function openModal() { $this->resetValidation(); $this->reset(['room_id', 'room_name', 'isEditMode', 'capacity', 'type', 'specialization', 'floor']); $this->type = 'LECTURE'; $this->capacity = 40; $this->showModal = true; }
 
     public function saveRoom() 
-{
-    $this->validate();
-    
-    Room::create([
-        'room_name' => $this->room_name, 
-        'type'      => strtoupper($this->type),
-        'capacity'  => $this->capacity
-    ]);
+    {
+        $this->validate();
+        
+        Room::create([
+            'room_name' => $this->room_name, 
+            'type'      => strtoupper($this->type),
+            'capacity'  => $this->capacity,
+            'specialization' => $this->specialization,
+            'floor'     => $this->floor,
+        ]);
 
-    // Notify others
-    $this->notifyManagement("added a new room: {$this->room_name}", 'room_add');
-    $this->dispatch('roomImported');
+        // Notify others
+        $this->notifyManagement("added a new room: {$this->room_name}", 'room_add');
+        $this->dispatch('roomImported');
 
-    $this->showModal = false;
+        $this->showModal = false;
 
-    // Success Message for the person doing the action
-    return $this->dispatch('swal', [
-        'title' => 'Room Created!',
-        'text' => "Room {$this->room_name} has been added to the system.",
-        'icon' => 'success'
-    ]);
-}
+        // Success Message for the person doing the action
+        return $this->dispatch('swal', [
+            'title' => 'Room Created!',
+            'text' => "Room {$this->room_name} has been added to the system.",
+            'icon' => 'success'
+        ]);
+    }
+
     public function editRoom($id) 
     {
         $this->resetValidation();
         $room = Room::findOrFail($id);
-        $this->room_id = $room->id; $this->room_name = $room->room_name; $this->type = $room->type; $this->capacity = $room->capacity; $this->isEditMode = true; $this->showModal = true;
+        $this->room_id = $room->id; 
+        $this->room_name = $room->room_name; 
+        $this->type = $room->type; 
+        $this->capacity = $room->capacity; 
+        $this->specialization = $room->specialization ?? '';
+        $this->floor = $room->floor ?? '';
+        $this->isEditMode = true; 
+        $this->showModal = true;
     }
 
     public function updateRoom()
     {
         $this->validate();
-        Room::findOrFail($this->room_id)->update(['room_name' => $this->room_name, 'type' => strtoupper($this->type), 'capacity' => $this->capacity]);
-        $this->showModal = false; $this->isEditMode = false;
+        Room::findOrFail($this->room_id)->update([
+            'room_name' => $this->room_name, 
+            'type' => strtoupper($this->type), 
+            'capacity' => $this->capacity,
+            'specialization' => $this->specialization,
+            'floor' => $this->floor,
+        ]);
+        $this->showModal = false; 
+        $this->isEditMode = false;
         $this->dispatch('swal', title: 'Room Updated', icon: 'success');
     }
 
     public function deleteRoom($id) 
-{
-    $room = Room::findOrFail($id);
-    $name = $room->room_name;
-    $room->delete();
+    {
+        $room = Room::findOrFail($id);
+        $name = $room->room_name;
+        $room->delete();
 
-    // Notify others
-    $this->notifyManagement("deleted room: $name", 'room_delete');
-    $this->dispatch('roomImported');
+        // Notify others
+        $this->notifyManagement("deleted room: $name", 'room_delete');
+        $this->dispatch('roomImported');
 
-    // Success Message for the person doing the action
-    return $this->dispatch('swal', [
-        'title' => 'Room Deleted',
-        'text' => "The record for $name has been removed.",
-        'icon' => 'warning'
-    ]);
-}
+        // Success Message for the person doing the action
+        return $this->dispatch('swal', [
+            'title' => 'Room Deleted',
+            'text' => "The record for $name has been removed.",
+            'icon' => 'warning'
+        ]);
+    }
 
     public function render() 
     {
         $query = Room::query()
-            ->when($this->search, fn($q) => $q->where('room_name', 'like', '%' . $this->search . '%'))
+            ->when($this->search, fn($q) => $q->where('room_name', 'like', '%' . $this->search . '%')
+                ->orWhere('specialization', 'like', '%' . $this->search . '%')
+                ->orWhere('floor', 'like', '%' . $this->search . '%'))
             ->when($this->filterType, fn($q) => $q->where('type', $this->filterType));
 
         return view('livewire.manage-rooms', [

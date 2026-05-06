@@ -42,7 +42,7 @@
                 <div class="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white dark:bg-slate-900/40 p-6 rounded-[2rem] border border-slate-200 dark:border-slate-800 shadow-sm transition-colors">
                     <div class="relative flex-1 max-w-lg">
                         <span class="absolute inset-y-0 left-5 flex items-center text-slate-400">🔍</span>
-                        <input type="text" wire:model.live="search" placeholder="Search by room name or type..." 
+                        <input type="text" wire:model.live="search" placeholder="Search by room name, floor or specialization..." 
                                class="w-full pl-14 pr-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-none rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 transition-all text-sm text-slate-800 dark:text-slate-200">
                     </div>
                     
@@ -68,7 +68,8 @@
                                 </th>
                                 <th class="px-10 py-5">Room Details</th>
                                 <th class="px-10 py-5 text-center">Classification</th>
-                                <th class="px-10 py-5">Capacity Index</th>
+                                <th class="px-10 py-5">Capacity</th>
+                                <th class="px-10 py-5">Floor & Spec</th>
                                 @if(in_array(auth()->user()->role, ['admin', 'registrar']))
                                 <th class="px-10 py-5 text-right">Actions</th>
                                 @endif
@@ -90,13 +91,21 @@
                                 </td>
                                 <td class="px-10 py-6 text-center">
                                     <span class="px-4 py-1.5 {{ strtoupper($room->type) === 'LAB' ? 'bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-400 border-purple-200 dark:border-purple-800' : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800' }} border rounded-xl text-[10px] uppercase font-black tracking-tighter">
-                                        {{ $room->type }}
+                                        {{ strtoupper($room->type) === 'LECTURE' ? 'Lecture' : 'Lab' }}
                                     </span>
                                 </td>
                                 <td class="px-10 py-6">
                                     <div class="flex items-baseline space-x-1">
                                         <span class="text-slate-800 dark:text-slate-100 font-black text-lg tracking-tight">{{ $room->capacity }}</span>
                                         <span class="text-slate-400 dark:text-slate-600 text-[8px] font-bold uppercase tracking-widest">Max Seats</span>
+                                    </div>
+                                </td>
+                                <td class="px-10 py-6">
+                                    <div class="flex flex-col space-y-1">
+                                        <span class="text-[11px] font-bold text-slate-700 dark:text-slate-300">{{ $room->floor ?? 'N/A' }}</span>
+                                        @if($room->specialization)
+                                        <span class="text-[9px] text-slate-500 dark:text-slate-400 italic">{{ $room->specialization }}</span>
+                                        @endif
                                     </div>
                                 </td>
                                 
@@ -115,7 +124,7 @@
                             </tr>
                             @empty
                             <tr>
-                                <td colspan="5" class="px-10 py-32 text-center">
+                                <td colspan="6" class="px-10 py-32 text-center">
                                     <div class="flex flex-col items-center">
                                         <span class="text-5xl mb-4 opacity-50">🏫</span>
                                         <p class="text-slate-400 dark:text-slate-600 font-black uppercase tracking-widest text-xs">No space records found</p>
@@ -172,6 +181,20 @@
                 </div>
             </div>
 
+            {{-- Floor and Specialization --}}
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest mb-2 ml-2">Floor</label>
+                    <input type="text" wire:model="floor" placeholder="e.g. 1st Floor" 
+                           class="w-full px-6 py-4 bg-slate-50 dark:bg-slate-800 border-none dark:text-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 shadow-inner dark:placeholder-slate-600">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest mb-2 ml-2">Specialization</label>
+                    <input type="text" wire:model="specialization" placeholder="e.g. FB, LD, QD" 
+                           class="w-full px-6 py-4 bg-slate-50 dark:bg-slate-800 border-none dark:text-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 shadow-inner dark:placeholder-slate-600">
+                </div>
+            </div>
+
             {{-- Actions --}}
             <div class="flex space-x-4 pt-6">
                 <button type="button" @click="open = false" class="flex-1 font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest text-[10px] hover:text-slate-600 dark:hover:text-slate-400 transition-colors">
@@ -187,12 +210,12 @@
 
     {{-- --- BULK IMPORT MODAL --- --}}
     <div x-show="bulkOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md" x-cloak x-transition>
-        <div class="bg-white w-full max-w-xl rounded-[3rem] p-10 shadow-2xl border border-slate-200" @click.away="bulkOpen = false">
-            <h3 class="text-2xl font-black text-slate-800 tracking-tighter mb-2 uppercase">Batch Room Import</h3>
-            <p class="text-xs text-slate-400 mb-6 font-medium italic underline decoration-blue-500/30">CSV Required Header: <span class="text-slate-600 font-bold italic">room_name, capacity, type</span></p>
+        <div class="bg-white dark:bg-slate-900 w-full max-w-xl rounded-[3rem] p-10 shadow-2xl border border-slate-200 dark:border-slate-800 transition-colors" @click.away="bulkOpen = false">
+            <h3 class="text-2xl font-black text-slate-800 dark:text-slate-100 tracking-tighter mb-2 uppercase">Batch Room Import</h3>
+            <p class="text-xs text-slate-400 dark:text-slate-500 mb-6 font-medium italic underline decoration-blue-500/30">CSV Required Headers: <span class="text-slate-600 dark:text-slate-300 font-bold italic">room_name, room_type, capacity, specialization (optional), floor (optional)</span></p>
             
             <div class="space-y-6">
-                <div class="group border-2 border-dashed border-slate-200 rounded-3xl p-8 flex flex-col items-center justify-center bg-slate-50 hover:bg-white hover:border-blue-400 transition-all cursor-pointer relative shadow-inner"
+                <div class="group border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-3xl p-8 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-800/30 hover:bg-white dark:hover:bg-slate-800/50 hover:border-blue-400 transition-all cursor-pointer relative shadow-inner"
                      wire:loading.class="opacity-50 pointer-events-none" wire:target="importFile">
                     
                     <input type="file" wire:model.live="importFile" class="absolute inset-0 opacity-0 cursor-pointer">
@@ -204,31 +227,33 @@
 
                     <div wire:loading.remove wire:target="importFile" class="text-center">
                         <span class="text-4xl mb-3 transition-transform group-hover:scale-110 block">📊</span>
-                        <span class="text-sm font-bold text-slate-600">
+                        <span class="text-sm font-bold text-slate-600 dark:text-slate-300">
                             {{ $importFile ? $importFile->getClientOriginalName() : 'Drop room CSV here or click to browse' }}
                         </span>
                     </div>
                 </div>
                 
                 @if(count($importPreview) > 0)
-                    <div class="mt-6 border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
-                        <div class="max-h-60 overflow-y-auto custom-scrollbar bg-white">
+                    <div class="mt-6 border border-slate-100 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm">
+                        <div class="max-h-60 overflow-y-auto custom-scrollbar bg-white dark:bg-slate-800/50">
                             <table class="w-full text-left border-collapse">
-                                <thead class="bg-slate-50/80 sticky top-0 backdrop-blur-sm">
-                                    <tr class="text-[9px] uppercase font-black text-slate-400">
+                                <thead class="bg-slate-50/80 dark:bg-slate-800/80 sticky top-0 backdrop-blur-sm">
+                                    <tr class="text-[9px] uppercase font-black text-slate-400 dark:text-slate-500">
                                         <th class="px-4 py-3">Room Name</th>
                                         <th class="px-4 py-3">Type</th>
+                                        <th class="px-4 py-3">Floor</th>
                                         <th class="px-4 py-3 text-right">Status</th>
                                     </tr>
                                 </thead>
-                                <tbody class="divide-y divide-slate-50">
+                                <tbody class="divide-y divide-slate-50 dark:divide-slate-700">
                                     @foreach($importPreview as $preview)
-                                        <tr class="text-[11px] font-bold">
-                                            <td class="px-4 py-3 text-slate-700">{{ $preview['room_name'] }}</td>
-                                            <td class="px-4 py-3 text-slate-400 italic font-medium uppercase">{{ $preview['type'] }}</td>
+                                        <tr class="text-[11px] font-bold dark:hover:bg-slate-700/50">
+                                            <td class="px-4 py-3 text-slate-700 dark:text-slate-300">{{ $preview['room_name'] }}</td>
+                                            <td class="px-4 py-3 text-slate-400 dark:text-slate-500 italic font-medium uppercase">{{ $preview['type'] }}</td>
+                                            <td class="px-4 py-3 text-slate-600 dark:text-slate-400 text-[10px]">{{ $preview['floor'] ?? 'N/A' }}</td>
                                             <td class="px-4 py-3 text-right">
                                                 <span class="px-2 py-0.5 rounded-full text-[8px] uppercase font-black
-                                                    {{ $preview['status'] === 'DUPLICATE' ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600' }}">
+                                                    {{ $preview['status'] === 'DUPLICATE' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' }}">
                                                     {{ $preview['status'] }}
                                                 </span>
                                             </td>
@@ -239,14 +264,14 @@
                         </div>
                     </div>
 
-                    <button wire:click="processImport" wire:loading.attr="disabled" class="w-full py-4 bg-blue-600 text-white rounded-[1.5rem] font-black uppercase tracking-widest hover:bg-blue-700 shadow-xl shadow-blue-100 transition-all">
+                    <button wire:click="processImport" wire:loading.attr="disabled" class="w-full py-4 bg-blue-600 dark:bg-blue-700 text-white rounded-[1.5rem] font-black uppercase tracking-widest hover:bg-blue-700 dark:hover:bg-blue-600 shadow-xl shadow-blue-100 dark:shadow-none transition-all">
                         <span wire:loading.remove wire:target="processImport">Confirm & Import Valid Rooms</span>
                         <span wire:loading wire:target="processImport">Saving to Database...</span>
                     </button>
                 @endif
 
                 <div class="flex justify-center">
-                    <button type="button" @click="bulkOpen = false; $wire.reset(['importFile', 'importPreview'])" class="font-black text-slate-400 uppercase tracking-widest text-xs hover:text-slate-600 transition-colors">Close Importer</button>
+                    <button type="button" @click="bulkOpen = false; $wire.reset(['importFile', 'importPreview'])" class="font-black text-slate-400 dark:text-slate-600 uppercase tracking-widest text-xs hover:text-slate-600 dark:hover:text-slate-400 transition-colors">Close Importer</button>
                 </div>
             </div>
         </div>
@@ -254,19 +279,19 @@
 
     {{-- --- BULK DELETE CONFIRMATION --- --}}
     <div x-show="confirmDelete" class="fixed inset-0 z-[60] flex items-center justify-center bg-slate-900/80 backdrop-blur-sm" x-cloak x-transition>
-        <div class="bg-white w-full max-w-sm rounded-[2.5rem] p-10 text-center shadow-2xl border border-red-100" @click.away="confirmDelete = false">
-            <div class="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-6 shadow-inner">⚠️</div>
-            <h3 class="text-2xl font-black text-slate-800 tracking-tighter mb-2">Security Check</h3>
-            <p class="text-sm text-slate-500 mb-8 font-medium italic">You are about to delete <span class="text-red-600 font-black">{{ count($selectedRooms) }}</span> room record(s). This action is permanent.</p>
+        <div class="bg-white dark:bg-slate-900 w-full max-w-sm rounded-[2.5rem] p-10 text-center shadow-2xl border border-red-100 dark:border-red-900/30 transition-colors" @click.away="confirmDelete = false">
+            <div class="w-20 h-20 bg-red-100 dark:bg-red-900/20 text-red-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-6 shadow-inner">⚠️</div>
+            <h3 class="text-2xl font-black text-slate-800 dark:text-slate-100 tracking-tighter mb-2">Security Check</h3>
+            <p class="text-sm text-slate-500 dark:text-slate-400 mb-8 font-medium italic">You are about to delete <span class="text-red-600 dark:text-red-400 font-black">{{ count($selectedRooms) }}</span> room record(s). This action is permanent.</p>
             
             <div class="flex flex-col space-y-3">
                 <button wire:click="deleteSelected" 
-                        class="w-full py-4 bg-red-600 text-white rounded-2xl font-black shadow-lg shadow-red-200 hover:bg-red-700 transition-all uppercase text-xs">
+                        class="w-full py-4 bg-red-600 dark:bg-red-700 text-white rounded-2xl font-black shadow-lg shadow-red-200 dark:shadow-none hover:bg-red-700 dark:hover:bg-red-600 transition-all uppercase text-xs">
                     Yes, Delete Permanently
                 </button>
                 
                 <button @click="confirmDelete = false" 
-                        class="w-full py-4 bg-slate-100 text-slate-400 rounded-2xl font-black hover:bg-slate-200 transition-all uppercase text-xs">
+                        class="w-full py-4 bg-slate-100 dark:bg-slate-800 text-slate-400 dark:text-slate-500 rounded-2xl font-black hover:bg-slate-200 dark:hover:bg-slate-700 transition-all uppercase text-xs">
                     No, Keep Records
                 </button>
             </div>
