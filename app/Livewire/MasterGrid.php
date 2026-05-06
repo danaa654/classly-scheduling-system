@@ -27,12 +27,18 @@ class MasterGrid extends Component
     public $selectedRoomName = null;
     public $selectedRoomType = null;
 
-    public $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-    public $startTime = '07:00';
-    public $endTime = '21:00';
+    // Dynamic time bounds from settings
+    public $dayStart = '07:00';
+    public $dayEnd = '21:00';
+    public $schoolYear = '2026-2027';
+    public $semester = '1st';
+    public $semesterName = 'First Semester 2026-2027';
+
+    // Hard-coded lunch break
+    public const LUNCH_START = '12:00';
+    public const LUNCH_END = '13:00';
     
-    public $lunchBreakStart = '12:00';
-    public $lunchBreakEnd = '13:00';
+    public $days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
     
     public const BRICK_DURATION_MINUTES = 30;
     
@@ -50,14 +56,26 @@ class MasterGrid extends Component
         'CTE' => ['ED'],
     ];
 
-    protected $listeners = ['refreshGrid' => '$refresh'];
+    protected $listeners = [
+        'refreshGrid' => '$refresh',
+        'settings-updated' => 'loadSettings',
+    ];
 
     public function mount()
     {
-        $this->startTime = Setting::where('key', 'start_time')->first()?->value ?? '07:00';
-        $this->endTime = Setting::where('key', 'end_time')->first()?->value ?? '21:00';
-        $this->lunchBreakStart = Setting::where('key', 'lunch_break_start')->first()?->value ?? '12:00';
-        $this->lunchBreakEnd = Setting::where('key', 'lunch_break_end')->first()?->value ?? '13:00';
+        $this->loadSettings();
+    }
+
+    /**
+     * Load settings from database dynamically.
+     */
+    public function loadSettings()
+    {
+        $this->dayStart = Setting::where('key', 'day_start')->first()?->value ?? '07:00';
+        $this->dayEnd = Setting::where('key', 'day_end')->first()?->value ?? '21:00';
+        $this->schoolYear = Setting::where('key', 'school_year')->first()?->value ?? '2026-2027';
+        $this->semester = Setting::where('key', 'semester')->first()?->value ?? '1st';
+        $this->semesterName = Setting::where('key', 'semester_name')->first()?->value ?? 'First Semester 2026-2027';
     }
 
     public function updatedSearchSubject() { $this->resetPage(); }
@@ -185,8 +203,8 @@ class MasterGrid extends Component
 
     private function overlapsLunchBreak($startTime, $endTime): bool
     {
-        $lunchStart = Carbon::parse($this->lunchBreakStart);
-        $lunchEnd = Carbon::parse($this->lunchBreakEnd);
+        $lunchStart = Carbon::parse(self::LUNCH_START);
+        $lunchEnd = Carbon::parse(self::LUNCH_END);
         $slotStart = Carbon::parse($startTime);
         $slotEnd = Carbon::parse($endTime);
 
@@ -230,8 +248,8 @@ class MasterGrid extends Component
     public function generateDisplaySlots()
     {
         $slots = [];
-        $current = Carbon::parse($this->startTime);
-        $end = Carbon::parse($this->endTime);
+        $current = Carbon::parse($this->dayStart);
+        $end = Carbon::parse($this->dayEnd);
 
         while ($current < $end) {
             $next = $current->copy()->addMinutes(self::BRICK_DURATION_MINUTES);
@@ -253,8 +271,8 @@ class MasterGrid extends Component
     public function getLunchBreakSlots()
     {
         $slots = [];
-        $current = Carbon::parse($this->lunchBreakStart);
-        $end = Carbon::parse($this->lunchBreakEnd);
+        $current = Carbon::parse(self::LUNCH_START);
+        $end = Carbon::parse(self::LUNCH_END);
 
         while ($current < $end) {
             $next = $current->copy()->addMinutes(self::BRICK_DURATION_MINUTES);
@@ -306,8 +324,8 @@ class MasterGrid extends Component
 
     private function findGridRowIndex($time)
     {
-        $time = \Carbon\Carbon::parse($time);
-        $gridStart = \Carbon\Carbon::parse('07:00:00');
+        $time = Carbon::parse($time);
+        $gridStart = Carbon::parse($this->dayStart);
         
         $diffMinutes = $gridStart->diffInMinutes($time);
         $slotIndex = round($diffMinutes / 30);
@@ -412,11 +430,11 @@ class MasterGrid extends Component
         $minutesPerMeeting = $this->calculateMinutesPerMeeting($subject);
         $endTime = $this->calculateEndTime($startTime, $minutesPerMeeting);
 
-        $gridEnd = Carbon::parse($this->endTime);
+        $gridEnd = Carbon::parse($this->dayEnd);
         $calculatedEndTime = Carbon::parse($endTime);
         
         if ($calculatedEndTime > $gridEnd) {
-            $gridEndDisplay = $this->formatTime12h($this->endTime);
+            $gridEndDisplay = $this->formatTime12h($this->dayEnd);
             $this->dispatch('toast', [
                 'type' => 'error',
                 'message' => '⏰ End Time Out of Bounds',
@@ -426,7 +444,7 @@ class MasterGrid extends Component
         }
 
         if ($this->overlapsLunchBreak($startTime, $endTime)) {
-            $lunchDisplay = $this->formatTimeRange12h($this->lunchBreakStart, $this->lunchBreakEnd);
+            $lunchDisplay = $this->formatTimeRange12h(self::LUNCH_START, self::LUNCH_END);
             $this->dispatch('toast', [
                 'type' => 'error',
                 'message' => '🍽️ Lunch Break Blocked',
@@ -690,8 +708,8 @@ class MasterGrid extends Component
             'schedules' => $schedules,
             'subjects' => $subjects,
             'rooms' => $rooms,
-            'lunchBreakStart' => $this->lunchBreakStart,
-            'lunchBreakEnd' => $this->lunchBreakEnd,
+            'lunchStart' => self::LUNCH_START,
+            'lunchEnd' => self::LUNCH_END,
             'brickDurationMinutes' => self::BRICK_DURATION_MINUTES,
             'brickHeightPx' => self::BRICK_HEIGHT_PX,
             'hasFullAccess' => $this->hasFullAccess(),
@@ -699,6 +717,11 @@ class MasterGrid extends Component
             'selectedRoomId' => $this->selectedRoomId,
             'selectedRoomName' => $this->selectedRoomName,
             'selectedRoomType' => $this->selectedRoomType,
+            'dayStart' => $this->dayStart,
+            'dayEnd' => $this->dayEnd,
+            'schoolYear' => $this->schoolYear,
+            'semester' => $this->semester,
+            'semesterName' => $this->semesterName,
         ]);
     }
 }

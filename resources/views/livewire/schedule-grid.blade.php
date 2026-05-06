@@ -76,32 +76,41 @@
                 
                 {{-- LUNCH BREAK BAR (MINIMALIST FULL-WIDTH) --}}
                 @php
-                    // Calculate lunch break position: 12:00 PM is 5 hours = 300 minutes from 7:00 AM
-                    $gridStart = \Carbon\Carbon::parse('07:00:00');
+                    // Calculate lunch break position based on dayStart
+                    $gridStart = \Carbon\Carbon::parse($dayStart);
                     $lunchStart = \Carbon\Carbon::parse('12:00:00');
                     $lunchEnd = \Carbon\Carbon::parse('13:00:00');
                     
                     $minutesFromStart = $gridStart->diffInMinutes($lunchStart);
-                    $lunchSlotIndex = $minutesFromStart / 30; // 10 slots (300 minutes / 30)
-                    $lunchDurationMinutes = $lunchStart->diffInMinutes($lunchEnd); // 60 minutes
-                    $lunchSlotsSpanned = $lunchDurationMinutes / 30; // 2 slots
-                    $lunchHeightPx = ($lunchSlotsSpanned * 45) - 4; // (2 * 45) - 4 = 86px
+                    
+                    // Handle case where lunch break is before grid start
+                    if ($minutesFromStart < 0) {
+                        $lunchSlotIndex = 0;
+                        $lunchHeightPx = 0;
+                    } else {
+                        $lunchSlotIndex = $minutesFromStart / 30;
+                        $lunchDurationMinutes = $lunchStart->diffInMinutes($lunchEnd);
+                        $lunchSlotsSpanned = $lunchDurationMinutes / 30;
+                        $lunchHeightPx = ($lunchSlotsSpanned * 45) - 4;
+                    }
                 @endphp
 
-                <div 
-                    class="absolute left-0 right-0 pointer-events-none flex items-center justify-center bg-slate-200/60 dark:bg-slate-700/50 backdrop-blur-sm border-t-2 border-b-2 border-slate-400 dark:border-slate-600"
-                    style="
-                        top: calc(({{ $lunchSlotIndex }} * 45px) + 2px);
-                        left: 6rem;
-                        right: 0;
-                        height: {{ $lunchHeightPx }}px;
-                        z-index: 10;
-                    "
-                >
-                    <span class="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-widest">
-                        🍽️ Institutional Lunch Break
-                    </span>
-                </div>
+                @if($lunchHeightPx > 0)
+                    <div 
+                        class="absolute left-0 right-0 pointer-events-none flex items-center justify-center bg-slate-200/60 dark:bg-slate-700/50 backdrop-blur-sm border-t-2 border-b-2 border-slate-400 dark:border-slate-600"
+                        style="
+                            top: calc(({{ $lunchSlotIndex }} * 45px) + 2px);
+                            left: 6rem;
+                            right: 0;
+                            height: {{ $lunchHeightPx }}px;
+                            z-index: 10;
+                        "
+                    >
+                        <span class="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-widest">
+                            🍽️ Institutional Lunch Break
+                        </span>
+                    </div>
+                @endif
 
                 {{-- SCHEDULE CARDS --}}
                 @foreach($schedules as $schedule)
@@ -112,10 +121,10 @@
                         // 1. Parse times precisely
                         $startTime = \Carbon\Carbon::parse($schedule->start_time);
                         $endTime = \Carbon\Carbon::parse($schedule->end_time);
-                        $gridStart = \Carbon\Carbon::parse('07:00:00');
-                        $gridEnd = \Carbon\Carbon::parse('21:00:00');
+                        $gridStart = \Carbon\Carbon::parse($dayStart);
+                        $gridEnd = \Carbon\Carbon::parse($dayEnd);
                         
-                        // 2. Calculate raw slot position (30-min increments)
+                        // 2. Calculate raw slot position (30-min increments from dayStart)
                         $minutesFromStart = $gridStart->diffInMinutes($startTime);
                         $rawSlotIndex = $minutesFromStart / 30;
                         $slotIndex = $rawSlotIndex;
@@ -243,8 +252,8 @@
                 {{-- CURRENT TIME INDICATOR (RED LINE) --}}
                 @php
                     $now = \Carbon\Carbon::now();
-                    $gridStart = \Carbon\Carbon::parse('07:00:00');
-                    $gridEnd = \Carbon\Carbon::parse('21:00:00');
+                    $gridStart = \Carbon\Carbon::parse($dayStart);
+                    $gridEnd = \Carbon\Carbon::parse($dayEnd);
                     
                     if ($now >= $gridStart && $now < $gridEnd) {
                         // Calculate elapsed minutes from grid start

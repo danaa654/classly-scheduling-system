@@ -30,8 +30,8 @@
                 class="w-full text-[8px] px-2 py-1 rounded-md border-2 border-slate-300 dark:border-slate-700 font-bold bg-white/70 dark:bg-slate-700/70 text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 transition-all backdrop-blur-sm">
                 <option value="">ALL DEPARTMENTS</option>
                 @if($hasFullAccess ?? false)
-                    <option value="CCS">CCS - Computer & Communication Studies</option>
-                    <option value="CTE">CTE - Career & Technical Education</option>
+                    <option value="CCS">CCS - College of Computer Studies</option>
+                    <option value="CTE">CTE - College of Teacher Education</option>
                     <option value="COC">COC - College of Criminology</option>
                     <option value="SHTM">SHTM - School of Hospitality & Tourism</option>
                 @else

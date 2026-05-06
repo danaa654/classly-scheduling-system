@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Casts\Attribute;
+use Carbon\Carbon;
 
 class Schedule extends Model
 {
@@ -164,8 +165,8 @@ class Schedule extends Model
     private function calculateDuration(): float
     {
         try {
-            $start = \Carbon\Carbon::parse($this->start_time);
-            $end = \Carbon\Carbon::parse($this->end_time);
+            $start = Carbon::parse($this->start_time);
+            $end = Carbon::parse($this->end_time);
             return round($start->diffInHours($end), 2);
         } catch (\Exception $e) {
             return 0;
@@ -178,8 +179,8 @@ class Schedule extends Model
     private function formatTimeDisplay(): string
     {
         try {
-            $start = \Carbon\Carbon::parse($this->start_time);
-            $end = \Carbon\Carbon::parse($this->end_time);
+            $start = Carbon::parse($this->start_time);
+            $end = Carbon::parse($this->end_time);
             return $start->format('h:i A') . ' - ' . $end->format('h:i A');
         } catch (\Exception $e) {
             return 'Invalid time';
@@ -211,38 +212,31 @@ class Schedule extends Model
     }
 
     /**
-     * Check if scheduled time respects lunch break
+     * Check if scheduled time respects hard-coded lunch break (12:00-13:00)
      */
     public function respectsLunchBreak(): bool
     {
-        $settings = Setting::query()
-            ->whereIn('key', ['lunch_break_start', 'lunch_break_end'])
-            ->pluck('value', 'key');
+        $lunchStart = Carbon::parse('12:00');
+        $lunchEnd = Carbon::parse('13:00');
 
-        $lunchStart = \Carbon\Carbon::parse($settings['lunch_break_start'] ?? '12:00');
-        $lunchEnd = \Carbon\Carbon::parse($settings['lunch_break_end'] ?? '13:00');
-
-        $scheduleStart = \Carbon\Carbon::parse($this->start_time);
-        $scheduleEnd = \Carbon\Carbon::parse($this->end_time);
+        $scheduleStart = Carbon::parse($this->start_time);
+        $scheduleEnd = Carbon::parse($this->end_time);
 
         // Check if schedule overlaps with lunch break
         return !($scheduleStart < $lunchEnd && $scheduleEnd > $lunchStart);
     }
 
     /**
-     * Check if scheduled time is within operational hours
+     * Check if scheduled time is within operational hours (master bounds)
      */
     public function isWithinOperationalHours(): bool
     {
-        $settings = Setting::query()
-            ->whereIn('key', ['day_start_time', 'day_end_time'])
-            ->pluck('value', 'key');
+        $bounds = Setting::getDayBounds();
+        $dayStart = Carbon::parse($bounds['start']);
+        $dayEnd = Carbon::parse($bounds['end']);
 
-        $dayStart = \Carbon\Carbon::parse($settings['day_start_time'] ?? '07:00');
-        $dayEnd = \Carbon\Carbon::parse($settings['day_end_time'] ?? '20:00');
-
-        $scheduleStart = \Carbon\Carbon::parse($this->start_time);
-        $scheduleEnd = \Carbon\Carbon::parse($this->end_time);
+        $scheduleStart = Carbon::parse($this->start_time);
+        $scheduleEnd = Carbon::parse($this->end_time);
 
         return $scheduleStart >= $dayStart && $scheduleEnd <= $dayEnd;
     }
@@ -269,7 +263,7 @@ class Schedule extends Model
         }
 
         if (!$this->respectsLunchBreak()) {
-            $errors[] = 'Schedule overlaps with lunch break.';
+            $errors[] = 'Schedule overlaps with lunch break (12:00-13:00).';
         }
 
         if (!$this->isCompatible()) {

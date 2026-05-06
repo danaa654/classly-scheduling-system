@@ -18,22 +18,19 @@ class GlobalSettings extends Component
     public const BRICK_DURATION = 0.5; // Hard-coded 30 minutes
     
     // Institutional time settings
-    public $start_time, $end_time, $semester_name;
+    public $day_start, $day_end, $school_year, $semester, $semester_name;
     
     // Access Control & Audit
-    public $is_locked = true;
+    public $config_locked = true;
     public $last_updated_by;
     public $last_updated_at;
     
-    // Lunch Break Configuration
-    public $lunch_break_start = '12:00';
-    public $lunch_break_end = '13:00';
+    // Lunch Break (Hard-coded, read-only)
+    public const LUNCH_START = '12:00';
+    public const LUNCH_END = '13:00';
     
     // Maintenance Mode
     public $maintenance_mode = false;
-    
-    // Department Management
-    public $new_dept_name, $new_dept_code;
     
     // UI State
     public $confirmingReset = false;
@@ -56,20 +53,17 @@ class GlobalSettings extends Component
 
     /**
      * Load all settings from database with PAP standards defaults.
-     * Note: default_duration is now a system constant (0.5 hours = 30 minutes).
      */
     private function loadAllSettings()
     {
-        $this->start_time = Setting::where('key', 'start_time')->first()?->value ?? '07:00';
-        $this->end_time = Setting::where('key', 'end_time')->first()?->value ?? '20:00';
+        $this->day_start = Setting::where('key', 'day_start')->first()?->value ?? '07:00';
+        $this->day_end = Setting::where('key', 'day_end')->first()?->value ?? '21:00';
+        $this->school_year = Setting::where('key', 'school_year')->first()?->value ?? '2026-2027';
+        $this->semester = Setting::where('key', 'semester')->first()?->value ?? '1st';
         $this->semester_name = Setting::where('key', 'semester_name')->first()?->value ?? 'First Semester 2026-2027';
         
-        // Lunch break settings
-        $this->lunch_break_start = Setting::where('key', 'lunch_break_start')->first()?->value ?? '12:00';
-        $this->lunch_break_end = Setting::where('key', 'lunch_break_end')->first()?->value ?? '13:00';
-        
         // Access control
-        $this->is_locked = (bool)Setting::where('key', 'is_locked')->first()?->value ?? true;
+        $this->config_locked = (bool)Setting::where('key', 'config_locked')->first()?->value ?? true;
         
         // Maintenance mode
         $this->maintenance_mode = (bool)Setting::where('key', 'maintenance_mode')->first()?->value ?? false;
@@ -107,10 +101,52 @@ class GlobalSettings extends Component
      */
     private function validateAllTimeIncrements(): bool
     {
-        return $this->validateTimeIncrement($this->start_time)
-            && $this->validateTimeIncrement($this->end_time)
-            && $this->validateTimeIncrement($this->lunch_break_start)
-            && $this->validateTimeIncrement($this->lunch_break_end);
+        return $this->validateTimeIncrement($this->day_start)
+            && $this->validateTimeIncrement($this->day_end);
+    }
+
+    /**
+     * Check if any schedules exist that would conflict with new day bounds.
+     */
+    private function hasScheduleConflicts(): array
+    {
+        $conflicts = [];
+        $newStart = Carbon::parse($this->day_start);
+        $newEnd = Carbon::parse($this->day_end);
+        $oldStart = Carbon::parse(Setting::where('key', 'day_start')->first()?->value ?? '07:00');
+        $oldEnd = Carbon::parse(Setting::where('key', 'day_end')->first()?->value ?? '21:00');
+
+        // Get all schedules
+        $schedules = Schedule::all();
+
+        foreach ($schedules as $schedule) {
+            $scheduleStart = Carbon::parse($schedule->start_time);
+            $scheduleEnd = Carbon::parse($schedule->end_time);
+
+            // Check if schedule starts before new day start
+            if ($scheduleStart < $newStart && $scheduleStart >= $oldStart) {
+                $conflicts[] = [
+                    'schedule_id' => $schedule->id,
+                    'subject_code' => $schedule->subject?->subject_code ?? 'Unknown',
+                    'day' => $schedule->day,
+                    'time' => $scheduleStart->format('H:i') . ' - ' . $scheduleEnd->format('H:i'),
+                    'issue' => 'starts before new day start time',
+                ];
+            }
+
+            // Check if schedule ends after new day end
+            if ($scheduleEnd > $newEnd && $scheduleEnd <= $oldEnd) {
+                $conflicts[] = [
+                    'schedule_id' => $schedule->id,
+                    'subject_code' => $schedule->subject?->subject_code ?? 'Unknown',
+                    'day' => $schedule->day,
+                    'time' => $scheduleStart->format('H:i') . ' - ' . $scheduleEnd->format('H:i'),
+                    'issue' => 'ends after new day end time',
+                ];
+            }
+        }
+
+        return $conflicts;
     }
 
     /**
@@ -118,11 +154,11 @@ class GlobalSettings extends Component
      */
     public function toggleLock()
     {
-        $this->is_locked = !$this->is_locked;
+        $this->config_locked = !$this->config_locked;
         
         $this->dispatch('notify', [
             'type' => 'info',
-            'message' => $this->is_locked 
+            'message' => $this->config_locked 
                 ? 'Configuration locked. Changes are disabled.' 
                 : '⚠️ Configuration unlocked. Proceed with caution.',
         ]);
@@ -154,21 +190,21 @@ class GlobalSettings extends Component
     public function save()
     {
         // GUARD: Check if locked
-        if ($this->is_locked) {
+        if ($this->config_locked) {
             $this->dispatch('notify', [
                 'type' => 'error',
-                'message' => 'Configuration is locked. Click "Modify Configuration" to unlock.',
+                'message' => 'Configuration is locked. Click "Unlock" to modify settings.',
             ]);
             return;
         }
 
         // Validation
         $this->validate([
-            'semester_name'     => 'required|string|min:3',
-            'start_time'        => 'required|date_format:H:i',
-            'end_time'          => 'required|date_format:H:i|after:start_time',
-            'lunch_break_start' => 'required|date_format:H:i',
-            'lunch_break_end'   => 'required|date_format:H:i|after:lunch_break_start',
+            'school_year'   => 'required|string|min:4',
+            'semester'      => 'required|in:1st,2nd,Summer',
+            'semester_name' => 'required|string|min:3',
+            'day_start'     => 'required|date_format:H:i',
+            'day_end'       => 'required|date_format:H:i|after:day_start',
         ]);
 
         // NEW: Validate 30-minute increments
@@ -181,8 +217,8 @@ class GlobalSettings extends Component
         }
 
         // LOGIC CHECK: Day is long enough for at least one 30-minute brick
-        $start = Carbon::parse($this->start_time);
-        $end = Carbon::parse($this->end_time);
+        $start = Carbon::parse($this->day_start);
+        $end = Carbon::parse($this->day_end);
         $totalMinutesAvailable = $start->diffInMinutes($end);
         $brickMinutesRequired = self::BRICK_DURATION * 60; // 30 minutes
 
@@ -194,14 +230,17 @@ class GlobalSettings extends Component
             return;
         }
 
-        // Ensure lunch break is within school day
-        $lunchStart = Carbon::parse($this->lunch_break_start);
-        $lunchEnd = Carbon::parse($this->lunch_break_end);
+        // NEW: Check if new bounds conflict with existing schedules
+        $conflicts = $this->hasScheduleConflicts();
+        if (!empty($conflicts)) {
+            $conflictDetails = collect($conflicts)->map(function ($conflict) {
+                return "• {$conflict['subject_code']} on {$conflict['day']} ({$conflict['time']}) - {$conflict['issue']}";
+            })->join("\n");
 
-        if ($lunchStart->lessThan($start) || $lunchEnd->greaterThan($end)) {
             $this->dispatch('notify', [
                 'type' => 'error',
-                'message' => 'Lunch break must fall within school operating hours.',
+                'message' => '⚠️ Cannot change day bounds - existing schedules conflict',
+                'detail' => "The following schedules would be outside the new bounds:\n\n{$conflictDetails}\n\nPlease remove or reschedule these classes first.",
             ]);
             return;
         }
@@ -210,11 +249,11 @@ class GlobalSettings extends Component
         try {
             DB::transaction(function () {
                 $settingsToUpdate = [
-                    'semester_name'     => $this->semester_name,
-                    'start_time'        => $this->start_time,
-                    'end_time'          => $this->end_time,
-                    'lunch_break_start' => $this->lunch_break_start,
-                    'lunch_break_end'   => $this->lunch_break_end,
+                    'school_year'   => $this->school_year,
+                    'semester'      => $this->semester,
+                    'semester_name' => $this->semester_name,
+                    'day_start'     => $this->day_start,
+                    'day_end'       => $this->day_end,
                 ];
 
                 foreach ($settingsToUpdate as $key => $value) {
@@ -240,8 +279,8 @@ class GlobalSettings extends Component
                 }
 
                 // RE-LOCK after save for safety
-                Setting::updateOrCreate(['key' => 'is_locked'], ['value' => '1']);
-                $this->is_locked = true;
+                Setting::updateOrCreate(['key' => 'config_locked'], ['value' => '1']);
+                $this->config_locked = true;
             });
 
             // BROADCAST to MasterGrid (if exists)
@@ -251,7 +290,7 @@ class GlobalSettings extends Component
 
             $this->dispatch('notify', [
                 'type' => 'success',
-                'message' => "✅ System configuration updated for {$this->semester_name}. Configuration re-locked.",
+                'message' => "✅ System configuration updated. Configuration re-locked.",
             ]);
         } catch (\Exception $e) {
             $this->dispatch('notify', [
@@ -259,55 +298,6 @@ class GlobalSettings extends Component
                 'message' => 'Save failed: ' . $e->getMessage(),
             ]);
         }
-    }
-
-    /**
-     * Add a new department.
-     */
-    public function addDepartment()
-    {
-        $this->validate([
-            'new_dept_name' => 'required|unique:departments,name',
-            'new_dept_code' => 'required|unique:departments,code|max:10',
-        ]);
-
-        Department::create([
-            'name' => $this->new_dept_name,
-            'code' => strtoupper($this->new_dept_code),
-        ]);
-
-        $this->reset(['new_dept_name', 'new_dept_code']);
-        
-        $this->dispatch('notify', [
-            'type' => 'success',
-            'message' => 'New Department registered.',
-        ]);
-    }
-
-    /**
-     * Delete a department (with safety checks).
-     */
-    public function deleteDepartment($id)
-    {
-        $dept = Department::findOrFail($id);
-
-        $isLinked = Faculty::where('department_id', $id)->exists() || 
-                    Subject::where('department_id', $id)->exists();
-
-        if ($isLinked) {
-            $this->dispatch('notify', [
-                'type' => 'error',
-                'message' => "Cannot delete {$dept->code}. Faculty or Subjects are currently assigned.",
-            ]);
-            return;
-        }
-
-        $dept->delete();
-        
-        $this->dispatch('notify', [
-            'type' => 'success',
-            'message' => 'Department successfully removed.',
-        ]);
     }
 
     /**
@@ -341,11 +331,11 @@ class GlobalSettings extends Component
                 Schedule::query()->delete();
                 
                 // 3. Reset to locked state
-                Setting::updateOrCreate(['key' => 'is_locked'], ['value' => '1']);
+                Setting::updateOrCreate(['key' => 'config_locked'], ['value' => '1']);
             });
 
             $this->confirmingReset = false;
-            $this->is_locked = true;
+            $this->config_locked = true;
             $this->loadChangeHistory();
 
             $this->dispatch('notify', [
@@ -366,10 +356,11 @@ class GlobalSettings extends Component
     public function render()
     {
         return view('livewire.global-settings', [
-            'departments' => Department::latest()->get(),
             'archives' => DB::table('schedule_archives')->latest()->get(),
             'changeHistory' => $this->changeHistory,
             'brickDuration' => self::BRICK_DURATION,
+            'lunchStart' => self::LUNCH_START,
+            'lunchEnd' => self::LUNCH_END,
         ])->layout('layouts.app');
     }
 }

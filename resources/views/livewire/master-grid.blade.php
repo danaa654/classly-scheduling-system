@@ -5,13 +5,13 @@
     <main class="flex-1 flex flex-col min-w-0 relative h-full">
 
         {{-- HEADER --}}
-        <header class="h-16 bg-white/50 dark:bg-slate-900/50 border-b-2 border-slate-300 dark:border-slate-700 backdrop-blur-md flex items-center justify-between px-4 z-20 shrink-0 shadow-md">
+        <header class="h-16 bg-white/50 dark:bg-slate-900/50 border-b-2 border-slate-300 dark:border-slate-700 backdrop-blur-md flex items-center justify-between px-6 z-20 shrink-0 shadow-md">
             <div class="flex flex-col justify-center">
                 <h2 class="text-xl font-black text-slate-900 dark:text-slate-50 uppercase tracking-tight">
                     Master <span class="text-blue-600 dark:text-blue-400">Grid</span>
                 </h2>
                 <div class="flex items-center gap-2 mt-0.5">
-                    <span class="text-[8px] text-slate-500 dark:text-slate-400 font-black uppercase tracking-widest">Active:</span>
+                    <span class="text-[8px] text-slate-500 dark:text-slate-400 font-black uppercase tracking-widest">{{ $schoolYear }} • {{ $semester }} SEM</span>
                     @if($selectedRoomName)
                         <span class="text-[8px] bg-emerald-100/80 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 px-2.5 py-0.5 rounded-lg font-black uppercase flex items-center gap-1 backdrop-blur-sm border-2 border-emerald-300 dark:border-emerald-800">
                             <span class="w-1.5 h-1.5 bg-emerald-600 dark:bg-emerald-400 rounded-full animate-pulse"></span>
@@ -30,7 +30,15 @@
                 </div>
             </div>
 
-            <div class="flex items-center gap-2">
+            <div class="flex items-center gap-3">
+                <!-- AI GENERATION BUTTON -->
+                <button 
+                    class="px-3 py-1.5 rounded-md text-[8px] font-black uppercase transition-all flex items-center gap-1 border-2 border-indigo-400 dark:border-indigo-600 bg-indigo-100/70 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-200/70 dark:hover:bg-indigo-900/50 shadow-md hover:shadow-lg"
+                    title="Generate schedule using AI">
+                    <span>✨</span>
+                    AI Generate
+                </button>
+
                 <div class="flex bg-slate-100/70 dark:bg-slate-800/60 p-0.5 rounded-lg border-2 border-slate-300 dark:border-slate-700 backdrop-blur-sm">
                     <button 
                         @click="subjectsOpen = !subjectsOpen"
@@ -85,7 +93,3 @@
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #64748B; }
     }
 </style>
-
-
-
-

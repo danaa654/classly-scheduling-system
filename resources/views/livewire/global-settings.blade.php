@@ -1,5 +1,5 @@
 <div class="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 transition-colors duration-500">
-    <div class="max-w-5xl mx-auto px-4 py-8 space-y-6">
+    <div class="max-w-6xl mx-auto px-4 py-8 space-y-6">
         
         <!-- HEADER WITH ACCESS CONTROL -->
         <div class="flex items-center justify-between">
@@ -11,7 +11,7 @@
             </div>
             
             <div class="flex items-center gap-3">
-                @if($is_locked)
+                @if($config_locked)
                     <span class="px-4 py-2 bg-emerald-100/80 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 text-xs font-black rounded-xl backdrop-blur-sm border border-emerald-200/50 dark:border-emerald-800/50">
                         🔒 LOCKED
                     </span>
@@ -23,8 +23,8 @@
                 
                 <button 
                     wire:click="toggleLock" 
-                    class="px-4 py-2 {{ $is_locked ? 'bg-blue-600 hover:bg-blue-700' : 'bg-orange-600 hover:bg-orange-700' }} text-white text-xs font-black rounded-xl transition-all shadow-lg hover:shadow-xl backdrop-blur-sm">
-                    {{ $is_locked ? 'Modify' : 'Lock' }}
+                    class="px-4 py-2 {{ $config_locked ? 'bg-blue-600 hover:bg-blue-700' : 'bg-orange-600 hover:bg-orange-700' }} text-white text-xs font-black rounded-xl transition-all shadow-lg hover:shadow-xl backdrop-blur-sm">
+                    {{ $config_locked ? 'Unlock' : 'Lock' }}
                 </button>
             </div>
         </div>
@@ -32,12 +32,13 @@
         <!-- NOTIFICATION TOAST -->
         <div 
             class="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-full max-w-md px-4"
-            x-data="{ show: false, message: '', type: '' }"
+            x-data="{ show: false, message: '', type: '', detail: '' }"
             x-on:notify.window="
                 show = true; 
                 message = $event.detail[0].message; 
-                type = $event.detail[0].type; 
-                setTimeout(() => show = false, 5000)
+                type = $event.detail[0].type;
+                detail = $event.detail[0].detail || '';
+                setTimeout(() => show = false, 6000)
             "
             x-show="show"
             x-transition:enter="transition ease-out duration-300"
@@ -55,9 +56,9 @@
                     'bg-blue-500 shadow-blue-500/25': type === 'info',
                     'bg-amber-500 shadow-amber-500/25': type === 'warning'
                 }"
-                class="rounded-2xl p-4 shadow-2xl flex items-center gap-3 border border-white/20 backdrop-blur-md">
+                class="rounded-2xl p-4 shadow-2xl flex items-start gap-3 border border-white/20 backdrop-blur-md">
                 
-                <div class="bg-white/20 rounded-full p-1 text-white flex-shrink-0">
+                <div class="bg-white/20 rounded-full p-1 text-white flex-shrink-0 mt-0.5">
                     <template x-if="type === 'success'">
                         <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
                     </template>
@@ -72,14 +73,71 @@
                     </template>
                 </div>
                 
-                <p class="text-xs font-black text-white uppercase tracking-tight flex-1" x-text="message"></p>
+                <div class="flex-1">
+                    <p class="text-xs font-black text-white uppercase tracking-tight" x-text="message"></p>
+                    <p class="text-xs font-medium text-white/90 mt-1 whitespace-pre-wrap" x-show="detail" x-text="detail"></p>
+                </div>
             </div>
         </div>
 
-        <!-- INSTITUTIONAL DEFAULTS CARD -->
+        <!-- ACADEMIC PERIOD INFO CARD -->
         <div class="bg-white/60 dark:bg-slate-900/40 rounded-2xl border border-slate-200/50 dark:border-slate-700/50 p-8 shadow-sm backdrop-blur-xl">
             <div class="flex items-center justify-between mb-6">
-                <h2 class="text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">⚙️ Institutional Defaults</h2>
+                <h2 class="text-xs font-black text-purple-600 dark:text-purple-400 uppercase tracking-widest">📅 Academic Period</h2>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                <!-- SCHOOL YEAR -->
+                <div>
+                    <label class="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest block mb-2">School Year</label>
+                    <input 
+                        type="text" 
+                        wire:model="school_year" 
+                        placeholder="e.g., 2026-2027"
+                        {{ $config_locked ? 'disabled' : '' }}
+                        class="w-full px-4 py-3 bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-xl font-medium text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all {{ $config_locked ? 'opacity-50 cursor-not-allowed' : '' }}">
+                    @error('school_year') 
+                        <span class="text-[10px] text-red-500 font-bold mt-1 uppercase block">{{ $message }}</span> 
+                    @enderror
+                </div>
+
+                <!-- SEMESTER -->
+                <div>
+                    <label class="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest block mb-2">Semester</label>
+                    <select 
+                        wire:model="semester"
+                        {{ $config_locked ? 'disabled' : '' }}
+                        class="w-full px-4 py-3 bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-xl font-medium text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all {{ $config_locked ? 'opacity-50 cursor-not-allowed' : '' }}">
+                        <option value="">Select Semester</option>
+                        <option value="1st">1st Semester</option>
+                        <option value="2nd">2nd Semester</option>
+                        <option value="Summer">Summer</option>
+                    </select>
+                    @error('semester') 
+                        <span class="text-[10px] text-red-500 font-bold mt-1 uppercase block">{{ $message }}</span> 
+                    @enderror
+                </div>
+
+                <!-- SEMESTER DISPLAY NAME -->
+                <div>
+                    <label class="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest block mb-2">Display Name</label>
+                    <input 
+                        type="text" 
+                        wire:model="semester_name" 
+                        placeholder="e.g., First Semester 2026-2027"
+                        {{ $config_locked ? 'disabled' : '' }}
+                        class="w-full px-4 py-3 bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-xl font-medium text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all {{ $config_locked ? 'opacity-50 cursor-not-allowed' : '' }}">
+                    @error('semester_name') 
+                        <span class="text-[10px] text-red-500 font-bold mt-1 uppercase block">{{ $message }}</span> 
+                    @enderror
+                </div>
+            </div>
+        </div>
+
+        <!-- SCHOOL DAY BOUNDS CARD -->
+        <div class="bg-white/60 dark:bg-slate-900/40 rounded-2xl border border-slate-200/50 dark:border-slate-700/50 p-8 shadow-sm backdrop-blur-xl">
+            <div class="flex items-center justify-between mb-6">
+                <h2 class="text-xs font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">⚙️ School Day Bounds</h2>
                 <span class="text-[10px] font-bold text-slate-400 dark:text-slate-500">Brick Duration: <span class="text-blue-600 dark:text-blue-400">30 min</span></span>
             </div>
             
@@ -93,31 +151,18 @@
             </div>
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-                <!-- SEMESTER NAME -->
-                <div class="md:col-span-2">
-                    <label class="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest block mb-2">Semester Name</label>
-                    <input 
-                        type="text" 
-                        wire:model="semester_name" 
-                        {{ $is_locked ? 'disabled' : '' }}
-                        class="w-full px-4 py-3 bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-xl font-medium text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all {{ $is_locked ? 'opacity-50 cursor-not-allowed' : '' }}">
-                    @error('semester_name') 
-                        <span class="text-[10px] text-red-500 font-bold mt-1 uppercase block">{{ $message }}</span> 
-                    @enderror
-                </div>
-
                 <!-- DAY START TIME -->
                 <div>
                     <label class="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest block mb-2">Day Start Time</label>
                     <div class="flex items-center gap-2">
                         <input 
                             type="time" 
-                            wire:model="start_time"
-                            {{ $is_locked ? 'disabled' : '' }}
-                            class="flex-1 px-4 py-3 bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-xl font-medium text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 {{ $is_locked ? 'opacity-50 cursor-not-allowed' : '' }}">
+                            wire:model="day_start"
+                            {{ $config_locked ? 'disabled' : '' }}
+                            class="flex-1 px-4 py-3 bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-xl font-medium text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 {{ $config_locked ? 'opacity-50 cursor-not-allowed' : '' }}">
                         <span class="text-xs font-bold text-slate-400">⏰</span>
                     </div>
-                    @error('start_time') 
+                    @error('day_start') 
                         <span class="text-[10px] text-red-500 font-bold mt-1 uppercase block">{{ $message }}</span> 
                     @enderror
                 </div>
@@ -128,55 +173,23 @@
                     <div class="flex items-center gap-2">
                         <input 
                             type="time" 
-                            wire:model="end_time"
-                            {{ $is_locked ? 'disabled' : '' }}
-                            class="flex-1 px-4 py-3 bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-xl font-medium text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 {{ $is_locked ? 'opacity-50 cursor-not-allowed' : '' }}">
+                            wire:model="day_end"
+                            {{ $config_locked ? 'disabled' : '' }}
+                            class="flex-1 px-4 py-3 bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-xl font-medium text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 {{ $config_locked ? 'opacity-50 cursor-not-allowed' : '' }}">
                         <span class="text-xs font-bold text-slate-400">⏰</span>
                     </div>
-                    @error('end_time') 
-                        <span class="text-[10px] text-red-500 font-bold mt-1 uppercase block">{{ $message }}</span> 
-                    @enderror
-                </div>
-
-                <!-- LUNCH BREAK START -->
-                <div>
-                    <label class="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest block mb-2">Lunch Break Start</label>
-                    <div class="flex items-center gap-2">
-                        <input 
-                            type="time" 
-                            wire:model="lunch_break_start"
-                            {{ $is_locked ? 'disabled' : '' }}
-                            class="flex-1 px-4 py-3 bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-xl font-medium text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 {{ $is_locked ? 'opacity-50 cursor-not-allowed' : '' }}">
-                        <span class="text-xs font-bold text-slate-400">🍽️</span>
-                    </div>
-                    @error('lunch_break_start') 
-                        <span class="text-[10px] text-red-500 font-bold mt-1 uppercase block">{{ $message }}</span> 
-                    @enderror
-                </div>
-
-                <!-- LUNCH BREAK END -->
-                <div>
-                    <label class="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest block mb-2">Lunch Break End</label>
-                    <div class="flex items-center gap-2">
-                        <input 
-                            type="time" 
-                            wire:model="lunch_break_end"
-                            {{ $is_locked ? 'disabled' : '' }}
-                            class="flex-1 px-4 py-3 bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-xl font-medium text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500 {{ $is_locked ? 'opacity-50 cursor-not-allowed' : '' }}">
-                        <span class="text-xs font-bold text-slate-400">🍽️</span>
-                    </div>
-                    @error('lunch_break_end') 
+                    @error('day_end') 
                         <span class="text-[10px] text-red-500 font-bold mt-1 uppercase block">{{ $message }}</span> 
                     @enderror
                 </div>
             </div>
 
-            <!-- LUNCH BREAK POLICY INFO BOX -->
+            <!-- LUNCH BREAK INFO BOX (HARD-CODED) -->
             <div class="bg-amber-50/50 dark:bg-amber-900/20 border border-amber-200/50 dark:border-amber-800/50 p-4 rounded-xl mb-6 backdrop-blur-sm flex items-start gap-3">
-                <span class="text-lg flex-shrink-0">⏸️</span>
+                <span class="text-lg flex-shrink-0">🍽️</span>
                 <div>
-                    <p class="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase mb-1">Lunch Break Policy</p>
-                    <p class="text-xs font-medium text-amber-700 dark:text-amber-300">{{ $lunch_break_start }} - {{ $lunch_break_end }} is automatically locked. No classes scheduled during this period.</p>
+                    <p class="text-[10px] font-black text-amber-600 dark:text-amber-400 uppercase mb-1">Institutional Lunch Break (Fixed)</p>
+                    <p class="text-xs font-medium text-amber-700 dark:text-amber-300">{{ $lunchStart }} - {{ $lunchEnd }} is automatically locked. This is a system-wide constant and cannot be modified.</p>
                 </div>
             </div>
 
@@ -199,9 +212,9 @@
             <!-- SAVE BUTTON -->
             <button 
                 wire:click="save"
-                {{ $is_locked ? 'disabled' : '' }}
-                class="w-full py-4 {{ $is_locked ? 'bg-slate-300 dark:bg-slate-700 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-lg hover:shadow-xl' }} text-white rounded-xl font-black uppercase tracking-widest transition-all">
-                {{ $is_locked ? 'Unlock to Save Changes' : 'Save Configuration' }}
+                {{ $config_locked ? 'disabled' : '' }}
+                class="w-full py-4 {{ $config_locked ? 'bg-slate-300 dark:bg-slate-700 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 shadow-lg hover:shadow-xl' }} text-white rounded-xl font-black uppercase tracking-widest transition-all">
+                {{ $config_locked ? 'Unlock to Save Changes' : 'Save Configuration' }}
             </button>
         </div>
 
@@ -219,62 +232,6 @@
                     </div>
                 @empty
                     <p class="text-[11px] text-slate-400 italic uppercase font-medium">No changes recorded yet.</p>
-                @endforelse
-            </div>
-        </div>
-
-        <!-- DEPARTMENTS MANAGEMENT SECTION -->
-        <div class="bg-white/60 dark:bg-slate-900/40 rounded-2xl border border-slate-200/50 dark:border-slate-700/50 p-8 shadow-sm backdrop-blur-xl">
-            <h2 class="text-xs font-black text-slate-600 dark:text-slate-400 uppercase tracking-widest mb-6">🏢 College Departments</h2>
-            
-            <div class="flex flex-col md:flex-row gap-4 mb-8">
-                <div class="flex-1">
-                    <input 
-                        type="text" 
-                        wire:model="new_dept_name" 
-                        placeholder="Full Name (e.g. Information Technology)" 
-                        class="w-full px-4 py-3 bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-xl font-medium text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500">
-                    @error('new_dept_name') 
-                        <span class="text-[9px] text-red-500 font-bold mt-1 uppercase block">{{ $message }}</span> 
-                    @enderror
-                </div>
-                
-                <div class="flex gap-3">
-                    <div>
-                        <input 
-                            type="text" 
-                            wire:model="new_dept_code" 
-                            placeholder="Code" 
-                            class="w-24 px-4 py-3 bg-slate-50/50 dark:bg-slate-800/50 border border-slate-200/50 dark:border-slate-700/50 rounded-xl font-medium text-center uppercase text-slate-900 dark:text-slate-100 focus:ring-2 focus:ring-blue-500">
-                        @error('new_dept_code') 
-                            <span class="text-[9px] text-red-500 font-bold mt-1 uppercase block text-center">{{ $message }}</span> 
-                        @enderror
-                    </div>
-                    <button 
-                        wire:click="addDepartment" 
-                        class="px-6 h-[42px] bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black uppercase text-[10px] transition-all shadow-md hover:shadow-lg">
-                        Add
-                    </button>
-                </div>
-            </div>
-
-            <div class="space-y-3">
-                @forelse($departments as $dept)
-                    <div class="flex items-center justify-between p-4 bg-slate-50/50 dark:bg-slate-800/50 rounded-xl border border-slate-100/50 dark:border-slate-700/50 hover:border-slate-200/75 dark:hover:border-slate-600/75 transition-all">
-                        <div class="flex items-center gap-4">
-                            <span class="w-12 h-12 rounded-lg bg-gradient-to-br from-blue-100 to-blue-50 dark:from-blue-900/30 dark:to-blue-800/20 border border-blue-200/50 dark:border-blue-700/50 flex items-center justify-center font-black text-blue-600 dark:text-blue-400 text-xs">
-                                {{ $dept->code }}
-                            </span>
-                            <p class="font-bold text-slate-800 dark:text-slate-200 text-sm">{{ $dept->name }}</p>
-                        </div>
-                        <button 
-                            wire:click="deleteDepartment({{ $dept->id }})" 
-                            class="text-slate-300 dark:text-slate-600 hover:text-red-500 transition-colors text-lg">
-                            ✕
-                        </button>
-                    </div>
-                @empty
-                    <p class="text-[11px] text-slate-400 italic uppercase font-medium text-center py-4">No departments added yet.</p>
                 @endforelse
             </div>
         </div>
