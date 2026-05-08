@@ -207,7 +207,7 @@
                         @mouseenter="showSchedulePopover($event, {
                             code: '{{ $subject->subject_code }}',
                             description: '{{ addslashes($subject->description ?? '') }}',
-                            edp: '{{ $schedule->edp_code ?? 'N/A' }}',
+                            edp: '{{ $subject->edp_code ?? 'N/A' }}',
                             section: '{{ $schedule->section ?? 'N/A' }}',
                             instructor: '{{ addslashes($instructor) }}',
                             time: '{{ $startTimeDisplay }} - {{ $endTimeDisplay }}',
@@ -216,7 +216,10 @@
                         @mouseleave="hideSchedulePopover()"
                     >
                         <div class="text-center w-full space-y-0.5 pointer-events-none">
-                            <div class="text-[10px] sm:text-[11px] font-black uppercase leading-tight line-clamp-2">
+                            <div class="text-[10px] sm:text-[12px] font-black uppercase leading-tight line-clamp-2">
+                                {{ $subject->edp_code }}
+                            </div>
+                            <div class="text-[10px] sm:text-[10px] font-black uppercase leading-tight line-clamp-2">
                                 {{ $subject->subject_code }}
                             </div>
                             <div class="text-[8px] font-semibold leading-tight opacity-90">
@@ -299,8 +302,8 @@
             <span class="text-[7px] font-bold px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 whitespace-nowrap flex-shrink-0" id="popType"></span>
         </div>
 
-        {{-- INFO GRID (COMPACT) --}}
-        <div class="grid grid-cols-2 gap-2 text-[9px]">
+        {{-- INFO GRID (COMPACT) - NOW INCLUDING EDP --}}
+        <div class="grid grid-cols-3 gap-2 text-[9px]">
             <div>
                 <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">EDP</span>
                 <span class="font-black text-slate-900 dark:text-slate-100 block truncate text-[8px]" id="popEdp">—</span>
@@ -308,6 +311,10 @@
             <div>
                 <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Section</span>
                 <span class="font-black text-slate-900 dark:text-slate-100 block text-[8px]" id="popSection">—</span>
+            </div>
+            <div>
+                <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Type</span>
+                <span class="font-black text-slate-900 dark:text-slate-100 block text-[8px]" id="popType2">—</span>
             </div>
         </div>
 
@@ -354,7 +361,6 @@
                 // Populate popover fields
                 document.getElementById('popCode').textContent = data.code;
                 document.getElementById('popDesc').textContent = data.description || 'No description';
-                document.getElementById('popType').textContent = data.type;
                 document.getElementById('popEdp').textContent = data.edp;
                 document.getElementById('popSection').textContent = `S${data.section}`;
                 document.getElementById('popInstructor').textContent = data.instructor;

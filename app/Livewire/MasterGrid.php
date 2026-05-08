@@ -59,6 +59,21 @@ class MasterGrid extends Component
         'CTE' => ['ED'],
     ];
 
+    public const DEPARTMENT_COLORS = [
+        'CCS' => 'yellow',
+        'IT' => 'yellow',
+        'ACT' => 'yellow',
+        'CTE' => 'blue',
+        'ED' => 'blue',
+        'COC' => 'violet',
+        'FB' => 'violet',
+        'LD' => 'violet',
+        'QD' => 'violet',
+        'SHTM' => 'orange',
+        'HM' => 'orange',
+        'TM' => 'orange',
+    ];
+
     protected $listeners = [
         'refreshGrid' => '$refresh',
         'settings-updated' => 'loadSettings',
@@ -122,6 +137,11 @@ class MasterGrid extends Component
         }
 
         return false;
+    }
+
+    public function getDepartmentColor($department): string
+    {
+        return self::DEPARTMENT_COLORS[$department] ?? 'slate';
     }
 
     public function formatTime12h($time): string
@@ -561,26 +581,24 @@ class MasterGrid extends Component
             });
         }
 
-        if ($this->selectedDept) {
+        if ($this->selectedDept && $this->selectedDept !== '') {
             $query->where('department', $this->selectedDept);
         }
 
-        if ($this->selectedYear) {
+        if ($this->selectedYear && $this->selectedYear !== '') {
             $query->where('year_level', (int)$this->selectedYear);
         }
 
-        if ($this->selectedMajor) {
-            $major = strtoupper($this->selectedMajor);
-            $query->where('major', $major);
+        if ($this->selectedMajor && $this->selectedMajor !== '') {
+            $query->where('major', $this->selectedMajor);
         }
 
-        if ($this->selectedSection) {
+        if ($this->selectedSection && $this->selectedSection !== '') {
             $query->where('section', $this->selectedSection);
         }
 
-        if ($this->selectedType) {
-            $type = ucfirst(strtolower($this->selectedType));
-            $query->where('type', $type);
+        if ($this->selectedType && $this->selectedType !== '') {
+            $query->where('type', $this->selectedType);
         }
 
         $subjects = $query
@@ -748,6 +766,7 @@ class MasterGrid extends Component
             'brickHeightPx'        => self::BRICK_HEIGHT_PX,
             'hasFullAccess'        => $this->hasFullAccess(),
             'departmentMajors'     => self::DEPARTMENT_MAJORS,
+            'departmentColors'     => self::DEPARTMENT_COLORS,
             'selectedRoomId'       => $this->selectedRoomId,
             'selectedRoomName'     => $this->selectedRoomName,
             'selectedRoomType'     => $this->selectedRoomType,
