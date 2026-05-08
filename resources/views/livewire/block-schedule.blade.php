@@ -1,3 +1,4 @@
+
 <div class="min-h-screen bg-[#E6E6E6] dark:bg-[#020617] transition-colors duration-500 py-8 px-6">
     <div class="max-w-7xl mx-auto">
 
@@ -33,6 +34,9 @@
                             <option value="ED">ED - Education</option>
                             <option value="HM">HM - Hospitality Management</option>
                             <option value="TM">TM - Tourism Management</option>
+                            <option value="FB">FB - Forensic Biology</option>
+                            <option value="LD">LD - Lie Detection</option>
+                            <option value="QD">QD - Questioned Document</option>
                         </select>
                     </div>
 
@@ -68,74 +72,104 @@
                 </div>
             </div>
 
-            {{-- The Schedule Table --}}
+            {{-- THE UNIFIED SCHEDULE TABLE --}}
             <div class="overflow-hidden">
-                @forelse($schedules as $day => $daySchedules)
-                    <div class="px-12 py-8 border-b-2 border-slate-200 dark:border-slate-800 last:border-b-0">
-                        {{-- Day Header --}}
-                        <h3 class="text-lg font-black uppercase tracking-tighter text-blue-600 dark:text-blue-400 mb-6 flex items-center gap-2">
-                            <span class="w-2 h-6 bg-blue-600 dark:bg-blue-400 rounded-full"></span>
-                            {{ $day }}
-                        </h3>
+                @php
+                    // Flatten all schedules into a single array, sorted by day and time
+                    $flattenedSchedules = [];
+                    foreach($schedules as $day => $daySchedules) {
+                        foreach($daySchedules as $sched) {
+                            $flattenedSchedules[] = $sched;
+                        }
+                    }
+                    
+                    // Sort by day order and then by start time
+                    $dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+                    usort($flattenedSchedules, function($a, $b) use ($dayOrder) {
+                        $dayA = array_search($a->day, $dayOrder);
+                        $dayB = array_search($b->day, $dayOrder);
+                        
+                        if ($dayA !== $dayB) {
+                            return $dayA - $dayB;
+                        }
+                        
+                        $timeA = strtotime($a->start_time);
+                        $timeB = strtotime($b->start_time);
+                        return $timeA - $timeB;
+                    });
+                @endphp
 
-                        {{-- Day Schedule Table --}}
-                        <div class="overflow-x-auto rounded-xl border-2 border-slate-200 dark:border-slate-700 shadow-sm">
+                @forelse($flattenedSchedules as $sched)
+                    @if($loop->first)
+                        {{-- Table Header --}}
+                        <div class="overflow-x-auto rounded-none border-none shadow-none">
                             <table class="w-full border-collapse">
                                 <thead>
-                                    <tr class="bg-slate-900 dark:bg-slate-800 text-white text-[10px] uppercase font-black tracking-widest">
-                                        <th class="px-6 py-4 text-left border-r border-slate-700 dark:border-slate-600">Time</th>
-                                        <th class="px-6 py-4 text-left border-r border-slate-700 dark:border-slate-600">EDP Code</th>
-                                        <th class="px-6 py-4 text-left border-r border-slate-700 dark:border-slate-600">Subject Code</th>
-                                        <th class="px-6 py-4 text-left border-r border-slate-700 dark:border-slate-600">Description</th>
-                                        <th class="px-6 py-4 text-center border-r border-slate-700 dark:border-slate-600">Units</th>
-                                        <th class="px-6 py-4 text-center">Room</th>
+                                    <tr class="bg-slate-900 dark:bg-slate-800 text-white text-[11px] uppercase font-black tracking-widest">
+                                        <th class="px-6 py-4 text-center border-r border-slate-700 dark:border-slate-600 w-24">Time</th>
+                                        <th class="px-6 py-4 text-center border-r border-slate-700 dark:border-slate-600 w-20">EDP Code</th>
+                                        <th class="px-6 py-4 text-left border-r border-slate-700 dark:border-slate-600 w-32">Subject Code</th>
+                                        <th class="px-6 py-4 text-left border-r border-slate-700 dark:border-slate-600 flex-1">Description</th>
+                                        <th class="px-6 py-4 text-center border-r border-slate-700 dark:border-slate-600 w-16">Units</th>
+                                        <th class="px-6 py-4 text-center border-r border-slate-700 dark:border-slate-600 w-20">Day</th>
+                                        <th class="px-6 py-4 text-center w-24">Room</th>
                                     </tr>
                                 </thead>
                                 <tbody class="text-sm">
-                                    @foreach($daySchedules as $sched)
-                                        <tr class="border-b border-slate-100 dark:border-slate-700 hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-colors">
-                                            {{-- Time --}}
-                                            <td class="px-6 py-4 font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                                                <span class="bg-blue-100/50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-3 py-1.5 rounded-lg text-xs font-black tracking-tight">
-                                                    {{ \Carbon\Carbon::parse($sched->start_time)->format('h:i A') }} -
-                                                    {{ \Carbon\Carbon::parse($sched->end_time)->format('h:i A') }}
-                                                </span>
-                                            </td>
+                    @endif
 
-                                            {{-- EDP Code --}}
-                                            <td class="px-6 py-4 font-mono text-slate-500 dark:text-slate-400 font-bold">
-                                                {{ $sched->subject->edp_code }}
-                                            </td>
+                    {{-- Table Row --}}
+                    <tr class="border-b border-slate-100 dark:border-slate-700 hover:bg-blue-50/50 dark:hover:bg-blue-900/10 transition-colors">
+                        {{-- Time --}}
+                        <td class="px-6 py-4 font-bold text-slate-700 dark:text-slate-300 whitespace-nowrap text-center">
+                            <span class="bg-blue-100/50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 px-3 py-1.5 rounded-lg text-xs font-black tracking-tight inline-block">
+                                {{ \Carbon\Carbon::parse($sched->start_time)->format('h:i A') }} -
+                                {{ \Carbon\Carbon::parse($sched->end_time)->format('h:i A') }}
+                            </span>
+                        </td>
 
-                                            {{-- Subject Code --}}
-                                            <td class="px-6 py-4 font-black text-slate-800 dark:text-slate-100 uppercase tracking-tight">
-                                                {{ $sched->subject->subject_code }}
-                                            </td>
+                        {{-- EDP Code --}}
+                        <td class="px-6 py-4 font-mono text-slate-500 dark:text-slate-400 font-bold text-center">
+                            {{ $sched->subject->edp_code }}
+                        </td>
 
-                                            {{-- Description --}}
-                                            <td class="px-6 py-4 text-slate-600 dark:text-slate-400">
-                                                {{ $sched->subject->description }}
-                                            </td>
+                        {{-- Subject Code --}}
+                        <td class="px-6 py-4 font-black text-slate-800 dark:text-slate-100 uppercase tracking-tight">
+                            {{ $sched->subject->subject_code }}
+                        </td>
 
-                                            {{-- Units --}}
-                                            <td class="px-6 py-4 text-center font-bold text-slate-700 dark:text-slate-300">
-                                                <span class="bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg text-xs font-black">
-                                                    {{ $sched->subject->units ?? 0 }} U
-                                                </span>
-                                            </td>
+                        {{-- Description --}}
+                        <td class="px-6 py-4 text-slate-600 dark:text-slate-400">
+                            {{ $sched->subject->description }}
+                        </td>
 
-                                            {{-- Room --}}
-                                            <td class="px-6 py-4 text-center font-black text-blue-600 dark:text-blue-400">
-                                                <span class="bg-blue-100/50 dark:bg-blue-900/30 px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-tight">
-                                                    {{ $sched->room->room_name }}
-                                                </span>
-                                            </td>
-                                        </tr>
-                                    @endforeach
+                        {{-- Units --}}
+                        <td class="px-6 py-4 text-center font-bold text-slate-700 dark:text-slate-300">
+                            <span class="bg-slate-100 dark:bg-slate-800 px-3 py-1.5 rounded-lg text-xs font-black inline-block">
+                                {{ $sched->subject->units ?? 0 }} U
+                            </span>
+                        </td>
+
+                        {{-- Day --}}
+                        <td class="px-6 py-4 text-center font-black text-slate-700 dark:text-slate-300">
+                            <span class="bg-slate-100/50 dark:bg-slate-800/50 px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-tight inline-block">
+                                {{ \Carbon\Carbon::parse('2000-01-01 00:00:00')->addDay(array_search($sched->day, ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']))->format('l') }}
+                            </span>
+                        </td>
+
+                        {{-- Room --}}
+                        <td class="px-6 py-4 text-center font-black text-blue-600 dark:text-blue-400">
+                            <span class="bg-blue-100/50 dark:bg-blue-900/30 px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-tight inline-block">
+                                {{ $sched->room->room_name }}
+                            </span>
+                        </td>
+                    </tr>
+
+                    @if($loop->last)
                                 </tbody>
                             </table>
                         </div>
-                    </div>
+                    @endif
                 @empty
                     {{-- Empty State --}}
                     <div class="px-12 py-20 text-center">
@@ -233,6 +267,23 @@
         .px-12 {
             padding-left: 20px !important;
             padding-right: 20px !important;
+        }
+
+        .bg-blue-100/50,
+        .dark\:bg-blue-900/30,
+        .text-blue-700,
+        .dark\:text-blue-300,
+        .bg-slate-100,
+        .dark\:bg-slate-800,
+        .bg-slate-100/50,
+        .dark\:bg-slate-800/50 {
+            background-color: transparent !important;
+            color: black !important;
+            border: 1px solid #000 !important;
+        }
+
+        .inline-block {
+            display: inline-block;
         }
 
         @page {

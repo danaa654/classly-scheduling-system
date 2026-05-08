@@ -49,29 +49,34 @@ class BlockSchedule extends Component
     }
 
     public function render()
-{
-    $allSchedules = Schedule::where('section', $this->selectedSection)
-        ->with(['subject', 'room'])
-        ->get();
+    {
+        // =====================================================
+        // Get all schedules for selected section
+        // =====================================================
+        $allSchedules = Schedule::where('section', $this->selectedSection)
+            ->with(['subject', 'room'])
+            ->get();
 
-    // Use mappedDepartment for filtering
-    $schedules = $allSchedules->filter(function ($schedule) {
-        if (!$schedule->subject) {
-            return false;
-        }
+        // =====================================================
+        // Filter by department AND year_level
+        // =====================================================
+        $schedules = $allSchedules->filter(function ($schedule) {
+            // Skip if no subject relationship exists
+            if (!$schedule->subject) {
+                return false;
+            }
 
-        $subjDept = $schedule->subject->mapped_department; // ← Use mapped version
-        
-        return ($subjDept === $this->selectedDepartment && 
-                (int)$schedule->subject->year_level === (int)$this->selectedYear);
-    })
-    ->groupBy('day');
+            // Match both department and year level
+            return ($schedule->subject->department === $this->selectedDepartment && 
+                    (int)$schedule->subject->year_level === (int)$this->selectedYear);
+        })
+        ->groupBy('day'); // Group by day for display
 
-    $departmentName = $this->getDepartmentName($this->selectedDepartment);
+        $departmentName = $this->getDepartmentName($this->selectedDepartment);
 
-    return view('livewire.block-schedule', [
-        'schedules' => $schedules,
-        'departmentName' => $departmentName,
-    ]);
-}
+        return view('livewire.block-schedule', [
+            'schedules' => $schedules,
+            'departmentName' => $departmentName,
+        ]);
+    }
 }

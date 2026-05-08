@@ -65,71 +65,92 @@
                 <div class="col-span-12 lg:col-span-9 space-y-4">
                     
                     {{-- Filter Bar Section --}}
-                    <div class="grid grid-cols-1 md:grid-cols-4 gap-4 bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-md">
-                        {{-- 1. DEPARTMENT FILTER --}}
-                        <div class="relative">
-                            <select wire:model.live="selectedDept" 
-                                class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl p-4 font-semibold text-sm uppercase text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 {{ !$isPowerUser ? 'opacity-70 cursor-not-allowed' : '' }}"
-                                {{ !$isPowerUser ? 'disabled' : '' }}>
-                                @if($isPowerUser)
-                                    <option value="">ALL DEPARTMENTS</option>
-                                    <option value="CCS">CCS</option>
-                                    <option value="SHTM">SHTM</option>
-                                    <option value="COC">COC</option>
-                                    <option value="CTE">CTE</option>
-                                @else
-                                    <option value="{{ auth()->user()->department }}">{{ auth()->user()->department }}</option>
-                                @endif
-                            </select>
-                            @if(!$isPowerUser)
-                                <span class="absolute -top-2 left-4 bg-white dark:bg-slate-900 px-1.5 text-xs font-extrabold text-blue-600 uppercase italic">Locked</span>
-                            @endif
-                        </div>
-                        {{-- 2. YEAR FILTER --}}
-                        <select wire:model.live="selectedYear" class="bg-slate-50 dark:bg-slate-800 border-none rounded-2xl p-4 font-semibold text-sm uppercase text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500">
-                            <option value="">YEAR</option>
-                            <option value="1">1st Year</option>
-                            <option value="2">2nd Year</option>
-                            <option value="3">3rd Year</option>
-                            <option value="4">4th Year</option>
-                        </select>
-                        <select wire:model.live="selectedSection" 
-                                class="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl px-4 py-2 text-xs font-bold uppercase text-slate-600 dark:text-slate-300 focus:ring-2 focus:ring-blue-500 outline-none transition-all">
-                            <option value="">All Sections</option>
-                            @foreach($sections as $sec)
-                                <option value="{{ $sec }}">{{ $sec }}</option>
-                            @endforeach
-                        </select>
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-md">
+    
+    {{-- 1. DEPARTMENT FILTER --}}
+    <div class="relative">
+        <select 
+            wire:model.live="selectedDept" 
+            class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl p-4 font-semibold text-sm uppercase text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all {{ !$isPowerUser ? 'opacity-70 cursor-not-allowed' : '' }}"
+            {{ !$isPowerUser ? 'disabled' : '' }}>
+            
+            @if($isPowerUser)
+                <option value="">ALL DEPARTMENTS</option>
+                <option value="CCS">CCS</option>
+                <option value="SHTM">SHTM</option>
+                <option value="COC">COC</option>
+                <option value="CTE">CTE</option>
+            @else
+                <option value="{{ auth()->user()->department }}">{{ auth()->user()->department }}</option>
+            @endif
+        </select>
 
-                        {{-- 3. MAJOR FILTER --}}
-                        <select wire:model.live="selectedMajor" 
-                                class="bg-slate-50 dark:bg-slate-800 border-none rounded-2xl p-4 font-semibold text-sm uppercase text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500"
-                                wire:key="major-filter-{{ $selectedDept }}">
-                            <option value="">MAJOR</option>
-                            @if($selectedDept == 'SHTM')
-                                <option value="HM">Hospitality (HM)</option>
-                                <option value="TM">Tourism (TM)</option>
-                            @elseif($selectedDept == 'CCS')
-                                <option value="IT">Information Technology (IT)</option>
-                                <option value="ACT">Assistive Computer Technology (ACT)</option> 
-                            @elseif($selectedDept == 'COC')
-                                <option value="FB">Forensic Biology (FB)</option>
-                                <option value="LD">Lie Detection (LD)</option>
-                                <option value="QD">Questioned Documents (QD)</option>
-                            @elseif($selectedDept == 'CTE')
-                                <option value="ED">Education (ED)</option>
-                            @else
-                                <option value="">N/A</option>
-                            @endif
-                        </select>
-                        {{-- 4. SEARCH --}}
-                        <div class="bg-slate-50 dark:bg-slate-800 rounded-2xl flex items-center px-4 border border-transparent focus-within:ring-2 focus-within:ring-blue-500">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-slate-500 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-                            </svg>
-                            <input type="text" wire:model.live="search" placeholder="Search Catalog..." class="w-full bg-transparent border-none focus:ring-0 font-semibold text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 py-4">
-                        </div>
-                    </div>
+        @if(!$isPowerUser)
+            <span class="absolute -top-2 left-4 bg-white dark:bg-slate-900 px-1.5 text-xs font-extrabold text-blue-600 uppercase italic">
+                Locked
+            </span>
+        @endif
+    </div>
+
+    {{-- 2. YEAR LEVEL FILTER --}}
+    <select 
+        wire:model.live="selectedYear" 
+        class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl p-4 font-semibold text-sm uppercase text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
+        <option value="">YEAR</option>
+        <option value="1">1st Year</option>
+        <option value="2">2nd Year</option>
+        <option value="3">3rd Year</option>
+        <option value="4">4th Year</option>
+    </select>
+
+    {{-- 3. SECTION FILTER --}}
+    <select 
+        wire:model.live="selectedSection" 
+        class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl p-4 font-semibold text-sm uppercase text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
+        <option value="">ALL SECTIONS</option>
+        @foreach($sections as $sec)
+            <option value="{{ $sec }}">{{ $sec }}</option>
+        @endforeach
+    </select>
+
+    {{-- 4. MAJOR FILTER - WITH wire:key FIX --}}
+    <select 
+        wire:model.live="selectedMajor" 
+        wire:key="major-filter-{{ $selectedDept }}"
+        class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl p-4 font-semibold text-sm uppercase text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
+        <option value="">MAJOR</option>
+        
+        @if($selectedDept === 'SHTM')
+            <option value="HM">Hospitality (HM)</option>
+            <option value="TM">Tourism (TM)</option>
+        @elseif($selectedDept === 'CCS')
+            <option value="IT">Information Technology (IT)</option>
+            <option value="ACT">Assistive Computer Technology (ACT)</option>
+        @elseif($selectedDept === 'COC')
+            <option value="FB">Forensic Biology (FB)</option>
+            <option value="LD">Lie Detection (LD)</option>
+            <option value="QD">Questioned Documents (QD)</option>
+        @elseif($selectedDept === 'CTE')
+            <option value="ED">Education (ED)</option>
+        @else
+            <option value="">N/A</option>
+        @endif
+    </select>
+</div>
+
+{{-- SEARCH BAR - Add below filters section --}}
+<div class="bg-white dark:bg-slate-900 rounded-3xl p-5 border border-slate-300 dark:border-slate-700 shadow-md">
+    <div class="bg-slate-50 dark:bg-slate-800 rounded-2xl flex items-center px-4 border border-transparent focus-within:ring-2 focus-within:ring-blue-500">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-slate-500 mr-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+        </svg>
+        <input 
+            type="text" 
+            wire:model.live="search" 
+            placeholder="Search Catalog by Code, EDP, or Description..." 
+            class="w-full bg-transparent border-none focus:ring-0 font-semibold text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 py-4">
+    </div>
+</div>
                     {{-- Table Container --}}
                     <div class="bg-white dark:bg-slate-900 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-md overflow-hidden transition-colors">
                         <table class="w-full text-left">
@@ -469,222 +490,237 @@
             @endif
         </div>
     </div>
-
-              {{-- New/Edit Subject Modal --}}
-    <div x-show="open" class="fixed inset-0 z-[60] flex items-center justify-center p-4" x-cloak>
-        <div class="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl p-6 shadow-2xl border border-transparent dark:border-slate-800 overflow-y-auto max-h-[90vh]" @click.away="open = false">
-        
-        @php
-            $userRole = strtolower(auth()->user()->role ?? '');
-            $powerRoles = ['admin', 'registrar', 'associate_dean'];
-            $isPowerUser = in_array($userRole, $powerRoles);
-        @endphp
-
-        <h3 class="text-lg font-black text-slate-800 dark:text-slate-100 mb-4 uppercase tracking-tighter">
-            {{ $isEditMode ? 'Edit Subject' : 'New Subject' }}
-        </h3>
-
-        <form wire:submit.prevent="saveSubject" class="space-y-3" autocomplete="off">
+{{-- NEW/EDIT SUBJECT MODAL --}}
+<div x-show="open" class="fixed inset-0 z-[60] flex items-center justify-center p-4" x-cloak>
+    <div class="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl p-6 shadow-2xl border border-transparent dark:border-slate-800 overflow-y-auto max-h-[90vh]" @click.away="open = false">
     
-    {{-- STEP 1: DEPARTMENT --}}
-    <div class="relative">
-        <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-1 block">
-            Step 1: Department
-        </label>
-        
-        @if($isEditMode)
-            <input
-                disabled
-                value="{{ $department }}"
-                class="w-full bg-slate-50 dark:bg-slate-800 rounded-xl p-3 font-bold text-xs uppercase
-                    text-slate-700 dark:text-slate-200 opacity-60 cursor-not-allowed">
-            <span class="text-[7px] font-black text-amber-600 uppercase ml-1 italic">Locked in Edit Mode</span>
-        @else
-            <select wire:model.live="department" class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500">
-                <option value="">— Select Department —</option>
-                @if($isPowerUser)
-                    <option value="CCS">CCS</option>
-                    <option value="CTE">CTE</option>
-                    <option value="COC">COC</option>
-                    <option value="SHTM">SHTM</option>
-                @else
-                    <option value="{{ auth()->user()->department }}">{{ auth()->user()->department }}</option>
-                @endif
-            </select>
-        @endif
-        @error('department')
-            <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
-        @enderror
-    </div>
+    @php
+        $userRole = strtolower(auth()->user()->role ?? '');
+        $powerRoles = ['admin', 'registrar', 'associate_dean'];
+        $isPowerUser = in_array($userRole, $powerRoles);
+    @endphp
 
-    {{-- STEP 2: MAJOR --}}
-    <div class="relative">
-        <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-1 block">
-            Step 2: Major
-        </label>
-        
-        @if($isEditMode)
-            <input
-                disabled
-                value="{{ $major }}"
-                class="w-full bg-slate-50 dark:bg-slate-800 rounded-xl p-3 font-bold text-xs uppercase
-                    text-slate-700 dark:text-slate-200 opacity-60 cursor-not-allowed">
-            <span class="text-[7px] font-black text-amber-600 uppercase ml-1 italic">Locked in Edit Mode</span>
-        @else
-            <select wire:model.live="major" class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 {{ empty($department) ? 'opacity-50 cursor-not-allowed' : '' }}" {{ empty($department) ? 'disabled' : '' }}>
-                <option value="">— Select Major —</option>
-                @foreach($availableMajors as $majorCode => $majorName)
-                    <option value="{{ $majorCode }}">{{ $majorName }}</option>
-                @endforeach
-            </select>
-        @endif
-        @error('major')
-            <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
-        @enderror
-    </div>
+    <h3 class="text-lg font-black text-slate-800 dark:text-slate-100 mb-4 uppercase tracking-tighter">
+        {{ $isEditMode ? 'Edit Subject' : 'New Subject' }}
+    </h3>
 
-    {{-- STEP 3: YEAR LEVEL --}}
-    <div class="relative">
-        <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-1 block">
-            Step 3: Year Level
-        </label>
-        
-        @if($isEditMode)
-            <input
-                disabled
-                value="Year {{ $year_level }}"
-                class="w-full bg-slate-50 dark:bg-slate-800 rounded-xl p-3 font-bold text-xs uppercase
-                    text-slate-700 dark:text-slate-200 opacity-60 cursor-not-allowed">
-            <span class="text-[7px] font-black text-amber-600 uppercase ml-1 italic">Locked in Edit Mode</span>
-        @else
-            <select wire:model.live="year_level" class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 {{ empty($major) ? 'opacity-50 cursor-not-allowed' : '' }}" {{ empty($major) ? 'disabled' : '' }}>
-                <option value="">— Select Year Level —</option>
-                <option value="1">1st Year</option>
-                <option value="2">2nd Year</option>
-                <option value="3">3rd Year</option>
-                <option value="4">4th Year</option>
-            </select>
-        @endif
-        @error('year_level')
-            <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
-        @enderror
-    </div>
+    <form wire:submit.prevent="saveSubject" class="space-y-3" autocomplete="off">
 
-    {{-- AUTOMATIC EDP CODE --}}
-    <div class="relative bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 border border-blue-200 dark:border-blue-800">
-        <label class="text-[9px] font-black opacity-60 dark:text-slate-400 uppercase ml-1 mb-1 block">
-            Auto-Generated EDP Code
-        </label>
-        <input
-            type="text"
-            wire:model="edp_code"
-            readonly
-            class="w-full bg-white dark:bg-slate-800 rounded-lg p-2 font-bold text-xs uppercase
-                text-blue-700 dark:text-blue-300 cursor-not-allowed border border-blue-300 dark:border-blue-600"
-            placeholder="Generates after selecting Major & Year">
-        <span class="text-[7px] font-bold text-blue-600 dark:text-blue-400 uppercase ml-1 italic mt-1 block">
-            Format: MAJOR-YEAR[LEVEL]### (e.g., IT-261001)
-        </span>
-    </div>
-
-    {{-- SUBJECT CODE & SECTION (Manual inputs) --}}
-    <div class="grid grid-cols-2 gap-2">
+        {{-- STEP 1: DEPARTMENT --}}
         <div class="relative">
-            <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block">Subject Code</label>
-            <input type="text" 
-                wire:model.live="subject_code" 
-                placeholder="e.g., UTS" 
-                class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 transition-all">
+            <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-1 block">
+                Step 1: Department
+            </label>
+            
+            @if($isEditMode)
+                <input
+                    disabled
+                    value="{{ $department }}"
+                    class="w-full bg-slate-50 dark:bg-slate-800 rounded-xl p-3 font-bold text-xs uppercase
+                        text-slate-700 dark:text-slate-200 opacity-60 cursor-not-allowed">
+                <span class="text-[7px] font-black text-amber-600 uppercase ml-1 italic">Locked in Edit Mode</span>
+            @else
+                <select wire:model.live="department" class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500">
+                    <option value="">— Select Department —</option>
+                    @if($isPowerUser)
+                        <option value="CCS">CCS</option>
+                        <option value="CTE">CTE</option>
+                        <option value="COC">COC</option>
+                        <option value="SHTM">SHTM</option>
+                    @else
+                        <option value="{{ auth()->user()->department }}">{{ auth()->user()->department }}</option>
+                    @endif
+                </select>
+            @endif
+            @error('department')
+                <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
+            @enderror
         </div>
 
+        {{-- STEP 2: MAJOR --}}
         <div class="relative">
-            <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block">Section</label>
-            <input type="text" 
-                wire:model="section" 
-                placeholder="A, B, C..." 
-                class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 transition-all">
-        </div>
-    </div>
-
-    {{-- ERROR MESSAGES --}}
-    @error('section')
-        <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
-    @enderror
-    @error('subject_code')
-        <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
-    @enderror
-
-    {{-- DESCRIPTION --}}
-    <input type="text" 
-        wire:model="description" 
-        placeholder="DESCRIPTION" 
-        class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 transition-all">
-
-    @error('description')
-        <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
-    @enderror
-
-    {{-- UNITS, TYPE, DURATION, MEETINGS --}}
-    <div class="grid grid-cols-4 gap-2">
-        <div>
-            <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block">Units</label>
-            <input type="number" 
-                wire:model.live="units" 
-                min="3" 
-                max="5"
-                class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
-        </div>
-        
-        <div>
-            <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block">Type</label>
-            <select wire:model="type" 
-                class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
-                <option value="Major">Major</option>
-                <option value="Minor">Minor</option>
-            </select>
+            <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-1 block">
+                Step 2: Major
+            </label>
+            
+            @if($isEditMode)
+                <input
+                    disabled
+                    value="{{ $major }}"
+                    class="w-full bg-slate-50 dark:bg-slate-800 rounded-xl p-3 font-bold text-xs uppercase
+                        text-slate-700 dark:text-slate-200 opacity-60 cursor-not-allowed">
+                <span class="text-[7px] font-black text-amber-600 uppercase ml-1 italic">Locked in Edit Mode</span>
+            @else
+                <select wire:model.live="major" class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 {{ empty($department) ? 'opacity-50 cursor-not-allowed' : '' }}" {{ empty($department) ? 'disabled' : '' }}>
+                    <option value="">— Select Major —</option>
+                    @foreach($availableMajors as $majorCode => $majorName)
+                        <option value="{{ $majorCode }}">{{ $majorName }}</option>
+                    @endforeach
+                </select>
+            @endif
+            @error('major')
+                <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
+            @enderror
         </div>
 
-        <div>
-            <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block">Duration</label>
-            <select wire:model="duration_hours" 
-                class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
-                <option value="2">2 Hrs</option>
-                <option value="3">3 Hrs</option>
-                <option value="4">4 Hrs</option>
-                <option value="5">5 Hrs</option>
-            </select>
+        {{-- STEP 3: YEAR LEVEL --}}
+        <div class="relative">
+            <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-1 block">
+                Step 3: Year Level
+            </label>
+            
+            @if($isEditMode)
+                <input
+                    disabled
+                    value="Year {{ $year_level }}"
+                    class="w-full bg-slate-50 dark:bg-slate-800 rounded-xl p-3 font-bold text-xs uppercase
+                        text-slate-700 dark:text-slate-200 opacity-60 cursor-not-allowed">
+                <span class="text-[7px] font-black text-amber-600 uppercase ml-1 italic">Locked in Edit Mode</span>
+            @else
+                <select wire:model.live="year_level" class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 {{ empty($major) ? 'opacity-50 cursor-not-allowed' : '' }}" {{ empty($major) ? 'disabled' : '' }}>
+                    <option value="">— Select Year Level —</option>
+                    <option value="1">1st Year</option>
+                    <option value="2">2nd Year</option>
+                    <option value="3">3rd Year</option>
+                    <option value="4">4th Year</option>
+                </select>
+            @endif
+            @error('year_level')
+                <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
+            @enderror
         </div>
 
-        <div>
-            <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block text-blue-500">Meetings</label>
-            <select wire:model="meetings_per_week" 
-                class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
-                <option value="1">1x</option>
-                <option value="2">2x</option>
-                <option value="3">3x</option>
-            </select>
+        {{-- AUTOMATIC EDP CODE --}}
+        <div class="relative bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3 border border-blue-200 dark:border-blue-800">
+            <label class="text-[9px] font-black opacity-60 dark:text-slate-400 uppercase ml-1 mb-1 block">
+                Auto-Generated EDP Code
+            </label>
+            <input
+                type="text"
+                wire:model="edp_code"
+                readonly
+                class="w-full bg-white dark:bg-slate-800 rounded-lg p-2 font-bold text-xs uppercase
+                    text-blue-700 dark:text-blue-300 cursor-not-allowed border border-blue-300 dark:border-blue-600"
+                placeholder="Generates after selecting Major & Year">
+            <span class="text-[7px] font-bold text-blue-600 dark:text-blue-400 uppercase ml-1 italic mt-1 block">
+                Format: MAJOR-YEAR[LEVEL]### (e.g., IT-261001)
+            </span>
         </div>
-    </div>
 
-    @error('units')
-        <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
-    @enderror
-    @error('type')
-        <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
-    @enderror
-    @error('duration_hours')
-        <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
-    @enderror
-    @error('meetings_per_week')
-        <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
-    @enderror
+        {{-- SUBJECT CODE & SECTION (Manual inputs) --}}
+        <div class="grid grid-cols-2 gap-2">
+            <div class="relative">
+                <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block">Subject Code</label>
+                <input type="text" 
+                    wire:model.live="subject_code" 
+                    placeholder="e.g., UTS" 
+                    class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 transition-all">
+            </div>
 
-    {{-- SUBMIT BUTTON --}}
-    <button type="submit" 
-        class="w-full py-3 mt-4 bg-blue-600 dark:bg-indigo-600 text-white rounded-xl font-black uppercase text-[10px] shadow-lg hover:shadow-blue-500/20 active:scale-95 transition-all">
-        {{ $isEditMode ? 'Update' : 'Save' }} Subject
-    </button>
-        </form>
+            <div class="relative">
+                <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block">Section</label>
+                <input type="text" 
+                    wire:model="section" 
+                    placeholder="A, B, C..." 
+                    class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 transition-all">
+            </div>
+        </div>
+
+        {{-- ERROR MESSAGES --}}
+        @error('section')
+            <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
+        @enderror
+        @error('subject_code')
+            <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
+        @enderror
+        @error('edp_code')
+            <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
+        @enderror
+
+        {{-- DESCRIPTION --}}
+        <input type="text" 
+            wire:model="description" 
+            placeholder="DESCRIPTION" 
+            class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:ring-2 focus:ring-blue-500 transition-all">
+
+        @error('description')
+            <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
+        @enderror
+
+        {{-- UNITS, TYPE, DURATION, MEETINGS --}}
+        <div class="grid grid-cols-4 gap-2">
+            <div>
+                <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block">Units</label>
+                <input type="number" 
+                    wire:model.live="units" 
+                    min="3" 
+                    max="5"
+                    class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
+            </div>
+            
+            <div>
+                <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block">Type</label>
+                <select wire:model="type" 
+                    class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
+                    <option value="Major">Major</option>
+                    <option value="Minor">Minor</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block">Duration</label>
+                <select wire:model="duration_hours" 
+                    class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
+                    <option value="2">2 Hrs</option>
+                    <option value="3">3 Hrs</option>
+                    <option value="4">4 Hrs</option>
+                    <option value="5">5 Hrs</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="text-[9px] font-black opacity-40 dark:text-slate-400 uppercase ml-1 mb-0.5 block text-blue-500">Meetings</label>
+                <select wire:model="meetings_per_week" 
+                    class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
+                    <option value="1">1x</option>
+                    <option value="2">2x</option>
+                    <option value="3">3x</option>
+                </select>
+            </div>
+        </div>
+
+        @error('units')
+            <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
+        @enderror
+        @error('type')
+            <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
+        @enderror
+        @error('duration_hours')
+            <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
+        @enderror
+        @error('meetings_per_week')
+            <span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>
+        @enderror
+
+        {{-- ✅ SUBMIT BUTTON - WITH wire:loading.attr="disabled" TO PREVENT DOUBLE SUBMISSION --}}
+        <button 
+            type="submit" 
+            wire:loading.attr="disabled"
+            wire:loading.class="opacity-60 cursor-not-allowed"
+            class="w-full py-3 mt-4 bg-blue-600 dark:bg-indigo-600 text-white rounded-xl font-black uppercase text-[10px] shadow-lg hover:shadow-blue-500/20 active:scale-95 transition-all disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+            <span wire:loading.remove wire:target="saveSubject">
+                {{ $isEditMode ? 'Update' : 'Save' }} Subject
+            </span>
+            <span wire:loading wire:target="saveSubject" class="inline-flex items-center gap-2">
+                <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+                Saving...
+            </span>
+        </button>
+    </form>
     </div>
 </div>
 

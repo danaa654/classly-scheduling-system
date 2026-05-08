@@ -15,6 +15,7 @@ use App\Livewire\AssistantDeanDashboard;
 use App\Livewire\NotificationCenter;
 use App\Livewire\GlobalSettings;
 use App\Livewire\BlockSchedule;
+use App\Http\Controllers\DiagnosticController;
 
 
 
@@ -61,6 +62,13 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/settings', GlobalSettings::class)->name('settings');
     Route::get('/block-schedule', BlockSchedule::class)->name('block-schedule');
 });
+
+Route::get('/diagnostic/summary', [DiagnosticController::class, 'summary']);
+Route::get('/diagnostic/schedules', [DiagnosticController::class, 'checkSchedules']);
+Route::get('/diagnostic/block', [DiagnosticController::class, 'checkBlockSchedule']);
+Route::get('/diagnostic/subjects', [DiagnosticController::class, 'checkSubjects']);
+Route::get('/diagnostic/subject/{id}', [DiagnosticController::class, 'checkSubjectDetail']);
+
 
 
 });

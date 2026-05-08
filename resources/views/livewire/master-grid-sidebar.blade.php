@@ -23,7 +23,7 @@
         </div>
 
         {{-- FILTERS --}}
-        <div class="px-2.5 py-2 border-b-2 border-slate-300 dark:border-slate-700 space-y-1.5 bg-white/30 dark:bg-slate-800/30 backdrop-blur-sm flex-shrink-0 max-h-[35%] overflow-y-auto custom-scrollbar">
+        <div class="px-2.5 py-2 border-b-2 border-slate-300 dark:border-slate-700 space-y-1.5 bg-white/30 dark:bg-slate-800/30 backdrop-blur-sm flex-shrink-0 max-h-[28%] overflow-y-auto custom-scrollbar">
             {{-- Department Filter --}}
             <select 
                 wire:model.live="selectedDept"
@@ -96,13 +96,17 @@
         <div class="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1.5">
             @forelse($subjects ?? [] as $subject)
                 @php
+                    // Get department color based on subject's department field
+                    $deptCode = strtoupper($subject->department ?? '');
+                    
                     $deptColorMap = [
                         'CCS' => 'bg-yellow-100/75 dark:bg-yellow-900/50 border-yellow-300 dark:border-yellow-700 text-yellow-900 dark:text-yellow-100 hover:bg-yellow-200/75 dark:hover:bg-yellow-900/70',
                         'CTE' => 'bg-blue-100/75 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-900 dark:text-blue-100 hover:bg-blue-200/75 dark:hover:bg-blue-900/70',
                         'COC' => 'bg-purple-100/75 dark:bg-purple-900/50 border-purple-300 dark:border-purple-700 text-purple-900 dark:text-purple-100 hover:bg-purple-200/75 dark:hover:bg-purple-900/70',
                         'SHTM' => 'bg-orange-100/75 dark:bg-orange-900/50 border-orange-300 dark:border-orange-700 text-orange-900 dark:text-orange-100 hover:bg-orange-200/75 dark:hover:bg-orange-900/70',
                     ];
-                    $color = $deptColorMap[$subject->department ?? ''] ?? 'bg-slate-100/75 dark:bg-slate-800/50 border-slate-300 dark:border-slate-600';
+                    
+                    $color = $deptColorMap[$deptCode] ?? 'bg-slate-100/75 dark:bg-slate-800/50 border-slate-300 dark:border-slate-600 text-slate-900 dark:text-slate-100 hover:bg-slate-200/75 dark:hover:bg-slate-800/70';
 
                     $scheduledCount = $this->getScheduledCount($subject->id) ?? 0;
                     $remainingMeetings = $this->getRemainingMeetings($subject) ?? 0;

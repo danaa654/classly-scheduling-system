@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 
 class Subject extends Model
@@ -20,6 +21,7 @@ class Subject extends Model
         'duration_hours',
         'type',
         'meetings_per_week',
+        'faculty_id',
     ];
 
     protected $casts = [
@@ -36,6 +38,11 @@ class Subject extends Model
     public function schedules(): HasMany
     {
         return $this->hasMany(Schedule::class);
+    }
+
+    public function faculty(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'faculty_id');
     }
 
     // ============================================================
@@ -64,10 +71,18 @@ class Subject extends Model
     public function departmentColor(): Attribute
     {
         $colors = [
-            'CCS' => 'yellow',    // College of Computer Studies
-            'CTE' => 'blue',      // College of Teacher Education
-            'COC' => 'violet',    // College of Criminology
-            'SHTM' => 'orange',   // School of Hospitality & Tourism
+            'IT' => 'yellow',
+            'ACT' => 'yellow',
+            'CCS' => 'yellow',
+            'CTE' => 'blue',
+            'ED' => 'blue',
+            'COC' => 'violet',
+            'FB' => 'violet',
+            'LD' => 'violet',
+            'QD' => 'violet',
+            'SHTM' => 'orange',
+            'HM' => 'orange',
+            'TM' => 'orange',
         ];
 
         return Attribute::make(
@@ -81,10 +96,18 @@ class Subject extends Model
     public function getCardStyling(): array
     {
         $styles = [
+            'IT' => 'yellow',
+            'ACT' => 'yellow',
             'CCS' => 'yellow',
             'CTE' => 'blue',
+            'ED' => 'blue',
             'COC' => 'violet',
+            'FB' => 'violet',
+            'LD' => 'violet',
+            'QD' => 'violet',
             'SHTM' => 'orange',
+            'HM' => 'orange',
+            'TM' => 'orange',
         ];
 
         return [

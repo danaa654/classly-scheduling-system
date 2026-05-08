@@ -123,21 +123,24 @@ class ManageSubjects extends Component
     }
 
     /**
-     * Check if subject code is duplicate within same major/year
+     * ✅ FIXED: Check if subject code is duplicate within same major/year/SECTION
+     * Now it correctly allows the same subject code in DIFFERENT sections
      */
     public function getSubjectCodeDuplicateProperty()
     {
-        if (empty($this->subject_code) || empty($this->major) || empty($this->year_level)) {
+        if (empty($this->subject_code) || empty($this->major) || empty($this->year_level) || empty($this->section)) {
             return false;
         }
 
         $subjectCodeUpper = strtoupper($this->subject_code);
         $majorUpper = strtoupper($this->major);
         $yearLevel = (int)$this->year_level;
+        $sectionUpper = strtoupper($this->section);
 
         $query = Subject::where('subject_code', $subjectCodeUpper)
             ->where('major', $majorUpper)
-            ->where('year_level', $yearLevel);
+            ->where('year_level', $yearLevel)
+            ->where('section', $sectionUpper); // ✅ CRITICAL: Check SECTION too!
 
         // Exclude current subject when editing
         if ($this->isEditMode && $this->subjectId) {
@@ -363,7 +366,7 @@ class ManageSubjects extends Component
     public function openModal()
     {
         $this->resetValidation();
-        $this->resetExcept(['selectedDept', 'search', 'selectedYear', 'selectedMajor']);
+        $this->resetExcept(['selectedDept', 'search', 'selectedYear', 'selectedMajor', 'selectedSection']);
         $this->isEditMode = false;
         $this->units = 3;
         $this->type = 'Major';
@@ -435,7 +438,7 @@ class ManageSubjects extends Component
     }
 
     /**
-     * Save Subject (Create or Update)
+     * ✅ FIXED: Save Subject (Create or Update) - Only validate uniqueness when section changes
      */
     public function saveSubject()
     {
@@ -471,13 +474,15 @@ class ManageSubjects extends Component
             'meetings_per_week' => 'required|integer|min:1|max:5',
         ]);
 
-        // Check for duplicate subject code within same major/year
-        if ($this->getSubjectCodeDuplicateProperty()) {
-            $this->addError('subject_code', "Subject code '{$subjectCodeUpper}' already exists for {$majorUpper} - Year {$this->year_level}.");
+        // ✅ FIXED: Only check for duplicate subject code if NOT in edit mode
+        // When editing, we allow the same subject code to remain in the same section
+        // When creating new, we check if this code already exists in this SECTION
+        if (!$this->isEditMode && $this->getSubjectCodeDuplicateProperty()) {
+            $this->addError('subject_code', "Subject code '{$subjectCodeUpper}' already exists in Section {$sectionUpper} for {$majorUpper} - Year {$this->year_level}.");
             return;
         }
 
-        // Check for duplicate if creating new
+        // Check for duplicate EDP+Section if creating new
         if (!$this->isEditMode) {
             $duplicate = Subject::where('edp_code', $edpUpper)
                 ->where('section', $sectionUpper)
@@ -537,12 +542,29 @@ class ManageSubjects extends Component
         ]);
 
         $this->dispatch('subjectUpdated');
-        $this->resetForm();
+        $this->completeFormReset();
     }
 
-    private function resetForm()
+    /**
+     * ✅ Complete form reset to prevent stale data
+     */
+    private function completeFormReset()
     {
-        $this->reset(['edp_code', 'subject_code', 'section', 'description', 'units', 'type', 'duration_hours', 'major', 'year_level', 'department', 'subjectId', 'isEditMode']);
+        $this->reset([
+            'edp_code', 
+            'subject_code', 
+            'section', 
+            'description', 
+            'units', 
+            'type', 
+            'duration_hours', 
+            'major', 
+            'year_level', 
+            'department', 
+            'subjectId', 
+            'isEditMode',
+            'meetings_per_week'
+        ]);
     }
 
     private function logActivityAndNotify($subject, $user, $deptUpper)
@@ -572,7 +594,7 @@ class ManageSubjects extends Component
     }
 
     /**
-     * Bulk Duplicate Subjects
+     * ✅ FIXED BULK DUPLICATE METHOD
      */
     public function bulkDuplicate()
     {
@@ -582,6 +604,7 @@ class ManageSubjects extends Component
         $actor = auth()->user();
         $duplicatedCount = 0;
         $skippedCount = 0;
+        $skippedReasons = [];
 
         foreach ($this->selectedSubjects as $id) {
             $original = Subject::find($id);
@@ -604,41 +627,91 @@ class ManageSubjects extends Component
                 $nextSection = chr(ord($currentSection) + 1);
             }
 
-            // Build new EDP code
-            $parts = explode('-', $original->edp_code);
-            $newEdp = $original->edp_code;
+            // Extract major, year, level from original EDP
+            $edpParts = explode('-', $original->edp_code);
             
-            if (count($parts) >= 2) {
-                $lastSequence = (int)substr($parts[1], -3);
-                $nextSequence = $lastSequence + 1;
-                $base = $parts[0]; // Major
-                $yearPart = substr($parts[1], 0, -3); // Year+Level
-                $newEdp = "{$base}-{$yearPart}" . str_pad($nextSequence, 3, '0', STR_PAD_LEFT);
-            }
-
-            // Check if already exists
-            $exists = Subject::where('edp_code', $newEdp)->exists();
-            
-            if ($exists) {
+            if (count($edpParts) < 2) {
+                \Log::error("Invalid EDP format for subject {$original->id}: {$original->edp_code}");
                 $skippedCount++;
                 continue;
             }
 
-            Subject::create([
-                'edp_code'          => $newEdp,
-                'subject_code'      => $original->subject_code,
-                'section'           => $nextSection,
-                'description'       => $original->description,
-                'major'             => $original->major,
-                'year_level'        => $original->year_level,
-                'units'             => $original->units,
-                'department'        => $original->department,
-                'type'              => $original->type ?? 'Major',
-                'duration_hours'    => $original->duration_hours,
-                'meetings_per_week' => $original->meetings_per_week ?? 1,
-            ]);
+            $majorCode = $edpParts[0];
+            $yearCodePart = $edpParts[1];
+            
+            $year = substr($yearCodePart, 0, 2);
+            $level = substr($yearCodePart, 2, 1);
+            $oldSequence = (int)substr($yearCodePart, 3, 3);
 
-            $duplicatedCount++;
+            $nextSequence = $oldSequence + 1;
+            $maxAttempts = 100;
+            $attempts = 0;
+            
+            while ($attempts < $maxAttempts) {
+                $newSequenceStr = str_pad($nextSequence, 3, '0', STR_PAD_LEFT);
+                $newEdp = "{$majorCode}-{$year}{$level}{$newSequenceStr}";
+                
+                $edpExists = Subject::where('edp_code', $newEdp)->exists();
+                
+                if (!$edpExists) {
+                    break;
+                }
+                
+                $nextSequence++;
+                $attempts++;
+            }
+
+            if ($attempts >= $maxAttempts) {
+                \Log::error("Could not find available EDP sequence for {$majorCode}-{$year}{$level}");
+                $skippedCount++;
+                continue;
+            }
+
+            // ✅ CRITICAL CHECK: Does this SUBJECT CODE already exist in the NEXT SECTION?
+            $subjectExistsInNextSection = Subject::where('subject_code', strtoupper($original->subject_code))
+                ->where('section', $nextSection)
+                ->where('major', $original->major)
+                ->where('year_level', $original->year_level)
+                ->where('department', $original->department)
+                ->exists();
+            
+            if ($subjectExistsInNextSection) {
+                $skippedCount++;
+                $skippedReasons[] = "{$original->subject_code} in Section {$nextSection} already exists";
+                continue;
+            }
+
+            // Also check if this EDP+SECTION combination exists
+            $sectionExists = Subject::where('edp_code', $newEdp)
+                ->where('section', $nextSection)
+                ->exists();
+            
+            if ($sectionExists) {
+                $skippedCount++;
+                continue;
+            }
+
+            // All checks passed, create the new subject
+            try {
+                Subject::create([
+                    'edp_code'          => $newEdp,
+                    'subject_code'      => $original->subject_code,
+                    'section'           => $nextSection,
+                    'description'       => $original->description,
+                    'major'             => $original->major,
+                    'year_level'        => $original->year_level,
+                    'units'             => $original->units,
+                    'department'        => $original->department,
+                    'type'              => $original->type ?? 'Major',
+                    'duration_hours'    => $original->duration_hours,
+                    'meetings_per_week' => $original->meetings_per_week ?? 1,
+                ]);
+
+                $duplicatedCount++;
+            } catch (\Exception $e) {
+                \Log::error("Error duplicating subject {$original->id}: " . $e->getMessage());
+                $skippedCount++;
+            }
         }
 
         Activity::create([
@@ -652,10 +725,18 @@ class ManageSubjects extends Component
         $this->dispatch('subjectUpdated');
         
         if ($skippedCount > 0) {
+            $detail = "Duplicated {$duplicatedCount} subjects, {$skippedCount} skipped.";
+            if (!empty($skippedReasons)) {
+                $detail .= " Reasons: " . implode(", ", array_slice($skippedReasons, 0, 3));
+                if (count($skippedReasons) > 3) {
+                    $detail .= ", and more...";
+                }
+            }
+            
             $this->dispatch('toast', [
                 'type'    => 'warning',
                 'message' => 'Bulk Duplicate Partial',
-                'detail'  => "{$duplicatedCount} subjects duplicated, {$skippedCount} skipped (already exist)."
+                'detail'  => $detail
             ]);
         } else {
             $this->dispatch('toast', [
@@ -676,18 +757,19 @@ class ManageSubjects extends Component
 
             $query = Subject::query();
 
-            $query->where(function($q) use ($user, $isPowerUser) {
-                if (!$isPowerUser) {
-                    $q->where('department', $user->department);
-                } elseif (!empty($this->selectedDept)) {
-                    $q->where('department', $this->selectedDept);
-                }
-            });
+            // 1. Department filter based on role
+            if (!$isPowerUser) {
+                $query->where('department', $user->department);
+            } elseif (!empty($this->selectedDept)) {
+                $query->where('department', $this->selectedDept);
+            }
 
+            // 2. Section filter
             if (!empty($this->selectedSection)) {
                 $query->where('section', $this->selectedSection);
             }
 
+            // 3. Search with closure to prevent filter interference
             if (!empty($this->search)) {
                 $query->where(function($q) {
                     $q->where('subject_code', 'like', "%{$this->search}%")
@@ -696,14 +778,14 @@ class ManageSubjects extends Component
                 });
             }
 
+            // 4. Year filter
             if (!empty($this->selectedYear)) {
-                $yearNumber = $this->selectedYear;
-                $query->where('year_level', $yearNumber);
+                $query->where('year_level', $this->selectedYear);
             }
 
+            // 5. Major filter
             if (!empty($this->selectedMajor)) {
-                $major = strtoupper($this->selectedMajor);
-                $query->where('major', $major);
+                $query->where('major', strtoupper($this->selectedMajor));
             }
 
             $this->selectedSubjects = $query
@@ -852,30 +934,41 @@ class ManageSubjects extends Component
         }
     }
 
+    /**
+     * FIXED RENDER METHOD
+     */
     public function render()
     {
         $user = auth()->user();
-        
         $userRole = strtolower($user->role ?? '');
         $powerRoles = ['admin', 'registrar', 'associate_dean'];
         $isPowerUser = in_array($userRole, $powerRoles);
 
         $query = Subject::query();
 
-        $query->where(function($q) use ($user, $isPowerUser) {
-            if (!$isPowerUser) {
-                $q->where('department', $user->department);
-            } else {
-                if (!empty($this->selectedDept)) {
-                    $q->where('department', $this->selectedDept);
-                }
-            }
-        });
+        // 1. DEPARTMENT FILTER - ROLE-BASED SECURITY
+        if (!$isPowerUser) {
+            $query->where('department', $user->department);
+        } elseif (!empty($this->selectedDept)) {
+            $query->where('department', $this->selectedDept);
+        }
 
+        // 2. SECTION FILTER
         if (!empty($this->selectedSection)) {
             $query->where('section', $this->selectedSection);
         }
 
+        // 3. YEAR LEVEL FILTER
+        if (!empty($this->selectedYear)) {
+            $query->where('year_level', (int)$this->selectedYear);
+        }
+
+        // 4. MAJOR FILTER
+        if (!empty($this->selectedMajor)) {
+            $query->where('major', strtoupper($this->selectedMajor));
+        }
+
+        // 5. SEARCH FILTER - WRAPPED IN CLOSURE
         if (!empty($this->search)) {
             $query->where(function($q) {
                 $q->where('subject_code', 'like', "%{$this->search}%")
@@ -884,39 +977,33 @@ class ManageSubjects extends Component
             });
         }
 
-        if (!empty($this->selectedYear)) {
-            $yearNumber = $this->selectedYear;
-            $query->where('year_level', $yearNumber);
-        }
-
-        if (!empty($this->selectedMajor)) {
-            $major = strtoupper($this->selectedMajor);
-            $query->where('major', $major);
-        }
-
         $subjects = $query->orderBy('edp_code', 'asc')->paginate(10);
+
+        // DYNAMIC SECTIONS DROPDOWN
+        $sectionsQuery = Subject::query();
+
+        if (!$isPowerUser) {
+            $sectionsQuery->where('department', $user->department);
+        } elseif ($isPowerUser && !empty($this->selectedDept)) {
+            $sectionsQuery->where('department', $this->selectedDept);
+        }
+
+        $sections = $sectionsQuery
+            ->distinct()
+            ->pluck('section')
+            ->filter()
+            ->sort()
+            ->values();
 
         return view('livewire.manage-subjects', [
             'subjects' => $subjects,
             'availableMajors' => $this->getAvailableMajorsProperty(),
-
-            'activities' => Activity::with('user')
+            'sections' => $sections,
+            'activities' => \App\Models\Activity::with('user')
                 ->latest()
                 ->take(10)
                 ->get(),
-
-            'sections' => Subject::query()
-                ->when(!$isPowerUser, function($q) use ($user) {
-                    $q->where('department', $user->department);
-                })
-                ->when(!empty($this->selectedDept) && $isPowerUser, function($q) {
-                    $q->where('department', $this->selectedDept);
-                })
-                ->distinct()
-                ->pluck('section')
-                ->filter()
-                ->sort()
-                ->values()
+            'isPowerUser' => $isPowerUser,
         ]); 
     }
 }
