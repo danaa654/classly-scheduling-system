@@ -106,6 +106,26 @@ class Schedule extends Model
     }
 
     /**
+     * Filter schedules by department through subject relationship
+     */
+    public function scopeByDepartment($query, $department)
+    {
+        return $query->whereHas('subject', function ($q) use ($department) {
+            $q->where('department', $department);
+        });
+    }
+
+    /**
+     * Filter schedules by year level through subject relationship
+     */
+    public function scopeByYearLevel($query, $yearLevel)
+    {
+        return $query->whereHas('subject', function ($q) use ($yearLevel) {
+            $q->where('year_level', (int)$yearLevel);
+        });
+    }
+
+    /**
      * Get morning classes (before noon)
      */
     public function scopeMorningClasses($query)

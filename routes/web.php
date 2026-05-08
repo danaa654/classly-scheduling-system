@@ -14,6 +14,8 @@ use App\Livewire\FacultyLoading;
 use App\Livewire\AssistantDeanDashboard;
 use App\Livewire\NotificationCenter;
 use App\Livewire\GlobalSettings;
+use App\Livewire\BlockSchedule;
+
 
 
 Route::get('/', function () {
@@ -57,6 +59,7 @@ Route::middleware(['auth'])->group(function () {
     Route::get('/manage-account', \App\Livewire\ManageAccount::class)->name('manage-account');
     Route::middleware(['auth'])->group(function () {
     Route::get('/settings', GlobalSettings::class)->name('settings');
+    Route::get('/block-schedule', BlockSchedule::class)->name('block-schedule');
 });
 
 

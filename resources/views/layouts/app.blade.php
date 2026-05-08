@@ -123,19 +123,55 @@
                     <p class="text-[9px] font-black text-slate-600 uppercase tracking-widest">Academic Tools</p>
                 </div>
 
-                <a href="{{ route('master-grid') }}" wire:navigate 
-                    class="relative flex items-center p-3 rounded-2xl transition-all duration-300 group {{ request()->is('master-grid*') ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
-                    @if(request()->is('master-grid*')) <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> @endif
-                    <span class="text-xl flex shrink-0 justify-center transition-transform group-hover:scale-110" :class="sidebarOpen ? 'mr-3' : 'w-full'">📅</span>
-                    <span x-show="sidebarOpen" x-transition.opacity class="font-bold text-[14px] tracking-tight whitespace-nowrap">Master Grid</span>
-                </a>
+               {{-- 1. Update x-data: include 'faculty-load*' to match the URL in web.php --}}
+<div x-data="{ masterGridMenuOpen: {{ request()->is('master-grid*', 'block-schedule*', 'faculty-load*') ? 'true' : 'false' }} }">
+    
+    <div class="relative group">
+        <a href="{{ route('master-grid') }}" wire:navigate 
+           class="relative flex items-center p-3 rounded-2xl transition-all duration-300 
+           {{-- 2. Update this check to use 'faculty-load*' --}}
+           {{ request()->is('master-grid*', 'block-schedule*', 'faculty-load*') 
+              ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' 
+              : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
+            
+            @if(request()->is('master-grid*', 'block-schedule*', 'faculty-load*')) 
+                <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> 
+            @endif
+            
+            <span class="text-xl flex shrink-0 justify-center transition-transform group-hover:scale-110" :class="sidebarOpen ? 'mr-3' : 'w-full'">📅</span>
+            <span x-show="sidebarOpen" x-transition.opacity class="font-bold text-[14px] tracking-tight whitespace-nowrap">Master Grid</span>
+            
+            <span x-show="sidebarOpen" @click.prevent="masterGridMenuOpen = !masterGridMenuOpen" class="ml-auto cursor-pointer p-1 hover:bg-white/10 rounded-md transition-transform" :class="masterGridMenuOpen ? 'rotate-180' : ''">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+            </span>
+        </a>
+    </div>
 
-                <a href="{{ route('faculty-loading') }}" wire:navigate 
-                    class="relative flex items-center p-3 rounded-2xl transition-all duration-300 group {{ request()->routeIs('faculty-loading') ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
-                    @if(request()->routeIs('faculty-loading')) <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> @endif
-                    <span class="text-xl flex shrink-0 justify-center transition-transform group-hover:scale-110" :class="sidebarOpen ? 'mr-3' : 'w-full'">✒️</span>
-                    <span x-show="sidebarOpen" x-transition.opacity class="font-bold text-[14px] tracking-tight whitespace-nowrap">Faculty Info</span>
-                </a>
+    <div x-show="masterGridMenuOpen" 
+         x-transition:enter="transition ease-out duration-200"
+         x-transition:enter-start="opacity-0 -translate-y-2"
+         x-transition:enter-end="opacity-100 translate-y-0"
+         class="mt-2 ml-6 space-y-1 border-l-2 border-white/20 pl-4">
+        
+        <a href="{{ route('master-grid') }}" wire:navigate 
+           class="flex items-center p-2 rounded-xl text-[13px] transition-all {{ request()->routeIs('master-grid') ? 'text-white font-bold bg-white/10' : 'text-blue-100/60 hover:text-white hover:bg-white/5' }}">
+            <span class="mr-2">🏠</span>
+            <span x-show="sidebarOpen">Room View</span>
+        </a>
+
+        <a href="{{ route('block-schedule') }}" wire:navigate 
+           class="flex items-center p-2 rounded-xl text-[13px] transition-all {{ request()->routeIs('block-schedule') ? 'text-white font-bold bg-white/10' : 'text-blue-100/60 hover:text-white hover:bg-white/5' }}">
+            <span class="mr-2">📚</span>
+            <span x-show="sidebarOpen">Block Schedule</span>
+        </a>
+
+        <a href="{{ route('faculty-loading') }}" wire:navigate 
+           class="flex items-center p-2 rounded-xl text-[13px] transition-all {{ request()->routeIs('faculty-loading') ? 'text-white font-bold bg-white/10' : 'text-blue-100/60 hover:text-white hover:bg-white/5' }}">
+            <span class="mr-2">✒️</span>
+            <span x-show="sidebarOpen">Faculty Info</span>
+        </a>
+    </div>
+</div>
 
                 @if(in_array(auth()->user()->role, ['admin', 'registrar']))
                 <a href="{{ route('settings') }}" wire:navigate 
