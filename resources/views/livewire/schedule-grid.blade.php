@@ -61,7 +61,6 @@
                                     const subCode = event.dataTransfer.getData('subject_code');
                                     if(subId) { 
                                         $wire.assignSubject(subId, '{{ $dayFull }}', '{{ $slot['start'] }}');
-                                        showSuccessNotification('{{ substr($dayFull, 0, 3) }}', '{{ $slot['display'] }}', subCode);
                                     }
                                 "
                             @endif
@@ -186,7 +185,7 @@
                     @endphp
 
                     <div 
-                        class="absolute pointer-events-auto z-20 rounded-r-lg border-2 border-r-slate-400 border-t-slate-300 border-b-slate-300 shadow-lg backdrop-blur-sm transition-all hover:shadow-2xl hover:z-50 group/card overflow-hidden flex flex-col items-center justify-center p-1.5 cursor-pointer 
+                        class="absolute pointer-events-auto z-20 rounded-r-lg border-2 border-r-slate-400 border-t-slate-300 border-b-slate-300 shadow-lg backdrop-blur-sm transition-all hover:shadow-2xl hover:z-50 group/card overflow-hidden 
                                {{ $colors['light'] }} {{ $colors['dark'] }} {{ $colors['border'] }} border-l-4"
                         style="
                             /* Vertical: Aligns with the 45px rows */
@@ -215,27 +214,33 @@
                         })"
                         @mouseleave="hideSchedulePopover()"
                     >
-                        <div class="text-center w-full space-y-0.5 pointer-events-none">
-                            <div class="text-[10px] sm:text-[12px] font-black uppercase leading-tight line-clamp-2">
-                                {{ $subject->edp_code }}
+                        {{-- SCHEDULE CARD CONTENT --}}
+                        <div class="flex flex-col items-center justify-center w-full h-full p-1 space-y-0.5 pointer-events-none overflow-hidden">
+                            {{-- EDP CODE (Top) --}}
+                            <div class="text-[9px] sm:text-[10px] font-black uppercase leading-tight line-clamp-1 text-center w-full">
+                                {{ $subject->edp_code ?? 'N/A' }}
                             </div>
-                            <div class="text-[10px] sm:text-[10px] font-black uppercase leading-tight line-clamp-2">
+                            
+                            {{-- SUBJECT CODE (Bold Center) --}}
+                            <div class="text-[10px] sm:text-[11px] font-black uppercase leading-tight line-clamp-2 text-center w-full">
                                 {{ $subject->subject_code }}
                             </div>
-                            <div class="text-[8px] font-semibold leading-tight opacity-90">
+                            
+                            {{-- TIME (Bottom) --}}
+                            <div class="text-[8px] sm:text-[9px] font-semibold leading-tight opacity-90 text-center w-full line-clamp-1">
                                 {{ $startTimeDisplay }} - {{ $endTimeDisplay }}
                             </div>
                         </div>
 
                         {{-- OVERLAP BADGE --}}
                         @if($totalOverlaps > 1)
-                            <div class="absolute top-0.5 right-0.5 text-[6px] font-black bg-red-500/90 text-white px-1 py-0.5 rounded-full border border-red-600 w-4 h-4 flex items-center justify-center">
+                            <div class="absolute top-0.5 right-0.5 text-[6px] font-black bg-red-500/90 text-white px-1 py-0.5 rounded-full border border-red-600 w-4 h-4 flex items-center justify-center flex-shrink-0">
                                 {{ $totalOverlaps }}
                             </div>
                         @endif
 
                         {{-- SECTION BADGE --}}
-                        <div class="absolute top-0.5 left-0.5 text-[6px] font-black bg-white/30 dark:bg-black/30 px-1 py-0.5 rounded border border-current/40 uppercase">
+                        <div class="absolute top-0.5 left-0.5 text-[6px] font-black bg-white/30 dark:bg-black/30 px-1 py-0.5 rounded border border-current/40 uppercase flex-shrink-0">
                             S{{ $schedule->section ?? 'N/A' }}
                         </div>
 
@@ -243,7 +248,7 @@
                         <button 
                             wire:click.stop="removeAssignment({{ $schedule->id }})"
                             wire:confirm="Remove this schedule?"
-                            class="absolute bottom-0.5 right-0.5 opacity-0 group-hover/card:opacity-100 bg-red-500/80 hover:bg-red-600 text-white rounded p-0.5 transition-all shadow-sm"
+                            class="absolute bottom-0.5 right-0.5 opacity-0 group-hover/card:opacity-100 bg-red-500/80 hover:bg-red-600 text-white rounded p-0.5 transition-all shadow-sm flex-shrink-0"
                         >
                             <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24">
                                 <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
@@ -284,120 +289,93 @@
             </div>
         </div>
     </div>
-</div>
 
-{{-- COMPACT SCHEDULE DETAIL POPOVER --}}
-<div 
-    id="schedulePopover" 
-    class="hidden fixed z-[9999] w-72 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-3 backdrop-blur-sm pointer-events-auto"
-    style="max-width: calc(100vw - 16px);"
->
-    <div class="space-y-2">
-        {{-- HEADER --}}
-        <div class="flex items-start justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-700">
-            <div class="flex-1 min-w-0">
-                <div class="text-[13px] font-black uppercase text-slate-900 dark:text-white line-clamp-1" id="popCode"></div>
-                <div class="text-[9px] font-semibold text-slate-600 dark:text-slate-300 mt-0.5 line-clamp-1" id="popDesc"></div>
+    {{-- SCHEDULE DETAIL POPOVER (COMPACT) --}}
+    <div 
+        id="schedulePopover" 
+        class="hidden fixed z-[9999] w-72 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-3 backdrop-blur-sm pointer-events-auto"
+        style="max-width: calc(100vw - 16px);"
+    >
+        <div class="space-y-2">
+            {{-- HEADER --}}
+            <div class="flex items-start justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-700">
+                <div class="flex-1 min-w-0">
+                    <div class="text-[13px] font-black uppercase text-slate-900 dark:text-white line-clamp-1" id="popCode"></div>
+                    <div class="text-[9px] font-semibold text-slate-600 dark:text-slate-300 mt-0.5 line-clamp-1" id="popDesc"></div>
+                </div>
+                <span class="text-[7px] font-bold px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 whitespace-nowrap flex-shrink-0" id="popType"></span>
             </div>
-            <span class="text-[7px] font-bold px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 whitespace-nowrap flex-shrink-0" id="popType"></span>
-        </div>
 
-        {{-- INFO GRID (COMPACT) - NOW INCLUDING EDP --}}
-        <div class="grid grid-cols-3 gap-2 text-[9px]">
-            <div>
-                <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">EDP</span>
-                <span class="font-black text-slate-900 dark:text-slate-100 block truncate text-[8px]" id="popEdp">—</span>
+            {{-- INFO GRID (COMPACT) --}}
+            <div class="grid grid-cols-3 gap-2 text-[9px]">
+                <div>
+                    <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">EDP</span>
+                    <span class="font-black text-slate-900 dark:text-slate-100 block truncate text-[8px]" id="popEdp">—</span>
+                </div>
+                <div>
+                    <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Section</span>
+                    <span class="font-black text-slate-900 dark:text-slate-100 block text-[8px]" id="popSection">—</span>
+                </div>
+                <div>
+                    <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Type</span>
+                    <span class="font-black text-slate-900 dark:text-slate-100 block text-[8px]" id="popType2">—</span>
+                </div>
             </div>
-            <div>
-                <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Section</span>
-                <span class="font-black text-slate-900 dark:text-slate-100 block text-[8px]" id="popSection">—</span>
-            </div>
-            <div>
-                <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Type</span>
-                <span class="font-black text-slate-900 dark:text-slate-100 block text-[8px]" id="popType2">—</span>
-            </div>
-        </div>
 
-        {{-- SCHEDULE INFO (COMPACT) --}}
-        <div class="bg-slate-50 dark:bg-slate-900/50 rounded p-2 space-y-1 text-[8px]">
-            <div class="flex justify-between font-bold">
-                <span class="text-slate-600 dark:text-slate-400">Time:</span>
-                <span class="text-slate-900 dark:text-slate-100" id="popTime">—</span>
+            {{-- SCHEDULE INFO (COMPACT) --}}
+            <div class="bg-slate-50 dark:bg-slate-900/50 rounded p-2 space-y-1 text-[8px]">
+                <div class="flex justify-between font-bold">
+                    <span class="text-slate-600 dark:text-slate-400">Time:</span>
+                    <span class="text-slate-900 dark:text-slate-100" id="popTime">—</span>
+                </div>
+                <div class="flex justify-between font-bold">
+                    <span class="text-slate-600 dark:text-slate-400">Day:</span>
+                    <span class="text-slate-900 dark:text-slate-100" id="popDay">—</span>
+                </div>
+                <div class="flex justify-between font-bold">
+                    <span class="text-slate-600 dark:text-slate-400">Instructor:</span>
+                    <span class="text-slate-900 dark:text-slate-100 truncate ml-1" id="popInstructor">—</span>
+                </div>
             </div>
-            <div class="flex justify-between font-bold">
-                <span class="text-slate-600 dark:text-slate-400">Day:</span>
-                <span class="text-slate-900 dark:text-slate-100" id="popDay">—</span>
-            </div>
-            <div class="flex justify-between font-bold">
-                <span class="text-slate-600 dark:text-slate-400">Instructor:</span>
-                <span class="text-slate-900 dark:text-slate-100 truncate ml-1" id="popInstructor">—</span>
-            </div>
-        </div>
-
-        {{-- OVERLAP WARNING --}}
-        <div id="popOverlapWarning" class="hidden bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-700/50 rounded p-1.5 text-[8px] text-amber-800 dark:text-amber-200">
-            <span class="font-bold">⚠️ Overlap: </span><span id="popOverlapText"></span>
         </div>
     </div>
 </div>
-
-{{-- SUCCESS NOTIFICATION --}}
-<div 
-    id="successNotification"
-    class="hidden fixed bottom-4 right-4 z-50 bg-green-500 text-white px-3 py-2 rounded-lg shadow-lg font-semibold text-xs animate-pulse"
-></div>
 
 <script>
     function scheduleGridApp() {
         return {
             initializeGrid() {
-                console.log('Schedule grid initialized');
+                console.log('✅ Schedule grid initialized');
             },
 
             showSchedulePopover(event, data) {
                 const popover = document.getElementById('schedulePopover');
                 if (!popover) return;
 
-                // Populate popover fields
-                document.getElementById('popCode').textContent = data.code;
+                document.getElementById('popCode').textContent = data.code || 'N/A';
                 document.getElementById('popDesc').textContent = data.description || 'No description';
-                document.getElementById('popEdp').textContent = data.edp;
-                document.getElementById('popSection').textContent = `S${data.section}`;
-                document.getElementById('popInstructor').textContent = data.instructor;
-                document.getElementById('popTime').textContent = data.time;
-                document.getElementById('popDay').textContent = data.day;
+                document.getElementById('popEdp').textContent = data.edp || 'N/A';
+                document.getElementById('popSection').textContent = `S${data.section || 'N/A'}`;
+                document.getElementById('popInstructor').textContent = data.instructor || 'N/A';
+                document.getElementById('popTime').textContent = data.time || 'N/A';
+                document.getElementById('popDay').textContent = data.day || 'N/A';
 
-                // Show overlap warning if applicable
-                const overlapWarning = document.getElementById('popOverlapWarning');
-                if (data.totalOverlaps > 1) {
-                    document.getElementById('popOverlapText').textContent = 
-                        `${data.totalOverlaps} classes overlap (Slot ${data.position + 1}/${data.totalOverlaps})`;
-                    overlapWarning.classList.remove('hidden');
-                } else {
-                    overlapWarning.classList.add('hidden');
-                }
-
-                // Position popover relative to viewport
                 let x = event.clientX + 10;
                 let y = event.clientY - 120;
 
-                // Prevent popover from going off-screen (right edge)
-                const popoverWidth = 288; // w-72 = 288px
+                const popoverWidth = 288;
                 if (x + popoverWidth > window.innerWidth) {
                     x = window.innerWidth - popoverWidth - 10;
                 }
 
-                // Prevent popover from going off-screen (left edge)
                 if (x < 10) {
                     x = 10;
                 }
 
-                // Prevent popover from going off-screen (top edge)
                 if (y < 10) {
                     y = event.clientY + 10;
                 }
 
-                // Prevent popover from going off-screen (bottom edge)
                 const popoverHeight = 280;
                 if (y + popoverHeight > window.innerHeight) {
                     y = window.innerHeight - popoverHeight - 10;
@@ -415,18 +393,6 @@
                 }
             }
         };
-    }
-
-    function showSuccessNotification(day, time, code) {
-        const notif = document.getElementById('successNotification');
-        if (!notif) return;
-        
-        notif.textContent = `✓ ${code} → ${day} ${time}`;
-        notif.classList.remove('hidden');
-        
-        setTimeout(() => {
-            notif.classList.add('hidden');
-        }, 2500);
     }
 </script>
 

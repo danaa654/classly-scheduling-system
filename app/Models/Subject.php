@@ -54,6 +54,26 @@ class Subject extends Model
         return $query->where('department', $department);
     }
 
+    public function scopeByMajor($query, $major)
+    {
+        return $query->where('major', $major);
+    }
+
+    public function scopeByYear($query, $year)
+    {
+        return $query->where('year_level', (int)$year);
+    }
+
+    public function scopeBySection($query, $section)
+    {
+        return $query->where('section', $section);
+    }
+
+    public function scopeByType($query, $type)
+    {
+        return $query->where('type', $type);
+    }
+
     public function scopeSearch($query, $term)
     {
         return $query->where('subject_code', 'like', "%{$term}%")
@@ -116,9 +136,33 @@ class Subject extends Model
         ];
     }
 
+    /**
+     * Get the unique identifier for a student group
+     * Used for section conflict checking
+     * Combines Department + Major + Section
+     */
+    public function getStudentGroupIdentifier(): string
+    {
+        return "{$this->department}|{$this->major}|{$this->section}";
+    }
+
+    /**
+     * Get all subjects with the same student group
+     */
+    public static function getSubjectsForGroup($department, $major, $section)
+    {
+        return static::where('department', $department)
+            ->where('major', $major)
+            ->where('section', $section)
+            ->get();
+    }
+
+    /**
+     * Get remaining meetings for this subject
+     */
     public function getRemainingMeetings()
     {
-        $scheduled = \App\Models\Schedule::where('subject_id', $this->id)->count();
+        $scheduled = Schedule::where('subject_id', $this->id)->count();
         return max(0, $this->meetings_per_week - $scheduled);
     }
 }

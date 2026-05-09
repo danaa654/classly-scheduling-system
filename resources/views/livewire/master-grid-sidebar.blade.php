@@ -33,7 +33,7 @@
                     <option value="CCS">CCS - College of Computer Studies</option>
                     <option value="CTE">CTE - College of Teacher Education</option>
                     <option value="COC">COC - College of Criminology</option>
-                    <option value="SHTM">SHTM - School of Hospitality & Tourism</option>
+                    <option value="SHTM">SHTM - School of Hospitality &amp; Tourism</option>
                 @else
                     @php
                         $userDept = auth()->user()?->department ?? '';
@@ -59,7 +59,7 @@
                     <option value="">MAJOR</option>
                     @if(isset($departmentMajors) && $selectedDept && isset($departmentMajors[$selectedDept]))
                         @foreach($departmentMajors[$selectedDept] as $major)
-                            <option value="{{ $major }}">{{ $major }}</option>
+                            <option value="{{ strtoupper($major) }}">{{ $major }}</option>
                         @endforeach
                     @endif
                 </select>
@@ -98,15 +98,25 @@
                 @php
                     // Get department color based on subject's department field
                     $deptCode = strtoupper($subject->department ?? '');
+                    $majorCode = strtoupper($subject->major ?? '');
                     
                     $deptColorMap = [
                         'CCS' => 'bg-yellow-100/75 dark:bg-yellow-900/50 border-yellow-300 dark:border-yellow-700 text-yellow-900 dark:text-yellow-100 hover:bg-yellow-200/75 dark:hover:bg-yellow-900/70',
+                        'IT' => 'bg-yellow-100/75 dark:bg-yellow-900/50 border-yellow-300 dark:border-yellow-700 text-yellow-900 dark:text-yellow-100 hover:bg-yellow-200/75 dark:hover:bg-yellow-900/70',
+                        'ACT' => 'bg-yellow-100/75 dark:bg-yellow-900/50 border-yellow-300 dark:border-yellow-700 text-yellow-900 dark:text-yellow-100 hover:bg-yellow-200/75 dark:hover:bg-yellow-900/70',
                         'CTE' => 'bg-blue-100/75 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-900 dark:text-blue-100 hover:bg-blue-200/75 dark:hover:bg-blue-900/70',
+                        'ED' => 'bg-blue-100/75 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-900 dark:text-blue-100 hover:bg-blue-200/75 dark:hover:bg-blue-900/70',
                         'COC' => 'bg-purple-100/75 dark:bg-purple-900/50 border-purple-300 dark:border-purple-700 text-purple-900 dark:text-purple-100 hover:bg-purple-200/75 dark:hover:bg-purple-900/70',
+                        'FB' => 'bg-purple-100/75 dark:bg-purple-900/50 border-purple-300 dark:border-purple-700 text-purple-900 dark:text-purple-100 hover:bg-purple-200/75 dark:hover:bg-purple-900/70',
+                        'LD' => 'bg-purple-100/75 dark:bg-purple-900/50 border-purple-300 dark:border-purple-700 text-purple-900 dark:text-purple-100 hover:bg-purple-200/75 dark:hover:bg-purple-900/70',
+                        'QD' => 'bg-purple-100/75 dark:bg-purple-900/50 border-purple-300 dark:border-purple-700 text-purple-900 dark:text-purple-100 hover:bg-purple-200/75 dark:hover:bg-purple-900/70',
                         'SHTM' => 'bg-orange-100/75 dark:bg-orange-900/50 border-orange-300 dark:border-orange-700 text-orange-900 dark:text-orange-100 hover:bg-orange-200/75 dark:hover:bg-orange-900/70',
+                        'HM' => 'bg-orange-100/75 dark:bg-orange-900/50 border-orange-300 dark:border-orange-700 text-orange-900 dark:text-orange-100 hover:bg-orange-200/75 dark:hover:bg-orange-900/70',
+                        'TM' => 'bg-orange-100/75 dark:bg-orange-900/50 border-orange-300 dark:border-orange-700 text-orange-900 dark:text-orange-100 hover:bg-orange-200/75 dark:hover:bg-orange-900/70',
                     ];
                     
-                    $color = $deptColorMap[$deptCode] ?? 'bg-slate-100/75 dark:bg-slate-800/50 border-slate-300 dark:border-slate-600 text-slate-900 dark:text-slate-100 hover:bg-slate-200/75 dark:hover:bg-slate-800/70';
+                    // Check both department and major for color mapping
+                    $color = $deptColorMap[$deptCode] ?? ($deptColorMap[$majorCode] ?? 'bg-slate-100/75 dark:bg-slate-800/50 border-slate-300 dark:border-slate-600 text-slate-900 dark:text-slate-100 hover:bg-slate-200/75 dark:hover:bg-slate-800/70');
 
                     $scheduledCount = $this->getScheduledCount($subject->id) ?? 0;
                     $remainingMeetings = $this->getRemainingMeetings($subject) ?? 0;
@@ -177,7 +187,7 @@
 
                         {{-- COMPACT METADATA --}}
                         <div class="flex items-center justify-between gap-1 text-[7px] font-bold">
-                            <span class="opacity-70">{{ $subject->units }}U</span>
+                            <span class="opacity-70">{{ $subject->units }}U • Yr{{ $subject->year_level }}</span>
                             <span class="bg-white/30 dark:bg-black/30 px-1 py-0 rounded border-2 border-current/20 text-[6.5px]">
                                 {{ $remainingHours }}h left
                             </span>
@@ -197,6 +207,8 @@
                             <div class="text-[6.5px] opacity-85 mb-1 leading-tight">{{ Str::limit($subject->description, 35) }}</div>
                             <div class="space-y-0.5 border-t-2 border-white/10 pt-0.5">
                                 <span class="block">📍 EDP: {{ $subject->edp_code }}</span>
+                                <span class="block">Dept: {{ $subject->department }} | Major: {{ $subject->major }}</span>
+                                <span class="block">Year: {{ $subject->year_level }} | Section: {{ $subject->section }}</span>
                                 <span class="block">Total Duration: {{ $subject->duration_hours }}h</span>
                                 <span class="block">Remaining: {{ $remainingHours }}h</span>
                                 <span class="block">Sessions Left: {{ $remainingMeetings }}</span>

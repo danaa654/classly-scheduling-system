@@ -93,14 +93,46 @@ class MasterGrid extends Component
         $this->semesterName = Setting::where('key', 'semester_name')->first()?->value ?? 'First Semester 2026-2027';
     }
 
-    public function updatedSearchSubject() { $this->resetPage(); }
-    public function updatedSelectedYear() { $this->resetPage(); }
-    public function updatedSelectedMajor() { $this->resetPage(); }
-    public function updatedSelectedDept() { $this->selectedMajor = ''; $this->resetPage(); }
-    public function updatedSelectedSection() { $this->resetPage(); }
-    public function updatedSelectedType() { $this->resetPage(); }
-    public function updatedSelectedRoomTypeFilter() { $this->resetPage(); }
-    public function updatedSelectedFloor() { $this->resetPage(); }
+    public function updatedSearchSubject() 
+    { 
+        $this->resetPage(); 
+    }
+
+    public function updatedSelectedYear() 
+    { 
+        $this->resetPage(); 
+    }
+
+    public function updatedSelectedMajor() 
+    { 
+        $this->resetPage(); 
+    }
+
+    public function updatedSelectedDept() 
+    { 
+        $this->selectedMajor = ''; 
+        $this->resetPage(); 
+    }
+
+    public function updatedSelectedSection() 
+    { 
+        $this->resetPage(); 
+    }
+
+    public function updatedSelectedType() 
+    { 
+        $this->resetPage(); 
+    }
+
+    public function updatedSelectedRoomTypeFilter() 
+    { 
+        $this->resetPage(); 
+    }
+
+    public function updatedSelectedFloor() 
+    { 
+        $this->resetPage(); 
+    }
 
     public function hasFullAccess(): bool
     {
@@ -267,6 +299,131 @@ class MasterGrid extends Component
             ->exists();
     }
 
+    /**
+     * ===== COMPREHENSIVE CONFLICT VALIDATION =====
+     * Checks all three types of conflicts before scheduling
+     */
+    private function validateSchedule($subjectId, $day, $startTime, $endTime, $roomId): ?array
+    {
+        $subject = Subject::find($subjectId);
+        if (!$subject) {
+            return null;
+        }
+
+        // ===== 1. SECTION CONFLICT CHECK =====
+        // Check if this specific Section (within the same Department, Major, Year, and Section) 
+        // is already scheduled in ANY room during this time slot
+        $sectionConflict = Schedule::whereHas('subject', function ($query) use ($subject) {
+            $query->where('department', $subject->department)
+                  ->where('major', $subject->major)
+                  ->where('year_level', $subject->year_level)
+                  ->where('section', $subject->section);
+        })
+        ->where('day', $day)
+        ->where(function ($query) use ($startTime, $endTime) {
+            $query->where('start_time', '<', $endTime)
+                  ->where('end_time', '>', $startTime);
+        })
+        ->with(['subject', 'room'])
+        ->first();
+
+        if ($sectionConflict) {
+            return [
+                'type' => 'SECTION_CONFLICT',
+                'title' => '⚠️ Student Group Already Scheduled',
+                'message' => 'This student group is already scheduled in another class during this time.',
+                'details' => [
+                    'conflict_type' => 'SECTION',
+                    'group' => "{$subject->department}-{$subject->major}-{$subject->year_level}-{$subject->section}",
+                    'conflicting_subject' => $sectionConflict->subject->subject_code ?? 'Unknown',
+                    'conflicting_room' => $sectionConflict->room->room_name ?? 'Unknown',
+                    'conflicting_start' => Carbon::parse($sectionConflict->start_time)->format(self::TIME_FORMAT_12H),
+                    'conflicting_end' => Carbon::parse($sectionConflict->end_time)->format(self::TIME_FORMAT_12H),
+                    'conflicting_day' => $sectionConflict->day,
+                    'requested_subject' => $subject->subject_code,
+                    'requested_start' => Carbon::parse($startTime)->format(self::TIME_FORMAT_12H),
+                    'requested_end' => Carbon::parse($endTime)->format(self::TIME_FORMAT_12H),
+                    'requested_day' => $day,
+                    'suggestion' => 'Choose a different time slot when this group is free.',
+                ]
+            ];
+        }
+
+        // ===== 2. FACULTY CONFLICT CHECK =====
+        // Check if the assigned Faculty Member is already teaching in ANY room during this time slot
+        if ($subject->faculty_id) {
+            $facultyConflict = Schedule::whereHas('subject', function ($query) use ($subject) {
+                $query->where('faculty_id', $subject->faculty_id);
+            })
+            ->where('day', $day)
+            ->where(function ($query) use ($startTime, $endTime) {
+                $query->where('start_time', '<', $endTime)
+                      ->where('end_time', '>', $startTime);
+            })
+            ->with(['subject', 'room'])
+            ->first();
+
+            if ($facultyConflict) {
+                $facultyName = $subject->faculty->name ?? 'Faculty Member';
+                return [
+                    'type' => 'FACULTY_CONFLICT',
+                    'title' => '👨‍🏫 Faculty Member Already Teaching',
+                    'message' => $facultyName . ' is already assigned to teach another class during this time.',
+                    'details' => [
+                        'conflict_type' => 'FACULTY',
+                        'faculty_name' => $facultyName,
+                        'conflicting_subject' => $facultyConflict->subject->subject_code ?? 'Unknown',
+                        'conflicting_room' => $facultyConflict->room->room_name ?? 'Unknown',
+                        'conflicting_start' => Carbon::parse($facultyConflict->start_time)->format(self::TIME_FORMAT_12H),
+                        'conflicting_end' => Carbon::parse($facultyConflict->end_time)->format(self::TIME_FORMAT_12H),
+                        'conflicting_day' => $facultyConflict->day,
+                        'requested_subject' => $subject->subject_code,
+                        'requested_start' => Carbon::parse($startTime)->format(self::TIME_FORMAT_12H),
+                        'requested_end' => Carbon::parse($endTime)->format(self::TIME_FORMAT_12H),
+                        'requested_day' => $day,
+                        'suggestion' => 'Assign a different faculty member or choose another time slot.',
+                    ]
+                ];
+            }
+        }
+
+        // ===== 3. ROOM CONFLICT CHECK =====
+        // Ensure the specific Room is not already occupied during this time slot
+        $roomConflict = Schedule::where('room_id', $roomId)
+            ->where('day', $day)
+            ->where(function ($query) use ($startTime, $endTime) {
+                $query->where('start_time', '<', $endTime)
+                      ->where('end_time', '>', $startTime);
+            })
+            ->with(['subject', 'room'])
+            ->first();
+
+        if ($roomConflict) {
+            return [
+                'type' => 'ROOM_CONFLICT',
+                'title' => '🏢 Room Already Occupied',
+                'message' => 'This room is already booked during the requested time slot.',
+                'details' => [
+                    'conflict_type' => 'ROOM',
+                    'room_name' => $roomConflict->room->room_name ?? 'Unknown',
+                    'conflicting_subject' => $roomConflict->subject->subject_code ?? 'Unknown',
+                    'conflicting_start' => Carbon::parse($roomConflict->start_time)->format(self::TIME_FORMAT_12H),
+                    'conflicting_end' => Carbon::parse($roomConflict->end_time)->format(self::TIME_FORMAT_12H),
+                    'conflicting_day' => $roomConflict->day,
+                    'requested_subject' => $subject->subject_code,
+                    'requested_start' => Carbon::parse($startTime)->format(self::TIME_FORMAT_12H),
+                    'requested_end' => Carbon::parse($endTime)->format(self::TIME_FORMAT_12H),
+                    'requested_day' => $day,
+                    'suggestion' => 'Select a different room or time slot.',
+                ]
+            ];
+        }
+
+        // ===== NO CONFLICTS FOUND =====
+        return null;
+    }
+    // ===== END CONFLICT VALIDATION =====
+
     public function generateDisplaySlots()
     {
         $slots = [];
@@ -401,6 +558,9 @@ class MasterGrid extends Component
         return true;
     }
 
+    /**
+     * ===== ASSIGN SUBJECT WITH COMPREHENSIVE CONFLICT VALIDATION =====
+     */
     public function assignSubject($subjectId, $day, $startTime)
     {
         if (!$this->selectedRoomId) {
@@ -479,23 +639,15 @@ class MasterGrid extends Component
             return;
         }
 
-        if ($this->hasRoomConflict($this->selectedRoomId, $day, $startTime, $endTime)) {
-            $this->dispatch('toast', [
-                'type' => 'error',
-                'message' => '🔴 Room Time Conflict',
-                'detail' => 'This room is already occupied during this time. Choose another slot!'
-            ]);
-            return;
-        }
+        // ===== COMPREHENSIVE CONFLICT VALIDATION =====
+        $conflictData = $this->validateSchedule($subjectId, $day, $startTime, $endTime, $this->selectedRoomId);
 
-        if ($this->hasFacultyConflict($subjectId, $day, $startTime, $endTime)) {
-            $this->dispatch('toast', [
-                'type' => 'error',
-                'message' => '👨‍🏫 Faculty Conflict',
-                'detail' => 'This faculty member is teaching another class at this time!'
-            ]);
+        if ($conflictData) {
+            // Dispatch the conflict modal event with proper Livewire v3 syntax
+            $this->dispatch('show-conflict-modal', conflictData: $conflictData);
             return;
         }
+        // ===== END CONFLICT VALIDATION =====
 
         try {
             Schedule::create([
@@ -505,7 +657,7 @@ class MasterGrid extends Component
                 'day' => $day,
                 'start_time' => $startTime,
                 'end_time' => $endTime,
-                'section' => $this->selectedSection ?: 'A',
+                'section' => $subject->section,
             ]);
 
             $remainingHours = $this->getRemainingHoursDecimal($subjectId);
@@ -526,6 +678,7 @@ class MasterGrid extends Component
             ]);
         }
     }
+    // ===== END ASSIGN SUBJECT =====
 
     public function removeAssignment($scheduleId)
     {
@@ -564,8 +717,9 @@ class MasterGrid extends Component
     public function getFilteredSubjects()
     {
         $query = Subject::query()
-            ->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'meetings_per_week', 'units', 'department', 'section', 'type', 'major', 'year_level');
+            ->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'meetings_per_week', 'units', 'department', 'section', 'type', 'major', 'year_level', 'faculty_id');
 
+        // Access control for non-admin users
         if (!$this->hasFullAccess()) {
             $userDept = $this->getUserDepartment();
             if ($userDept) {
@@ -573,6 +727,7 @@ class MasterGrid extends Component
             }
         }
 
+        // Search filter
         if (trim($this->searchSubject)) {
             $query->where(function ($q) {
                 $q->where('subject_code', 'like', '%' . $this->searchSubject . '%')
@@ -581,22 +736,27 @@ class MasterGrid extends Component
             });
         }
 
+        // Department filter (case-insensitive)
         if ($this->selectedDept && $this->selectedDept !== '') {
-            $query->where('department', $this->selectedDept);
+            $query->where('department', strtoupper($this->selectedDept));
         }
 
+        // Year level filter
         if ($this->selectedYear && $this->selectedYear !== '') {
             $query->where('year_level', (int)$this->selectedYear);
         }
 
+        // Major filter (case-insensitive)
         if ($this->selectedMajor && $this->selectedMajor !== '') {
-            $query->where('major', $this->selectedMajor);
+            $query->where('major', strtoupper($this->selectedMajor));
         }
 
+        // Section filter
         if ($this->selectedSection && $this->selectedSection !== '') {
-            $query->where('section', $this->selectedSection);
+            $query->where('section', strtoupper($this->selectedSection));
         }
 
+        // Type filter
         if ($this->selectedType && $this->selectedType !== '') {
             $query->where('type', $this->selectedType);
         }
@@ -605,7 +765,7 @@ class MasterGrid extends Component
             ->where('meetings_per_week', '>', 0)
             ->orderBy('subject_code', 'asc')
             ->get()
-            ->filter(function($subject) {
+            ->filter(function ($subject) {
                 return $this->getRemainingHours($subject->id) > 0;
             });
 
@@ -722,13 +882,13 @@ class MasterGrid extends Component
         $subjects = $this->getFilteredSubjects();
 
         $rooms = Room::query()
-            ->when($this->searchRoom, function($query) {
+            ->when($this->searchRoom, function ($query) {
                 $query->where('room_name', 'like', '%' . $this->searchRoom . '%');
             })
-            ->when($this->selectedRoomTypeFilter, function($query) {
+            ->when($this->selectedRoomTypeFilter, function ($query) {
                 $query->where('type', $this->selectedRoomTypeFilter);
             })
-            ->when($this->selectedFloor, function($query) {
+            ->when($this->selectedFloor, function ($query) {
                 $query->where('floor', $this->selectedFloor);
             })
             ->get()
@@ -743,7 +903,7 @@ class MasterGrid extends Component
                 ->with(['subject' => function ($query) {
                     $query->select(
                         'id', 'subject_code', 'description', 'edp_code', 
-                        'duration_hours', 'department', 'type', 'major', 'year_level'
+                        'duration_hours', 'department', 'type', 'major', 'year_level', 'faculty_id'
                     );
                 }])
                 ->get()
