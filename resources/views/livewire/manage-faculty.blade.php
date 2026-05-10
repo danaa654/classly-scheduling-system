@@ -122,6 +122,20 @@ x-data="{
                             @endif
                         </div>
                     </div>
+                    <div class="flex items-center gap-3">
+    <select wire:model.live="filterType" class="bg-white dark:bg-slate-900 border-none rounded-2xl text-xs font-bold uppercase py-2.5 px-4 shadow-sm">
+        <option value="">All Types</option>
+        <option value="Full-time">Full-time</option>
+        <option value="Part-time">Part-time</option>
+    </select>
+
+    <select wire:model.live="filterSpecialization" class="bg-white dark:bg-slate-900 border-none rounded-2xl text-xs font-bold uppercase py-2.5 px-4 shadow-sm">
+        <option value="">All Specializations</option>
+        <option value="Major">Major</option>
+        <option value="Minor">Minor</option>
+        <option value="Both">Both</option>
+    </select>
+</div>
 
                     {{-- Main Table --}}
                     <div class="bg-white dark:bg-slate-900/40 rounded-[2.5rem] border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden backdrop-blur-md">

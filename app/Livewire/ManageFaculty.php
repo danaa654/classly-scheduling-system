@@ -21,6 +21,8 @@ class ManageFaculty extends Component
     // Filters & UI State
     public $search = '';
     public $filterDepartment = ''; 
+    public $filterType = ''; 
+    public $filterSpecialization = '';
     public $showModal = false;
     public $bulkOpen = false;
     public $isEditMode = false;
@@ -87,35 +89,35 @@ class ManageFaculty extends Component
     }
 
     public function updatedSelectAll($value)
-    {
-        if ($value) {
-            $user = auth()->user();
-            
-            $this->selectedFaculty = Faculty::query()
-                ->whereIn('status', ['approved', 'rejected'])
-                ->when(!$this->isAdminOrRegistrar(), function($q) use ($user) {
-                    if ($user->role === 'associate_dean') {
-                        return $q->where('status', 'rejected');
-                    }
-                    return $q->where('department', $user->department)
-                             ->where('status', 'rejected');
-                })
-                ->pluck('id')
-                ->map(fn($id) => (string)$id)
-                ->toArray();
-           
-            if(!$this->isAdminOrRegistrar() && empty($this->selectedFaculty)) {
-                 $this->dispatch('swal', [
-                     'title' => 'No Records Selected', 
-                     'text' => 'There are no "Rejected" records available for you to delete.', 
-                     'icon' => 'info'
-                 ]);
-                 $this->selectAll = false;
-            }
-        } else {
-            $this->selectedFaculty = [];
-        }
+{
+    if ($value) {
+        $user = auth()->user();
+        
+        // This query MUST match your render() query filters exactly
+        $this->selectedFaculty = Faculty::query()
+            ->approved()
+            ->when(!$this->isGlobalViewer(), function ($q) use ($user) {
+                return $q->where('department', $user->department);
+            })
+            ->when($this->filterDepartment && $this->isGlobalViewer(), function ($q) {
+                return $q->where('department', $this->filterDepartment);
+            })
+            // Add the new filters here too
+            ->when($this->filterType, fn($q) => $q->where('employment_type', $this->filterType))
+            ->when($this->filterSpecialization, fn($q) => $q->where('teaching_specialization', $this->filterSpecialization))
+            ->when($this->search, function ($q) {
+                $q->where(function ($sub) {
+                    $sub->where('full_name', 'like', "%{$this->search}%")
+                        ->orWhere('employee_id', 'like', "%{$this->search}%");
+                });
+            })
+            ->pluck('id')
+            ->map(fn($id) => (string) $id)
+            ->toArray();
+    } else {
+        $this->selectedFaculty = [];
     }
+}
 
     private function logAction($facultyId, $action, $description, $department = null) 
     {
@@ -1061,6 +1063,8 @@ class ManageFaculty extends Component
                 ->when(!$this->isGlobalViewer(), function ($q) use ($user) {
                     return $q->where('department', $user->department);
                 })
+                ->when($this->filterType, fn($q) => $q->where('employment_type', $this->filterType))
+                ->when($this->filterSpecialization, fn($q) => $q->where('teaching_specialization', $this->filterSpecialization))
                 ->when($this->filterDepartment && $this->isGlobalViewer(), function ($q) {
                     return $q->where('department', $this->filterDepartment);
                 })
