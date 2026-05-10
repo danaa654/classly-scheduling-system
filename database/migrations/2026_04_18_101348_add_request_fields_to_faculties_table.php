@@ -9,17 +9,22 @@ return new class extends Migration
     public function up(): void
     {
         Schema::table('faculties', function (Blueprint $table) {
-            // Check if column exists first to prevent that "Duplicate Column" error
-            if (!Schema::hasColumn('faculties', 'status')) {
-                $table->string('status')->default('pending')->after('department');
-            }
-            
-            if (!Schema::hasColumn('faculties', 'requested_by')) {
-                $table->foreignId('requested_by')->nullable()->constrained('users')->onDelete('set null');
+            // Add scheduling-related fields if they don't exist
+            if (!Schema::hasColumn('faculties', 'employment_type')) {
+                $table->string('employment_type')->default('Full-time')->after('department');
             }
 
-            if (!Schema::hasColumn('faculties', 'remarks')) {
-                $table->text('remarks')->nullable();
+            if (!Schema::hasColumn('faculties', 'teaching_specialization')) {
+                $table->string('teaching_specialization')->default('Both')->after('employment_type');
+            }
+
+            if (!Schema::hasColumn('faculties', 'max_units')) {
+                $table->integer('max_units')->default(21)->after('teaching_specialization');
+            }
+
+            // Ensure rejection_reason exists
+            if (!Schema::hasColumn('faculties', 'rejection_reason')) {
+                $table->text('rejection_reason')->nullable()->after('max_units');
             }
         });
     }
@@ -27,7 +32,18 @@ return new class extends Migration
     public function down(): void
     {
         Schema::table('faculties', function (Blueprint $table) {
-            $table->dropColumn(['status', 'requested_by', 'remarks']);
+            if (Schema::hasColumn('faculties', 'employment_type')) {
+                $table->dropColumn('employment_type');
+            }
+            if (Schema::hasColumn('faculties', 'teaching_specialization')) {
+                $table->dropColumn('teaching_specialization');
+            }
+            if (Schema::hasColumn('faculties', 'max_units')) {
+                $table->dropColumn('max_units');
+            }
+            if (Schema::hasColumn('faculties', 'rejection_reason')) {
+                $table->dropColumn('rejection_reason');
+            }
         });
     }
 };
