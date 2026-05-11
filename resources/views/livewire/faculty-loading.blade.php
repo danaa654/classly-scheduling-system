@@ -60,9 +60,15 @@
                                 ID: {{ $faculty->employee_id }} • {{ $faculty->department }}
                             </p>
                             @if($faculty->teaching_specialization)
-                                <p class="text-[8px] text-slate-400 dark:text-slate-500 font-bold uppercase tracking-tight mt-0.5">
-                                    {{ $faculty->teaching_specialization }}
-                                </p>
+                                <div class="flex items-center gap-1 mt-0.5">
+                                    @if($faculty->teaching_specialization === 'Both')
+                                        <span class="px-1.5 py-0.5 bg-purple-100 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400 rounded text-[8px] font-black uppercase">✓ Both</span>
+                                    @elseif($faculty->teaching_specialization === 'Major')
+                                        <span class="px-1.5 py-0.5 bg-amber-100 dark:bg-amber-950/30 text-amber-700 dark:text-amber-400 rounded text-[8px] font-black uppercase">★ Major</span>
+                                    @else
+                                        <span class="px-1.5 py-0.5 bg-indigo-100 dark:bg-indigo-950/30 text-indigo-700 dark:text-indigo-400 rounded text-[8px] font-black uppercase">ℹ Minor</span>
+                                    @endif
+                                </div>
                             @endif
                         </div>
 
@@ -127,11 +133,18 @@
     <main class="flex-1 flex flex-col bg-slate-50 dark:bg-slate-950 overflow-hidden">
         @if($currentFaculty)
             <!-- Header -->
-            <div class="p-6 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-white dark:bg-slate-900">
+            <div class="p-6 border-b border-slate-200 dark:border-slate-800 shrink-0 bg-white dark:bg-slate-900 overflow-y-auto custom-scrollbar max-h-[45%]">
                 <div class="flex items-start justify-between mb-4">
                     <div>
                         <div class="flex items-center gap-2 mb-2">
                             <span class="px-2.5 py-1 bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded-full text-[9px] font-black uppercase tracking-widest">Active Profile</span>
+                            @if($currentFaculty->teaching_specialization === 'Both')
+                                <span class="px-2.5 py-1 bg-purple-100 dark:bg-purple-950 text-purple-700 dark:text-purple-300 rounded-full text-[9px] font-black uppercase tracking-widest">✓ Both</span>
+                            @elseif($currentFaculty->teaching_specialization === 'Major')
+                                <span class="px-2.5 py-1 bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300 rounded-full text-[9px] font-black uppercase tracking-widest">★ Major</span>
+                            @else
+                                <span class="px-2.5 py-1 bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300 rounded-full text-[9px] font-black uppercase tracking-widest">ℹ Minor</span>
+                            @endif
                         </div>
                         <h1 class="text-3xl font-black text-slate-900 dark:text-white uppercase tracking-tight">
                             {{ $currentFaculty->full_name }}
@@ -143,11 +156,11 @@
 
                     <!-- Action Buttons -->
                     <div class="flex gap-2">
-                        <button class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-black uppercase tracking-widest transition-all active:scale-95">
-                            ✏️ Edit Load
-                        </button>
-                        <button onclick="window.print()" class="px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white rounded-lg text-xs font-black uppercase tracking-widest transition-all">
+                        <button onclick="window.print()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-black uppercase tracking-widest transition-all active:scale-95">
                             🖨️ Print
+                        </button>
+                        <button class="px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white rounded-lg text-xs font-black uppercase tracking-widest transition-all">
+                            ⋮ More
                         </button>
                     </div>
                 </div>
@@ -211,37 +224,40 @@
                     <div class="mt-4 p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900 rounded-xl flex items-start gap-3">
                         <span class="text-lg flex-shrink-0">✓</span>
                         <div>
-                            <p class="text-sm font-black text-blue-700 dark:text-blue-400 uppercase tracking-tight">No Schedule Conflicts</p>
+                            <p class="text-sm font-black text-blue-700 dark:text-blue-400 uppercase tracking-tight">Load Status: Within Capacity</p>
                             <p class="text-xs text-blue-600 dark:text-blue-500 font-medium mt-1">
-                                There are no scheduling conflicts detected for this load.
+                                Faculty can take {{ ($currentFaculty->max_units ?? 21) - ($currentFaculty->subjects->sum('units') ?? 0) }} more units.
                             </p>
                         </div>
                     </div>
                 @endif
             </div>
 
-            <!-- Tabs & Table Section -->
+            <!-- Tabs & Content -->
             <div class="flex-1 flex flex-col overflow-hidden">
                 <!-- Tabs -->
                 <div class="px-6 pt-4 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0">
                     <div class="flex gap-6">
-                        <button wire:click="$set('activeTab', 'subjects')" class="pb-3 px-1 text-sm font-black {{ $activeTab === 'subjects' ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-slate-600 dark:text-slate-400 border-b-2 border-transparent hover:text-slate-900 dark:hover:text-white' }} uppercase tracking-widest transition-all">
+                        <button wire:click="toggleTab('subjects')"
+                            class="pb-3 px-1 text-sm font-black {{ $activeTab === 'subjects' ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-slate-600 dark:text-slate-400 border-b-2 border-transparent hover:text-slate-900 dark:hover:text-white' }} uppercase tracking-widest transition-all">
                             Subjects Assigned ({{ $currentFaculty->subjects->count() }})
                         </button>
-                        <button wire:click="toggleScheduleModal" class="pb-3 px-1 text-sm font-black {{ $activeTab === 'schedule' ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-slate-600 dark:text-slate-400 border-b-2 border-transparent hover:text-slate-900 dark:hover:text-white' }} uppercase tracking-widest transition-all">
+                        <button wire:click="toggleTab('schedule')"
+                            class="pb-3 px-1 text-sm font-black {{ $activeTab === 'schedule' ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-slate-600 dark:text-slate-400 border-b-2 border-transparent hover:text-slate-900 dark:hover:text-white' }} uppercase tracking-widest transition-all">
                             Schedule Overview
                         </button>
-                        <button wire:click="toggleSummaryModal" class="pb-3 px-1 text-sm font-black {{ $activeTab === 'summary' ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-slate-600 dark:text-slate-400 border-b-2 border-transparent hover:text-slate-900 dark:hover:text-white' }} uppercase tracking-widest transition-all">
+                        <button wire:click="toggleTab('summary')"
+                            class="pb-3 px-1 text-sm font-black {{ $activeTab === 'summary' ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-slate-600 dark:text-slate-400 border-b-2 border-transparent hover:text-slate-900 dark:hover:text-white' }} uppercase tracking-widest transition-all">
                             Load Summary
                         </button>
                     </div>
                 </div>
 
-                <!-- Assignment Table / Schedule / Summary -->
+                <!-- Tab Content -->
                 <div class="flex-1 overflow-y-auto custom-scrollbar">
-                    <div class="px-6 py-4">
-                        <!-- SUBJECTS TAB -->
-                        @if($activeTab === 'subjects')
+                    <!-- Subjects Tab -->
+                    @if($activeTab === 'subjects')
+                        <div class="px-6 py-4">
                             @if($currentFaculty->subjects->count() > 0)
                                 <div class="overflow-x-auto">
                                     <table class="w-full text-[11px]">
@@ -253,7 +269,7 @@
                                                 <th class="px-4 py-3 text-left font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Description</th>
                                                 <th class="px-4 py-3 text-left font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Section</th>
                                                 <th class="px-4 py-3 text-center font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Units</th>
-                                                <th class="px-4 py-3 text-left font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Type</th>
+                                                <th class="px-4 py-3 text-center font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Type</th>
                                                 <th class="px-4 py-3 text-center font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Status</th>
                                                 <th class="px-4 py-3 text-center font-black text-slate-700 dark:text-slate-300 uppercase tracking-widest">Action</th>
                                             </tr>
@@ -262,7 +278,7 @@
                                             @foreach($currentFaculty->subjects as $idx => $subject)
                                                 <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                                                     <td class="px-4 py-3 text-slate-900 dark:text-white font-black">{{ $idx + 1 }}</td>
-                                                    <td class="px-4 py-3 font-black text-blue-600 dark:text-blue-400 uppercase">{{ $subject->edp_code }}</td>
+                                                    <td class="px-4 py-3 font-black text-orange-600 dark:text-orange-400 uppercase">{{ $subject->edp_code }}</td>
                                                     <td class="px-4 py-3 font-black text-blue-600 dark:text-blue-400 uppercase">{{ $subject->subject_code }}</td>
                                                     <td class="px-4 py-3 text-slate-900 dark:text-white font-bold truncate max-w-xs" title="{{ $subject->description }}">
                                                         {{ $subject->description }}
@@ -297,148 +313,120 @@
                                         Total Units Assigned
                                     </p>
                                     <p class="text-2xl font-black text-blue-600 dark:text-blue-400">
-                                        {{ $currentFaculty->subjects->sum('units') ?? 0 }}<span class="text-xs text-slate-500 dark:text-slate-400"> Units</span>
+                                        {{ $currentFaculty->subjects->sum('units') ?? 0 }}<span class="text-xs text-slate-500 dark:text-slate-400"> / {{ $currentFaculty->max_units }}</span>
                                     </p>
                                 </div>
                             @else
-                                <div class="h-64 flex flex-col items-center justify-center opacity-40">
+                                <div class="h-48 flex flex-col items-center justify-center opacity-40">
                                     <p class="text-3xl mb-3">📚</p>
                                     <p class="text-[10px] font-black uppercase text-slate-600 dark:text-slate-400 tracking-widest">No Subjects Assigned</p>
                                     <p class="text-[9px] text-slate-500 dark:text-slate-500 font-medium mt-2">Add subjects from the Subjects Catalog on the right</p>
                                 </div>
                             @endif
-                        @endif
+                        </div>
+                    @endif
 
-                        <!-- SCHEDULE TAB -->
-                        @if($activeTab === 'schedule' && $showScheduleModal)
-                            <div class="space-y-4">
-                                <div class="p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900 rounded-xl">
-                                    <p class="text-sm font-black text-blue-700 dark:text-blue-400 uppercase tracking-tight mb-3">Weekly Schedule Grid</p>
-                                    
-                                    <div class="overflow-x-auto">
-                                        <table class="w-full text-[10px]">
-                                            <thead class="bg-slate-100 dark:bg-slate-800/50">
-                                                <tr>
-                                                    <th class="px-2 py-2 font-black text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">Time</th>
-                                                    <th class="px-2 py-2 font-black text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">Monday</th>
-                                                    <th class="px-2 py-2 font-black text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">Tuesday</th>
-                                                    <th class="px-2 py-2 font-black text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">Wednesday</th>
-                                                    <th class="px-2 py-2 font-black text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">Thursday</th>
-                                                    <th class="px-2 py-2 font-black text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">Friday</th>
-                                                    <th class="px-2 py-2 font-black text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700">Saturday</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                @for($time = 6; $time <= 18; $time++)
-                                                    <tr>
-                                                        <td class="px-2 py-2 font-bold text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-700">
-                                                            {{ sprintf('%02d:00', $time) }}
-                                                        </td>
-                                                        @for($day = 1; $day <= 6; $day++)
-                                                            <td class="px-2 py-2 border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/30 hover:bg-slate-100 dark:hover:bg-slate-700/50 transition-colors">
-                                                                <!-- Schedule slots can be populated here -->
-                                                            </td>
-                                                        @endfor
-                                                    </tr>
+                    <!-- Schedule Tab -->
+                    @if($activeTab === 'schedule')
+                        <div class="px-6 py-4">
+                            <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-x-auto">
+                                <table class="w-full text-[9px]">
+                                    <thead class="bg-slate-100 dark:bg-slate-800">
+                                        <tr>
+                                            <th class="px-3 py-3 text-left font-black uppercase text-slate-600 dark:text-slate-400 min-w-12">Time</th>
+                                            <th class="px-3 py-3 text-center font-black uppercase text-slate-600 dark:text-slate-400 min-w-20">Monday</th>
+                                            <th class="px-3 py-3 text-center font-black uppercase text-slate-600 dark:text-slate-400 min-w-20">Tuesday</th>
+                                            <th class="px-3 py-3 text-center font-black uppercase text-slate-600 dark:text-slate-400 min-w-20">Wednesday</th>
+                                            <th class="px-3 py-3 text-center font-black uppercase text-slate-600 dark:text-slate-400 min-w-20">Thursday</th>
+                                            <th class="px-3 py-3 text-center font-black uppercase text-slate-600 dark:text-slate-400 min-w-20">Friday</th>
+                                            <th class="px-3 py-3 text-center font-black uppercase text-slate-600 dark:text-slate-400 min-w-20">Saturday</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-200 dark:divide-slate-700">
+                                        @for($hour = 6; $hour < 18; $hour++)
+                                            <tr class="hover:bg-blue-50 dark:hover:bg-blue-900/10 transition-colors">
+                                                <td class="px-3 py-2 font-black text-slate-600 dark:text-slate-400">{{ str_pad($hour, 2, '0', STR_PAD_LEFT) }}:00</td>
+                                                @for($day = 1; $day <= 6; $day++)
+                                                    <td class="px-3 py-2 text-center bg-slate-50 dark:bg-slate-800/30 border-r border-slate-200 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer transition-colors">
+                                                        <!-- Schedule slot -->
+                                                    </td>
                                                 @endfor
-                                            </tbody>
-                                        </table>
-                                    </div>
-                                </div>
-
-                                <p class="text-[9px] text-slate-500 dark:text-slate-400 font-bold uppercase tracking-widest italic">
-                                    📋 Note: Populate this with your Schedule model data
-                                </p>
+                                            </tr>
+                                        @endfor
+                                    </tbody>
+                                </table>
                             </div>
-                        @endif
+                            <p class="text-[9px] text-slate-400 mt-4 italic">Schedule grid - ready to populate with Schedule model data</p>
+                        </div>
+                    @endif
 
-                        <!-- SUMMARY TAB -->
-                        @if($activeTab === 'summary' && $showSummaryModal && $facultySummary)
-                            <div class="space-y-4">
-                                <div class="grid grid-cols-2 gap-4">
+                    <!-- Summary Tab -->
+                    @if($activeTab === 'summary')
+                        <div class="px-6 py-4">
+                            @if($facultySummary)
+                                <!-- Stats Cards -->
+                                <div class="grid grid-cols-2 gap-4 mb-6">
                                     <!-- Total Units Card -->
                                     <div class="p-4 bg-gradient-to-br from-blue-50 to-blue-100 dark:from-blue-950/20 dark:to-blue-900/20 rounded-xl border border-blue-200 dark:border-blue-800">
-                                        <p class="text-[9px] font-black text-blue-700 dark:text-blue-400 uppercase tracking-widest mb-2">Total Units</p>
-                                        <p class="text-3xl font-black text-blue-700 dark:text-blue-300">{{ $facultySummary['total_units'] }}</p>
-                                        <p class="text-xs text-blue-600 dark:text-blue-400 font-bold mt-2">
-                                            Max: {{ $facultySummary['max_units'] }} | Remaining: {{ $facultySummary['remaining_units'] }}
-                                        </p>
+                                        <p class="text-[9px] font-black text-blue-700 dark:text-blue-400 uppercase tracking-widest mb-2">📊 Total Units</p>
+                                        <p class="text-3xl font-black text-blue-700 dark:text-blue-300">{{ $facultySummary['totalUnits'] }}</p>
+                                        <p class="text-[9px] text-blue-600 dark:text-blue-400 font-bold mt-1">Max: {{ $facultySummary['maxUnits'] }} units</p>
                                     </div>
 
                                     <!-- Utilization Card -->
                                     <div class="p-4 bg-gradient-to-br from-purple-50 to-purple-100 dark:from-purple-950/20 dark:to-purple-900/20 rounded-xl border border-purple-200 dark:border-purple-800">
-                                        <p class="text-[9px] font-black text-purple-700 dark:text-purple-400 uppercase tracking-widest mb-2">Utilization</p>
-                                        <p class="text-3xl font-black text-purple-700 dark:text-purple-300">{{ round($facultySummary['utilization_percent']) }}%</p>
-                                        <div class="mt-2 h-1.5 bg-purple-200 dark:bg-purple-900/40 rounded-full overflow-hidden">
-                                            <div class="h-full bg-gradient-to-r from-purple-500 to-purple-600" style="width: {{ $facultySummary['utilization_percent'] }}%"></div>
-                                        </div>
+                                        <p class="text-[9px] font-black text-purple-700 dark:text-purple-400 uppercase tracking-widest mb-2">📈 Utilization</p>
+                                        <p class="text-3xl font-black text-purple-700 dark:text-purple-300">{{ $facultySummary['utilizationPercent'] }}%</p>
+                                        <p class="text-[9px] text-purple-600 dark:text-purple-400 font-bold mt-1">Remaining: {{ $facultySummary['remainingUnits'] }} units</p>
                                     </div>
 
-                                    <!-- Major Subjects Card -->
-                                    <div class="p-4 bg-gradient-to-br from-green-50 to-green-100 dark:from-green-950/20 dark:to-green-900/20 rounded-xl border border-green-200 dark:border-green-800">
-                                        <p class="text-[9px] font-black text-green-700 dark:text-green-400 uppercase tracking-widest mb-2">Major Subjects</p>
-                                        <div class="flex items-baseline gap-2">
-                                            <p class="text-3xl font-black text-green-700 dark:text-green-300">{{ $facultySummary['lecture_count'] }}</p>
-                                            <p class="text-lg font-black text-green-600 dark:text-green-400">{{ $facultySummary['lecture_units'] }} Units</p>
-                                        </div>
+                                    <!-- Major Card -->
+                                    <div class="p-4 bg-gradient-to-br from-amber-50 to-amber-100 dark:from-amber-950/20 dark:to-amber-900/20 rounded-xl border border-amber-200 dark:border-amber-800">
+                                        <p class="text-[9px] font-black text-amber-700 dark:text-amber-400 uppercase tracking-widest mb-2">★ Major Subjects</p>
+                                        <p class="text-3xl font-black text-amber-700 dark:text-amber-300">{{ $facultySummary['majorCount'] }}</p>
+                                        <p class="text-[9px] text-amber-600 dark:text-amber-400 font-bold mt-1">{{ $facultySummary['majorUnits'] }} units</p>
                                     </div>
 
-                                    <!-- Minor Subjects Card -->
-                                    <div class="p-4 bg-gradient-to-br from-orange-50 to-orange-100 dark:from-orange-950/20 dark:to-orange-900/20 rounded-xl border border-orange-200 dark:border-orange-800">
-                                        <p class="text-[9px] font-black text-orange-700 dark:text-orange-400 uppercase tracking-widest mb-2">Minor Subjects</p>
-                                        <div class="flex items-baseline gap-2">
-                                            <p class="text-3xl font-black text-orange-700 dark:text-orange-300">{{ $facultySummary['lab_count'] }}</p>
-                                            <p class="text-lg font-black text-orange-600 dark:text-orange-400">{{ $facultySummary['lab_units'] }} Units</p>
-                                        </div>
+                                    <!-- Minor Card -->
+                                    <div class="p-4 bg-gradient-to-br from-indigo-50 to-indigo-100 dark:from-indigo-950/20 dark:to-indigo-900/20 rounded-xl border border-indigo-200 dark:border-indigo-800">
+                                        <p class="text-[9px] font-black text-indigo-700 dark:text-indigo-400 uppercase tracking-widest mb-2">ℹ Minor Subjects</p>
+                                        <p class="text-3xl font-black text-indigo-700 dark:text-indigo-300">{{ $facultySummary['minorCount'] }}</p>
+                                        <p class="text-[9px] text-indigo-600 dark:text-indigo-400 font-bold mt-1">{{ $facultySummary['minorUnits'] }} units</p>
                                     </div>
                                 </div>
 
                                 <!-- Breakdown Table -->
-                                <div class="p-4 bg-slate-50 dark:bg-slate-800/30 rounded-xl border border-slate-200 dark:border-slate-700">
-                                    <p class="text-[9px] font-black text-slate-700 dark:text-slate-400 uppercase tracking-widest mb-3">Subject Breakdown</p>
-                                    <table class="w-full text-[11px]">
-                                        <thead class="bg-slate-100 dark:bg-slate-800/50">
+                                <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 p-4">
+                                    <p class="text-[10px] font-black text-slate-600 dark:text-slate-400 uppercase mb-4">📋 Breakdown</p>
+                                    <table class="w-full text-[10px]">
+                                        <thead class="bg-slate-100 dark:bg-slate-800">
                                             <tr>
-                                                <th class="px-3 py-2 text-left font-black text-slate-700 dark:text-slate-300">Type</th>
-                                                <th class="px-3 py-2 text-center font-black text-slate-700 dark:text-slate-300">Count</th>
-                                                <th class="px-3 py-2 text-center font-black text-slate-700 dark:text-slate-300">Total Units</th>
-                                                <th class="px-3 py-2 text-center font-black text-slate-700 dark:text-slate-300">Avg Units</th>
+                                                <th class="px-3 py-2 text-left font-black uppercase text-slate-600 dark:text-slate-400">Type</th>
+                                                <th class="px-3 py-2 text-center font-black uppercase text-slate-600 dark:text-slate-400">Count</th>
+                                                <th class="px-3 py-2 text-center font-black uppercase text-slate-600 dark:text-slate-400">Total Units</th>
+                                                <th class="px-3 py-2 text-center font-black uppercase text-slate-600 dark:text-slate-400">Average</th>
                                             </tr>
                                         </thead>
-                                        <tbody class="divide-y divide-slate-200 dark:divide-slate-800">
-                                            <tr>
-                                                <td class="px-3 py-2 font-black text-green-700 dark:text-green-400 uppercase">Major</td>
-                                                <td class="px-3 py-2 text-center font-bold text-slate-900 dark:text-white">{{ $facultySummary['lecture_count'] }}</td>
-                                                <td class="px-3 py-2 text-center font-bold text-slate-900 dark:text-white">{{ $facultySummary['lecture_units'] }}</td>
-                                                <td class="px-3 py-2 text-center font-bold text-slate-900 dark:text-white">
-                                                    {{ $facultySummary['lecture_count'] > 0 ? round($facultySummary['lecture_units'] / $facultySummary['lecture_count'], 1) : 0 }}
-                                                </td>
+                                        <tbody class="divide-y divide-slate-200 dark:divide-slate-700">
+                                            <tr class="hover:bg-amber-50 dark:hover:bg-amber-900/10">
+                                                <td class="px-3 py-2 font-black text-amber-700 dark:text-amber-400">Major</td>
+                                                <td class="px-3 py-2 text-center font-black text-slate-900 dark:text-white">{{ $facultySummary['majorCount'] }}</td>
+                                                <td class="px-3 py-2 text-center font-black text-amber-700 dark:text-amber-400">{{ $facultySummary['majorUnits'] }}</td>
+                                                <td class="px-3 py-2 text-center font-bold text-slate-600 dark:text-slate-400">{{ $facultySummary['averageMajorUnits'] }}u</td>
                                             </tr>
-                                            <tr>
-                                                <td class="px-3 py-2 font-black text-orange-700 dark:text-orange-400 uppercase">Minor</td>
-                                                <td class="px-3 py-2 text-center font-bold text-slate-900 dark:text-white">{{ $facultySummary['lab_count'] }}</td>
-                                                <td class="px-3 py-2 text-center font-bold text-slate-900 dark:text-white">{{ $facultySummary['lab_units'] }}</td>
-                                                <td class="px-3 py-2 text-center font-bold text-slate-900 dark:text-white">
-                                                    {{ $facultySummary['lab_count'] > 0 ? round($facultySummary['lab_units'] / $facultySummary['lab_count'], 1) : 0 }}
-                                                </td>
+                                            <tr class="hover:bg-indigo-50 dark:hover:bg-indigo-900/10">
+                                                <td class="px-3 py-2 font-black text-indigo-700 dark:text-indigo-400">Minor</td>
+                                                <td class="px-3 py-2 text-center font-black text-slate-900 dark:text-white">{{ $facultySummary['minorCount'] }}</td>
+                                                <td class="px-3 py-2 text-center font-black text-indigo-700 dark:text-indigo-400">{{ $facultySummary['minorUnits'] }}</td>
+                                                <td class="px-3 py-2 text-center font-bold text-slate-600 dark:text-slate-400">{{ $facultySummary['averageMinorUnits'] }}u</td>
                                             </tr>
                                         </tbody>
                                     </table>
                                 </div>
-                            </div>
-                        @endif
-                    </div>
+                            @endif
+                        </div>
+                    @endif
                 </div>
-            </div>
-
-            <!-- Quick Action Footer -->
-            <div class="px-6 py-4 border-t border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shrink-0 flex gap-3">
-                <button class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-black uppercase tracking-widest transition-all active:scale-95 flex items-center gap-2">
-                    <span>ℹ️</span> Info
-                </button>
-                <button class="ml-auto px-4 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-900 dark:text-white rounded-lg text-xs font-black uppercase tracking-widest transition-all">
-                    🔄 Refresh
-                </button>
             </div>
         @else
             <!-- Empty State -->
@@ -455,86 +443,97 @@
     <!-- RIGHT PANEL: SUBJECTS CATALOG -->
     <aside class="w-80 border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col shrink-0 overflow-hidden">
         <!-- Header -->
-        <div class="p-4 border-b border-slate-200 dark:border-slate-800 shrink-0">
+        <div class="p-4 border-b border-slate-200 dark:border-slate-800 shrink-0 overflow-y-auto custom-scrollbar max-h-[40%]">
             <div class="flex items-center justify-between mb-3">
                 <h2 class="text-xs font-black uppercase tracking-widest text-slate-900 dark:text-white">Subjects Catalog</h2>
-                <span class="px-2 py-1 bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded-full text-[8px] font-black uppercase">
-                    {{ count($availableSubjects) }}
-                </span>
+                @if($currentFaculty)
+                    <span class="px-2 py-1 bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 rounded-full text-[8px] font-black uppercase">
+                        {{ count($availableSubjects) }} Available
+                    </span>
+                @endif
             </div>
 
             <!-- Subject Search -->
             <div class="relative mb-3">
                 <input type="text" 
                     wire:model.live="subjectSearch" 
-                    placeholder="Search (code/desc/edp)..." 
+                    placeholder="Search subject, EDP..." 
                     class="w-full pl-8 pr-3 py-2 bg-slate-100 dark:bg-slate-800 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 outline-none transition-all placeholder:text-slate-400">
                 <span class="absolute left-2.5 top-2.5 text-slate-400">🔍</span>
             </div>
 
-            <!-- Filters (Only show for admin/registrar when no faculty selected) -->
-            @if(($userRole === 'admin' || $userRole === 'registrar') && !$selectedFacultyId)
-                <div class="flex gap-2">
-                    <select wire:model.live="subjectDepartmentFilter" class="flex-1 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg text-[10px] font-bold border border-slate-200 dark:border-slate-700 focus:border-blue-500 outline-none transition-all">
-                        <option value="all">All Dept</option>
-                        @foreach($departments as $dept)
-                            <option value="{{ $dept }}">{{ $dept }}</option>
-                        @endforeach
-                    </select>
-                    <select wire:model.live="subjectTypeFilter" class="flex-1 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 rounded-lg text-[10px] font-bold border border-slate-200 dark:border-slate-700 focus:border-blue-500 outline-none transition-all">
-                        <option value="all">All Type</option>
-                        @foreach($subjectTypes as $type)
-                            <option value="{{ $type }}">{{ $type }}</option>
-                        @endforeach
-                    </select>
+            <!-- Advanced Filters Grid -->
+            @if($currentFaculty)
+                <!-- Cross-Department Info -->
+                <div class="p-2 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-900/30 mb-3">
+                    <p class="text-[8px] font-black text-blue-700 dark:text-blue-400 uppercase mb-1">📍 Cross-Dept Assignment</p>
+                    <p class="text-[9px] text-blue-600 dark:text-blue-300 font-medium">
+                        @if($currentFaculty->teaching_specialization === 'Minor')
+                            ℹ Minor subjects from ANY department
+                        @elseif($currentFaculty->teaching_specialization === 'Major')
+                            ★ Major subjects from {{ $currentFaculty->department }} only
+                        @else
+                            ✓ Minor (any) + Major ({{ $currentFaculty->department }})
+                        @endif
+                    </p>
                 </div>
+
+                <!-- Compact Advanced Filters -->
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="text-[7px] font-black uppercase text-slate-600 dark:text-slate-400 block mb-0.5">Year Level</label>
+                        <select wire:model.live="subjectYearLevelFilter" class="w-full px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded text-[9px] font-bold border border-slate-200 dark:border-slate-700 focus:border-blue-500 outline-none transition-all">
+                            <option value="all">All</option>
+                            @foreach($yearLevels as $level)
+                                <option value="{{ $level }}">{{ $level }}{{ $level == 1 ? 'st' : ($level == 2 ? 'nd' : ($level == 3 ? 'rd' : 'th')) }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[7px] font-black uppercase text-slate-600 dark:text-slate-400 block mb-0.5">Section</label>
+                        <select wire:model.live="subjectSectionFilter" class="w-full px-2 py-1 bg-slate-100 dark:bg-slate-800 rounded text-[9px] font-bold border border-slate-200 dark:border-slate-700 focus:border-blue-500 outline-none transition-all">
+                            <option value="all">All</option>
+                            @foreach($sections as $section)
+                                <option value="{{ $section }}">{{ $section }}</option>
+                            @endforeach
+                        </select>
+                    </div>
+                </div>
+            @else
+
             @endif
         </div>
 
-        <!-- Subject List (Scrollable - No Limit) -->
+        <!-- Subject List -->
         <div class="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
             @if($currentFaculty)
                 @forelse($availableSubjects as $subject)
-                    <div class="p-4 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-xl border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 transition-all group">
-                        <div class="flex items-start justify-between mb-2">
-                            <div class="flex-1 min-w-0">
-                                <p class="text-[9px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest">
-                                    EDP: {{ $subject->edp_code }}
-                                </p>
-                                <p class="text-[10px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest mt-0.5">
-                                    {{ $subject->subject_code }}
-                                </p>
-                                <p class="text-xs font-bold text-slate-900 dark:text-white leading-tight mt-1 line-clamp-2">
-                                    {{ $subject->description }}
-                                </p>
-                            </div>
+                    <div class="p-3 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 transition-all group">
+                        <div class="mb-2">
+                            <p class="text-[8px] font-black text-orange-600 dark:text-orange-400 uppercase tracking-widest">EDP: {{ $subject->edp_code }}</p>
+                            <p class="text-[9px] font-black text-blue-600 dark:text-blue-400 uppercase tracking-widest mt-0.5">{{ $subject->subject_code }}</p>
+                            <p class="text-xs font-bold text-slate-900 dark:text-white leading-tight mt-1 line-clamp-2">{{ $subject->description }}</p>
                         </div>
 
-                        <div class="flex items-center gap-1.5 mb-3 text-[8px] flex-wrap">
-                            <span class="px-2 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded font-bold uppercase">
-                                {{ $subject->section }}
-                            </span>
-                            <span class="px-2 py-0.5 bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 rounded font-bold uppercase">
-                                {{ $subject->units }}u
-                            </span>
-                            <span class="px-2 py-0.5 {{ $subject->type === 'Major' ? 'bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400' : 'bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-400' }} rounded font-bold uppercase">
-                                {{ $subject->type }}
-                            </span>
+                        <div class="flex items-center gap-1 mb-2 text-[7px] flex-wrap">
+                            <span class="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded font-bold uppercase">{{ $subject->section }}</span>
+                            <span class="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 rounded font-bold uppercase">{{ $subject->units }}u</span>
+                            <span class="px-1.5 py-0.5 {{ $subject->type === 'Major' ? 'bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400' : 'bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-400' }} rounded font-bold uppercase">{{ $subject->type }}</span>
                         </div>
 
                         <button wire:click="assignSubject({{ $subject->id }})" 
-                            class="w-full px-3 py-2 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded-lg text-xs font-black uppercase tracking-widest transition-all transform active:scale-95">
+                            class="w-full px-2 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded text-[9px] font-black uppercase tracking-widest transition-all transform active:scale-95">
                             + Assign
                         </button>
                     </div>
                 @empty
                     <div class="h-48 flex flex-col items-center justify-center opacity-40 text-center p-4">
                         <p class="text-3xl mb-2">🔍</p>
-                        <p class="text-[10px] font-black uppercase text-slate-600 dark:text-slate-400 tracking-widest">
+                        <p class="text-[9px] font-black uppercase text-slate-600 dark:text-slate-400 tracking-widest">
                             @if(strlen($subjectSearch) > 1)
-                                No subjects match
+                                No matching subjects
                             @else
-                                Search to view subjects
+                                Search to view available subjects
                             @endif
                         </p>
                     </div>
@@ -542,42 +541,40 @@
             @else
                 <div class="h-48 flex flex-col items-center justify-center opacity-40 text-center p-4">
                     <p class="text-3xl mb-2">📋</p>
-                    <p class="text-[10px] font-black uppercase text-slate-600 dark:text-slate-400 tracking-widest">Select Faculty First</p>
-                    <p class="text-[9px] text-slate-500 dark:text-slate-500 font-medium mt-2">Choose a faculty member to view available subjects</p>
+                    <p class="text-[9px] font-black uppercase text-slate-600 dark:text-slate-400 tracking-widest">Select Faculty First</p>
+                    <p class="text-[8px] text-slate-500 dark:text-slate-500 font-medium mt-2">Choose a faculty member from the left panel</p>
                 </div>
             @endif
         </div>
 
         <!-- Footer -->
-        <div class="p-3 border-t border-slate-200 dark:border-slate-800 shrink-0 text-center">
-            <p class="text-[9px] text-slate-500 dark:text-slate-400 font-bold uppercase">
-                @if($userRole === 'associate_dean')
-                    🎓 Minor Subjects Only
-                @elseif($userRole === 'dean' || $userRole === 'oic')
-                    🎓 Major Subjects Only
-                @else
-                    🎓 All Subject Types
-                @endif
-            </p>
+        <div class="p-3 border-t border-slate-200 dark:border-slate-800 shrink-0 text-center text-[8px] text-slate-500 dark:text-slate-400 font-bold uppercase">
+            @if($userRole === 'associate_dean')
+                Minor Subjects Only
+            @elseif($userRole === 'dean' || $userRole === 'oic')
+                Major Subjects (Your Dept)
+            @else
+                All Subject Types
+            @endif
         </div>
     </aside>
 </div>
 
 <!-- Session Alerts -->
 @if(session('success'))
-    <div class="fixed top-4 right-4 px-4 py-3 bg-green-100 dark:bg-green-950 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 rounded-lg text-sm font-bold uppercase tracking-widest animate-pulse z-50">
+    <div class="fixed top-4 right-4 px-4 py-3 bg-green-100 dark:bg-green-950 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 rounded-lg text-sm font-bold uppercase tracking-widest animate-pulse z-50 max-w-md">
         {{ session('success') }}
     </div>
 @endif
 
 @if(session('error'))
-    <div class="fixed top-4 right-4 px-4 py-3 bg-red-100 dark:bg-red-950 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 rounded-lg text-sm font-bold uppercase tracking-widest animate-pulse z-50">
+    <div class="fixed top-4 right-4 px-4 py-3 bg-red-100 dark:bg-red-950 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 rounded-lg text-sm font-bold uppercase tracking-widest animate-pulse z-50 max-w-md">
         {{ session('error') }}
     </div>
 @endif
 
 @if(session('warning'))
-    <div class="fixed top-4 right-4 px-4 py-3 bg-orange-100 dark:bg-orange-950 border border-orange-200 dark:border-orange-800 text-orange-700 dark:text-orange-400 rounded-lg text-sm font-bold uppercase tracking-widest animate-pulse z-50">
+    <div class="fixed top-4 right-4 px-4 py-3 bg-orange-100 dark:bg-orange-950 border border-orange-200 dark:border-orange-800 text-orange-700 dark:text-orange-400 rounded-lg text-sm font-bold uppercase tracking-widest animate-pulse z-50 max-w-md">
         {{ session('warning') }}
     </div>
 @endif
@@ -604,8 +601,7 @@
     }
 
     @media print {
-        body > *:not(.flex-1) { display: none; }
-        main { height: auto !important; overflow: visible !important; }
-        .custom-scrollbar { overflow: visible !important; }
+        body > * { display: none !important; }
+        main { height: auto !important; overflow: visible !important; border: none; }
     }
 </style>

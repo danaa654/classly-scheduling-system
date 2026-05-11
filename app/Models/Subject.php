@@ -35,14 +35,21 @@ class Subject extends Model
     // RELATIONSHIPS
     // ============================================================
     
+    /**
+     * Get schedules associated with this subject
+     */
     public function schedules(): HasMany
     {
         return $this->hasMany(Schedule::class);
     }
 
+    /**
+     * Get the faculty member assigned to this subject
+     * FIXED: Changed from User to Faculty model
+     */
     public function faculty(): BelongsTo
     {
-        return $this->belongsTo(User::class, 'faculty_id');
+        return $this->belongsTo(Faculty::class, 'faculty_id');
     }
 
     // ============================================================
