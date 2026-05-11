@@ -32,6 +32,11 @@ class FacultyLoading extends Component
         'SHTM' => ['HM', 'TM'],
     ];
 
+    private function toast(string $type, string $message): void
+    {
+        $this->dispatch('toast', type: $type, message: $message);
+    }
+
     /**
      * Select a faculty member from the registry
      */
@@ -127,26 +132,31 @@ class FacultyLoading extends Component
     public function assignSubject($subjectId)
     {
         if (!$this->selectedFacultyId) {
-            session()->flash('error', 'Please select a faculty member first.');
+            $this->toast('error', 'Please select a faculty member first.');
             return;
         }
 
         $subject = Subject::find($subjectId);
         $faculty = Faculty::withSum('subjects', 'units')->find($this->selectedFacultyId);
 
-        if (!$subject || !$faculty) {
-            session()->flash('error', 'Data error: Could not find subject or faculty.');
+        if (!$subject) {
+            $this->toast('error', 'Subject not found.');
+            return;
+        }
+
+        if (!$faculty) {
+            $this->toast('error', 'Faculty not found.');
             return;
         }
 
         if ($subject->faculty_id !== null) {
-            session()->flash('warning', "{$subject->subject_code} is already assigned to a faculty member.");
+            $this->toast('warning', "{$subject->subject_code} is already assigned to a faculty member.");
             return;
         }
 
         // RBAC & Specialization Check
         if (!$this->canAssignSubject(Auth::user(), $faculty, $subject)) {
-            session()->flash('error', 'You cannot assign this type of subject to this faculty.');
+            $this->toast('error', 'Unauthorized assignment.');
             return;
         }
 
@@ -157,17 +167,22 @@ class FacultyLoading extends Component
         $newTotal = $currentUnits + $subjectUnits;
 
         if ($newTotal > $maxUnits) {
-            session()->flash('warning', "Overload prevented: assigning {$subject->subject_code} would bring {$faculty->full_name} to {$newTotal}/{$maxUnits} units.");
+            $this->toast('warning', "Faculty overload detected. {$subject->subject_code} would bring {$faculty->full_name} to {$newTotal}/{$maxUnits} units.");
             return;
         }
 
-        // Update faculty_id so it leaves the catalog
-        $subject->update(['faculty_id' => $this->selectedFacultyId]);
-        
-        // Clear search and notify user
-        $this->subjectSearch = '';
-        unset($this->selectedFaculty);
-        session()->flash('success', "Assigned {$subject->subject_code} to {$faculty->full_name} successfully.");
+        try {
+            // Update faculty_id so it leaves the catalog
+            $subject->update(['faculty_id' => $this->selectedFacultyId]);
+
+            // Clear search and notify user
+            $this->subjectSearch = '';
+            unset($this->selectedFaculty);
+            $this->toast('success', "{$subject->subject_code} assigned to {$faculty->full_name} successfully.");
+        } catch (\Throwable $exception) {
+            report($exception);
+            $this->toast('error', 'Database update failure. Subject was not assigned.');
+        }
     }
 
     /**
@@ -176,20 +191,30 @@ class FacultyLoading extends Component
     public function removeSubject($subjectId)
     {
         $subject = Subject::find($subjectId);
-        if ($subject) {
-            $oldCode = $subject->subject_code;
-            $oldEDP = $subject->edp_code;
-            $oldUnits = $subject->units;
-            
+        if (!$subject) {
+            $this->toast('error', 'Subject not found.');
+            return;
+        }
+
+        $oldCode = $subject->subject_code;
+        $oldEDP = $subject->edp_code;
+        $oldUnits = $subject->units;
+
+        try {
             $subject->update(['faculty_id' => null]);
             unset($this->selectedFaculty);
-            
+
             if ($this->selectedFaculty) {
                 // Refresh the selected faculty
                 $faculty = Faculty::with('subjects')->find($this->selectedFacultyId);
                 $remainingUnits = $faculty->subjects->sum('units') ?? 0;
-                session()->flash('success', "Subject {$oldCode} (EDP: {$oldEDP}, {$oldUnits}u) removed. Remaining load: {$remainingUnits}/{$faculty->max_units} units.");
+                $this->toast('success', "Subject {$oldCode} (EDP: {$oldEDP}, {$oldUnits}u) removed. Remaining load: {$remainingUnits}/{$faculty->max_units} units.");
+            } else {
+                $this->toast('success', "Subject {$oldCode} removed successfully.");
             }
+        } catch (\Throwable $exception) {
+            report($exception);
+            $this->toast('error', 'Database update failure. Subject was not removed.');
         }
     }
 

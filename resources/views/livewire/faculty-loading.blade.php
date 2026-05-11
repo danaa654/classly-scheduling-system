@@ -1,4 +1,43 @@
-<div class="h-screen bg-slate-50 dark:bg-slate-950 flex overflow-hidden font-sans transition-colors duration-500">
+<div
+    x-data="{
+        toasts: [],
+        addToast(toast) {
+            const id = Date.now() + Math.random();
+            const item = {
+                id,
+                type: toast.type || 'success',
+                message: toast.message || '',
+                timeout: null
+            };
+
+            this.toasts.push(item);
+            item.timeout = setTimeout(() => this.removeToast(id), 4200);
+        },
+        removeToast(id) {
+            const toast = this.toasts.find((item) => item.id === id);
+            if (toast && toast.timeout) {
+                clearTimeout(toast.timeout);
+            }
+
+            this.toasts = this.toasts.filter((item) => item.id !== id);
+        },
+        toastClasses(type) {
+            return {
+                success: 'bg-green-600 border-green-500 text-white',
+                warning: 'bg-amber-500 border-amber-400 text-white',
+                error: 'bg-red-600 border-red-500 text-white'
+            }[type] || 'bg-slate-900 border-slate-700 text-white';
+        },
+        toastIcon(type) {
+            return {
+                success: 'OK',
+                warning: '!',
+                error: '!'
+            }[type] || 'i';
+        }
+    }"
+    x-on:toast.window="addToast($event.detail)"
+    class="h-screen bg-slate-50 dark:bg-slate-950 flex overflow-hidden font-sans transition-colors duration-500">
     
     <!-- LEFT PANEL: FACULTY ROSTER -->
     <aside class="w-80 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col shrink-0 overflow-hidden">
@@ -558,29 +597,34 @@
             @endif
         </div>
     </aside>
+
+    <!-- Faculty Loading Toast Notifications -->
+    <div class="fixed top-5 right-5 z-[9999] w-[min(24rem,calc(100vw-2rem))] space-y-3 pointer-events-none">
+        <template x-for="toast in toasts" :key="toast.id">
+            <div
+                x-transition:enter="transition ease-out duration-300"
+                x-transition:enter-start="opacity-0 translate-x-6 scale-95"
+                x-transition:enter-end="opacity-100 translate-x-0 scale-100"
+                x-transition:leave="transition ease-in duration-200"
+                x-transition:leave-start="opacity-100 translate-x-0 scale-100"
+                x-transition:leave-end="opacity-0 translate-x-6 scale-95"
+                class="pointer-events-auto flex items-start gap-3 rounded-xl border px-4 py-3 shadow-2xl"
+                :class="toastClasses(toast.type)">
+                <div class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/20 text-sm font-black">
+                    <span x-text="toastIcon(toast.type)"></span>
+                </div>
+                <p class="min-w-0 flex-1 text-sm font-bold leading-5 tracking-wide" x-text="toast.message"></p>
+                <button
+                    type="button"
+                    x-on:click="removeToast(toast.id)"
+                    class="rounded-md px-1.5 text-lg font-black leading-none text-white/80 transition hover:bg-white/15 hover:text-white"
+                    aria-label="Dismiss notification">
+                    &times;
+                </button>
+            </div>
+        </template>
+    </div>
 </div>
-
-<!-- Session Alerts - Fixed position toasts (always visible) -->
-@if (session()->has('success'))
-    <div class="fixed top-5 right-5 z-[9999] flex items-center gap-3 px-5 py-4 bg-green-600 text-white rounded-xl shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300">
-        <span class="text-xl font-bold flex-shrink-0">✓</span>
-        <p class="text-sm font-bold tracking-wide">{{ session('success') }}</p>
-    </div>
-@endif
-
-@if (session()->has('error'))
-    <div class="fixed top-5 right-5 z-[9999] flex items-center gap-3 px-5 py-4 bg-red-600 text-white rounded-xl shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300">
-        <span class="text-xl font-bold flex-shrink-0">⚠️</span>
-        <p class="text-sm font-bold tracking-wide">{{ session('error') }}</p>
-    </div>
-@endif
-
-@if (session()->has('warning'))
-    <div class="fixed top-5 right-5 z-[9999] flex items-center gap-3 px-5 py-4 bg-amber-500 text-white rounded-xl shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300">
-        <span class="text-xl font-bold flex-shrink-0">!</span>
-        <p class="text-sm font-bold tracking-wide">{{ session('warning') }}</p>
-    </div>
-@endif
 
 <!-- Scrollbar Styling -->
 <style>
