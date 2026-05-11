@@ -187,13 +187,13 @@
                             'light' => 'bg-slate-400/85 text-slate-950', 'dark' => 'dark:bg-slate-600/80 dark:text-slate-50', 'border' => 'border-l-slate-600'
                         ];
 
-                        $instructor = $subject->faculty?->full_name ?? 'N/A';
+                        $instructor = $schedule->faculty?->full_name ?? 'Unassigned';
                         $startTimeDisplay = $startTime->format('g:i A');
                         $endTimeDisplay = $endTime->format('g:i A');
                     @endphp
 
                     <div 
-                        class="absolute pointer-events-auto z-20 rounded-r-lg border-2 border-r-slate-400 border-t-slate-300 border-b-slate-300 shadow-lg backdrop-blur-sm transition-all hover:shadow-2xl hover:z-50 group/card overflow-hidden ring-1 ring-black/10 dark:ring-white/10
+                        class="schedule-block absolute pointer-events-auto z-20 rounded-lg border border-black/10 shadow-sm backdrop-blur-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-xl hover:z-50 group/card overflow-hidden ring-1 ring-white/30 dark:ring-white/10
                                {{ $colors['light'] }} {{ $colors['dark'] }} {{ $colors['border'] }} border-l-4"
                         style="
                             /* Vertical: Aligns with the 45px rows */
@@ -211,31 +211,33 @@
                             z-index: {{ 20 + $myPosition }};
                         "
                         wire:key="schedule-{{ $schedule->id }}"
-                        @mouseenter="showSchedulePopover($event, {
-                            code: '{{ $subject->subject_code }}',
-                            description: '{{ addslashes($subject->description ?? '') }}',
-                            edp: '{{ $subject->edp_code ?? 'N/A' }}',
-                            section: '{{ $schedule->section ?? 'N/A' }}',
-                            instructor: '{{ addslashes($instructor) }}',
-                            time: '{{ $startTimeDisplay }} - {{ $endTimeDisplay }}',
-                            day: '{{ $dayFull }}'
+                        @mouseenter="showSchedulePopover($event, $el, {
+                            code: @js($subject->subject_code),
+                            description: @js($subject->description ?? ''),
+                            edp: @js($subject->edp_code ?? 'N/A'),
+                            section: @js($schedule->section ?? 'N/A'),
+                            instructor: @js($instructor),
+                            room: @js($schedule->room?->room_name ?? $selectedRoomName ?? 'N/A'),
+                            type: @js($subject->type ?? 'N/A'),
+                            time: @js($startTimeDisplay . ' - ' . $endTimeDisplay),
+                            day: @js($dayFull)
                         })"
                         @mouseleave="hideSchedulePopover()"
                     >
                         {{-- SCHEDULE CARD CONTENT --}}
-                        <div class="flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden bg-white/20 px-1.5 py-1 text-center leading-tight pointer-events-none dark:bg-black/15">
+                        <div class="flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden bg-white/25 px-2 py-1.5 text-center leading-tight pointer-events-none dark:bg-black/15">
                             {{-- EDP CODE (Top) --}}
-                            <div class="w-full truncate text-[9px] font-black uppercase tracking-tight text-current drop-shadow-sm sm:text-[10px]">
+                            <div class="w-full truncate text-[8px] font-black uppercase text-current opacity-80 sm:text-[9px]">
                                 {{ $subject->edp_code ?? 'N/A' }}
                             </div>
                             
                             {{-- SUBJECT CODE (Bold Center) --}}
-                            <div class="w-full truncate text-[10px] font-black uppercase tracking-tight text-current drop-shadow-sm sm:text-[11px]">
+                            <div class="w-full truncate text-[11px] font-black uppercase text-current sm:text-[12px]">
                                 {{ $subject->subject_code }}
                             </div>
                             
                             {{-- TIME (Bottom) --}}
-                            <div class="w-full truncate text-[8px] font-bold opacity-95 drop-shadow-sm sm:text-[9px]">
+                            <div class="w-full truncate text-[8px] font-bold opacity-90 sm:text-[9px]">
                                 {{ $startTimeDisplay }} - {{ $endTimeDisplay }}
                             </div>
                         </div>
@@ -301,7 +303,7 @@
     {{-- SCHEDULE DETAIL POPOVER (COMPACT) --}}
     <div 
         id="schedulePopover" 
-        class="hidden fixed z-[9999] w-72 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-3 backdrop-blur-sm pointer-events-auto"
+        class="schedule-popover hidden fixed z-[9999] w-80 bg-white dark:bg-slate-800 rounded-lg shadow-2xl border border-slate-200 dark:border-slate-700 p-3 backdrop-blur-sm pointer-events-auto opacity-0 scale-95 transition-all duration-150"
         style="max-width: calc(100vw - 16px);"
     >
         <div class="space-y-2">
@@ -344,6 +346,10 @@
                     <span class="text-slate-600 dark:text-slate-400">Instructor:</span>
                     <span class="text-slate-900 dark:text-slate-100 truncate ml-1" id="popInstructor">—</span>
                 </div>
+                <div class="flex justify-between font-bold">
+                    <span class="text-slate-600 dark:text-slate-400">Room:</span>
+                    <span class="text-slate-900 dark:text-slate-100 truncate ml-1" id="popRoom">—</span>
+                </div>
             </div>
         </div>
     </div>
@@ -356,7 +362,7 @@
                 console.log('✅ Schedule grid initialized');
             },
 
-            showSchedulePopover(event, data) {
+            showSchedulePopover(event, anchor, data) {
                 const popover = document.getElementById('schedulePopover');
                 if (!popover) return;
 
@@ -365,39 +371,54 @@
                 document.getElementById('popEdp').textContent = data.edp || 'N/A';
                 document.getElementById('popSection').textContent = `S${data.section || 'N/A'}`;
                 document.getElementById('popInstructor').textContent = data.instructor || 'N/A';
+                document.getElementById('popRoom').textContent = data.room || 'N/A';
                 document.getElementById('popTime').textContent = data.time || 'N/A';
                 document.getElementById('popDay').textContent = data.day || 'N/A';
-
-                let x = event.clientX + 10;
-                let y = event.clientY - 120;
-
-                const popoverWidth = 288;
-                if (x + popoverWidth > window.innerWidth) {
-                    x = window.innerWidth - popoverWidth - 10;
-                }
-
-                if (x < 10) {
-                    x = 10;
-                }
-
-                if (y < 10) {
-                    y = event.clientY + 10;
-                }
-
-                const popoverHeight = 280;
-                if (y + popoverHeight > window.innerHeight) {
-                    y = window.innerHeight - popoverHeight - 10;
-                }
+                document.getElementById('popType').textContent = data.type || 'N/A';
+                document.getElementById('popType2').textContent = data.type || 'N/A';
 
                 popover.style.display = 'block';
+                popover.style.opacity = '0';
+                popover.style.transform = 'scale(0.96)';
+
+                const anchorRect = anchor.getBoundingClientRect();
+                const popoverRect = popover.getBoundingClientRect();
+                const gap = 12;
+                const margin = 8;
+                const popoverWidth = popoverRect.width || 320;
+                const popoverHeight = popoverRect.height || 220;
+
+                let x = anchorRect.right + gap;
+                let y = anchorRect.top + (anchorRect.height / 2) - (popoverHeight / 2);
+
+                if (x + popoverWidth + margin > window.innerWidth) {
+                    x = anchorRect.left - popoverWidth - gap;
+                }
+
+                if (x < margin) {
+                    x = Math.min(window.innerWidth - popoverWidth - margin, anchorRect.right + gap);
+                }
+
+                y = Math.max(margin, Math.min(y, window.innerHeight - popoverHeight - margin));
+
                 popover.style.left = x + 'px';
                 popover.style.top = y + 'px';
+                requestAnimationFrame(() => {
+                    popover.style.opacity = '1';
+                    popover.style.transform = 'scale(1)';
+                });
             },
 
             hideSchedulePopover() {
                 const popover = document.getElementById('schedulePopover');
                 if (popover) {
-                    popover.style.display = 'none';
+                    popover.style.opacity = '0';
+                    popover.style.transform = 'scale(0.96)';
+                    setTimeout(() => {
+                        if (popover.style.opacity === '0') {
+                            popover.style.display = 'none';
+                        }
+                    }, 120);
                 }
             }
         };

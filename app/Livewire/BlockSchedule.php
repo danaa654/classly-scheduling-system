@@ -53,8 +53,9 @@ class BlockSchedule extends Component
         // =====================================================
         // Get all schedules for selected section
         // =====================================================
-        $allSchedules = Schedule::where('section', $this->selectedSection)
-            ->with(['subject', 'room'])
+        $allSchedules = Schedule::finalized()
+            ->where('section', $this->selectedSection)
+            ->with(['subject', 'room', 'faculty'])
             ->get();
 
         // =====================================================

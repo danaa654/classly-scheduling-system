@@ -47,6 +47,17 @@
             </div>
 
             <div class="flex items-center gap-3">
+                @if($canFinalizeSchedules ?? false)
+                    <button 
+                        wire:click="finalizeFacultyAssignedSchedules"
+                        wire:confirm="Finalize all faculty-assigned schedules?"
+                        class="px-3 py-1.5 rounded-md text-[8px] font-black uppercase transition-all flex items-center gap-1 border-2 border-emerald-400 dark:border-emerald-600 bg-emerald-100/70 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-200/70 dark:hover:bg-emerald-900/50 shadow-md hover:shadow-lg"
+                        title="Finalize submitted faculty loading schedules">
+                        <span>OK</span>
+                        Finalize
+                    </button>
+                @endif
+
                 <!-- AI GENERATION BUTTON -->
                 <button 
                     class="px-3 py-1.5 rounded-md text-[8px] font-black uppercase transition-all flex items-center gap-1 border-2 border-indigo-400 dark:border-indigo-600 bg-indigo-100/70 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-200/70 dark:hover:bg-indigo-900/50 shadow-md hover:shadow-lg"

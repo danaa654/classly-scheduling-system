@@ -144,6 +144,38 @@ class MasterGrid extends Component
         return in_array($role, ['admin', 'registrar', 'associate_dean']);
     }
 
+    public function canFinalizeSchedules(): bool
+    {
+        $role = auth()->user()?->role ?? 'guest';
+
+        return in_array($role, ['admin', 'registrar'], true);
+    }
+
+    public function finalizeFacultyAssignedSchedules(): void
+    {
+        if (!$this->canFinalizeSchedules()) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Permission Denied',
+                'detail' => 'Only Registrar/Admin can finalize schedules.'
+            ]);
+            return;
+        }
+
+        $updated = Schedule::where('status', Schedule::STATUS_FACULTY_ASSIGNED)
+            ->update(['status' => Schedule::STATUS_FINALIZED]);
+
+        $this->dispatch('toast', [
+            'type' => $updated > 0 ? 'success' : 'warning',
+            'message' => $updated > 0 ? 'Schedules Finalized' : 'No Schedules Ready',
+            'detail' => $updated > 0
+                ? "{$updated} faculty-assigned schedule(s) are now finalized."
+                : 'There are no faculty-assigned schedules pending final approval.'
+        ]);
+
+        $this->dispatch('refreshGrid');
+    }
+
     public function getUserDepartment(): ?string
     {
         $user = auth()->user();
@@ -281,15 +313,7 @@ class MasterGrid extends Component
 
     private function hasFacultyConflict($subjectId, $day, $startTime, $endTime): bool
     {
-        $subject = Subject::find($subjectId);
-        if (!$subject || !$subject->faculty_id) {
-            return false;
-        }
-
-        $result = app(ScheduleConflictService::class)
-            ->checkFacultyConflict($subject, $day, $startTime, $endTime);
-
-        return ($result['status'] ?? true) === false;
+        return false;
     }
 
     /**
@@ -437,7 +461,6 @@ class MasterGrid extends Component
 
         $checks = [
             $service->checkRoomConflict($room->id, $day, $startTime, $endTime, $ignoreScheduleId),
-            $service->checkFacultyConflict($subject, $day, $startTime, $endTime, $ignoreScheduleId),
             $service->checkSectionConflict($subject, $day, $startTime, $endTime, $ignoreScheduleId),
         ];
 
@@ -719,10 +742,14 @@ class MasterGrid extends Component
                 'subject_id' => $subjectId,
                 'room_id' => $this->selectedRoomId,
                 'user_id' => auth()->id() ?? 1,
+                'department' => $subject->department,
+                'major' => $subject->major,
+                'year_level' => $subject->year_level,
                 'day' => $day,
                 'start_time' => $startTime,
                 'end_time' => $endTime,
                 'section' => $subject->section,
+                'status' => 'partial',
             ]);
 
             $remainingHours = $this->getRemainingHoursDecimal($subjectId);
@@ -970,7 +997,7 @@ class MasterGrid extends Component
                         'id', 'subject_code', 'description', 'edp_code', 
                         'duration_hours', 'department', 'type', 'major', 'year_level', 'faculty_id'
                     );
-                }, 'subject.faculty:id,full_name'])
+                }, 'faculty:id,full_name'])
                 ->get()
             : collect();
 
@@ -990,6 +1017,7 @@ class MasterGrid extends Component
             'brickDurationMinutes' => self::BRICK_DURATION_MINUTES,
             'brickHeightPx'        => self::BRICK_HEIGHT_PX,
             'hasFullAccess'        => $this->hasFullAccess(),
+            'canFinalizeSchedules'  => $this->canFinalizeSchedules(),
             'departmentMajors'     => self::DEPARTMENT_MAJORS,
             'departmentColors'     => self::DEPARTMENT_COLORS,
             'selectedRoomId'       => $this->selectedRoomId,

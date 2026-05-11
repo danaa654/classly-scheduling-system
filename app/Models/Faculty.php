@@ -52,6 +52,14 @@ class Faculty extends Model
     }
 
     /**
+     * Scheduled teaching assignments owned by Faculty Loading.
+     */
+    public function schedules(): HasMany
+    {
+        return $this->hasMany(Schedule::class);
+    }
+
+    /**
      * Get the logs for this faculty member
      */
     public function logs()

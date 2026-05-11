@@ -9,14 +9,30 @@ use Carbon\Carbon;
 
 class Schedule extends Model
 {
+    public const STATUS_DRAFT = 'draft';
+    public const STATUS_PARTIAL = 'partial';
+    public const STATUS_FACULTY_ASSIGNED = 'faculty_assigned';
+    public const STATUS_FINALIZED = 'finalized';
+
+    public const SECTION_TIME_PREFERENCES = [
+        'A' => 'morning',
+        'B' => 'afternoon',
+        'C' => 'evening',
+    ];
+
     protected $fillable = [
         'subject_id',
         'room_id',
+        'faculty_id',
         'user_id',
+        'department',
+        'major',
+        'year_level',
         'section',
         'day',
         'start_time',
         'end_time',
+        'status',
     ];
 
     protected $casts = [
@@ -42,6 +58,14 @@ class Schedule extends Model
     public function room(): BelongsTo
     {
         return $this->belongsTo(Room::class);
+    }
+
+    /**
+     * A schedule may be assigned to a faculty member after room/time scheduling.
+     */
+    public function faculty(): BelongsTo
+    {
+        return $this->belongsTo(Faculty::class);
     }
 
     /**
@@ -103,6 +127,31 @@ class Schedule extends Model
     public function scopeForSection($query, $section)
     {
         return $query->where('section', $section);
+    }
+
+    public function scopePartial($query)
+    {
+        return $query->where('status', self::STATUS_PARTIAL);
+    }
+
+    public function scopeFacultyAssigned($query)
+    {
+        return $query->where('status', self::STATUS_FACULTY_ASSIGNED);
+    }
+
+    public function scopeFinalized($query)
+    {
+        return $query->where('status', self::STATUS_FINALIZED);
+    }
+
+    public function scopeAssignable($query)
+    {
+        return $query->whereIn('status', [self::STATUS_PARTIAL, self::STATUS_FACULTY_ASSIGNED]);
+    }
+
+    public static function sectionTimePreference(?string $section): ?string
+    {
+        return self::SECTION_TIME_PREFERENCES[strtoupper((string) $section)] ?? null;
     }
 
     /**

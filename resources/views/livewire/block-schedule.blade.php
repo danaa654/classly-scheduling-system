@@ -112,7 +112,8 @@
                                         <th class="px-6 py-4 text-left border-r border-slate-700 dark:border-slate-600 flex-1">Description</th>
                                         <th class="px-6 py-4 text-center border-r border-slate-700 dark:border-slate-600 w-16">Units</th>
                                         <th class="px-6 py-4 text-center border-r border-slate-700 dark:border-slate-600 w-20">Day</th>
-                                        <th class="px-6 py-4 text-center w-24">Room</th>
+                                        <th class="px-6 py-4 text-center border-r border-slate-700 dark:border-slate-600 w-24">Room</th>
+                                        <th class="px-6 py-4 text-center w-36">Faculty</th>
                                     </tr>
                                 </thead>
                                 <tbody class="text-sm">
@@ -161,6 +162,13 @@
                         <td class="px-6 py-4 text-center font-black text-blue-600 dark:text-blue-400">
                             <span class="bg-blue-100/50 dark:bg-blue-900/30 px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-tight inline-block">
                                 {{ $sched->room->room_name }}
+                            </span>
+                        </td>
+
+                        {{-- Faculty --}}
+                        <td class="px-6 py-4 text-center font-black text-slate-700 dark:text-slate-300">
+                            <span class="bg-slate-100/50 dark:bg-slate-800/50 px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-tight inline-block">
+                                {{ $sched->faculty?->full_name ?? 'Unassigned' }}
                             </span>
                         </td>
                     </tr>

@@ -114,7 +114,7 @@
                         <!-- Progress Ring -->
                         <div class="flex-shrink-0 w-14 h-14 relative">
                             @php
-                                $units = $faculty->subjects_sum_units ?? 0;
+                                $units = $faculty->assigned_units ?? 0;
                                 $max = $faculty->max_units ?? 21;
                                 $percent = min(($units / $max) * 100, 100);
                                 $circumference = 2 * 3.14159 * 20;
@@ -195,6 +195,9 @@
 
                     <!-- Action Buttons -->
                     <div class="flex gap-2">
+                        <button wire:click="submitFacultyLoading" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-black uppercase tracking-widest transition-all active:scale-95">
+                            Submit Faculty Loading
+                        </button>
                         <button onclick="window.print()" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-black uppercase tracking-widest transition-all active:scale-95">
                             🖨️ Print
                         </button>
@@ -211,7 +214,7 @@
                         <p class="text-[9px] font-black text-blue-700 dark:text-blue-400 uppercase tracking-widest mb-2">Overall Load</p>
                         <div class="flex items-baseline gap-1">
                             <span class="text-2xl font-black text-blue-700 dark:text-blue-300">
-                                {{ $currentFaculty->subjects->sum('units') ?? 0 }}
+                                {{ $assignedSubjects->sum('units') ?? 0 }}
                             </span>
                             <span class="text-xs text-blue-600 dark:text-blue-400 font-bold">
                                 / {{ $currentFaculty->max_units }} Units
@@ -219,7 +222,7 @@
                         </div>
                         <div class="mt-2 h-1.5 bg-blue-200 dark:bg-blue-900/40 rounded-full overflow-hidden">
                             @php
-                                $totalUnits = $currentFaculty->subjects->sum('units') ?? 0;
+                                $totalUnits = $assignedSubjects->sum('units') ?? 0;
                                 $maxUnits = $currentFaculty->max_units ?? 21;
                                 $loadPercent = min(($totalUnits / $maxUnits) * 100, 100);
                             @endphp
@@ -247,14 +250,14 @@
                 </div>
 
                 <!-- Alert: Overload Warning -->
-                @if(($currentFaculty->subjects->sum('units') ?? 0) > ($currentFaculty->max_units ?? 21))
+                @if(($assignedSubjects->sum('units') ?? 0) > ($currentFaculty->max_units ?? 21))
                     <div class="mt-4 p-4 bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 rounded-xl flex items-start gap-3">
                         <span class="text-lg flex-shrink-0">⚠️</span>
                         <div>
                             <p class="text-sm font-black text-red-700 dark:text-red-400 uppercase tracking-tight">Load Status: Overload</p>
                             <p class="text-xs text-red-600 dark:text-red-500 font-medium mt-1">
                                 The current load exceeds the maximum allowable units. 
-                                <span class="font-black">{{ ($currentFaculty->subjects->sum('units') ?? 0) - ($currentFaculty->max_units ?? 21) }} units over capacity.</span>
+                                <span class="font-black">{{ ($assignedSubjects->sum('units') ?? 0) - ($currentFaculty->max_units ?? 21) }} units over capacity.</span>
                             </p>
                         </div>
                     </div>
@@ -265,7 +268,7 @@
                         <div>
                             <p class="text-sm font-black text-blue-700 dark:text-blue-400 uppercase tracking-tight">Load Status: Within Capacity</p>
                             <p class="text-xs text-blue-600 dark:text-blue-500 font-medium mt-1">
-                                Faculty can take {{ ($currentFaculty->max_units ?? 21) - ($currentFaculty->subjects->sum('units') ?? 0) }} more units.
+                                Faculty can take {{ ($currentFaculty->max_units ?? 21) - ($assignedSubjects->sum('units') ?? 0) }} more units.
                             </p>
                         </div>
                     </div>
@@ -279,7 +282,7 @@
                     <div class="flex gap-6">
                         <button wire:click="toggleTab('subjects')"
                             class="pb-3 px-1 text-sm font-black {{ $activeTab === 'subjects' ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-slate-600 dark:text-slate-400 border-b-2 border-transparent hover:text-slate-900 dark:hover:text-white' }} uppercase tracking-widest transition-all">
-                            Subjects Assigned ({{ $currentFaculty->subjects->count() }})
+                            Subjects Assigned ({{ $assignedSchedules->count() }})
                         </button>
                         <button wire:click="toggleTab('schedule')"
                             class="pb-3 px-1 text-sm font-black {{ $activeTab === 'schedule' ? 'text-blue-600 dark:text-blue-400 border-b-2 border-blue-600 dark:border-blue-400' : 'text-slate-600 dark:text-slate-400 border-b-2 border-transparent hover:text-slate-900 dark:hover:text-white' }} uppercase tracking-widest transition-all">
@@ -297,7 +300,7 @@
                     <!-- Subjects Tab -->
                     @if($activeTab === 'subjects')
                         <div class="px-6 py-4">
-                            @if($currentFaculty->subjects->count() > 0)
+                            @if($assignedSchedules->count() > 0)
                                 <div class="overflow-x-auto">
                                     <table class="w-full text-[11px]">
                                         <thead class="bg-slate-100 dark:bg-slate-800/50 sticky top-0">
@@ -314,7 +317,11 @@
                                             </tr>
                                         </thead>
                                         <tbody class="divide-y divide-slate-200 dark:divide-slate-800">
-                                            @foreach($currentFaculty->subjects as $idx => $subject)
+                                            @foreach($assignedSchedules as $idx => $schedule)
+                                                @php
+                                                    $subject = $schedule->subject;
+                                                    $room = $schedule->room;
+                                                @endphp
                                                 <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
                                                     <td class="px-4 py-3 text-slate-900 dark:text-white font-black">{{ $idx + 1 }}</td>
                                                     <td class="px-4 py-3 font-black text-orange-600 dark:text-orange-400 uppercase">{{ $subject->edp_code }}</td>
@@ -322,7 +329,12 @@
                                                     <td class="px-4 py-3 text-slate-900 dark:text-white font-bold truncate max-w-xs" title="{{ $subject->description }}">
                                                         {{ $subject->description }}
                                                     </td>
-                                                    <td class="px-4 py-3 text-slate-600 dark:text-slate-400 font-bold uppercase">{{ $subject->section }}</td>
+                                                    <td class="px-4 py-3 text-slate-600 dark:text-slate-400 font-bold uppercase">
+                                                        {{ $schedule->section }}
+                                                        <span class="block text-[9px] font-bold text-slate-400">
+                                                            {{ $room?->room_name ?? 'No room' }} · {{ $schedule->day }} {{ \Carbon\Carbon::parse($schedule->start_time)->format('h:i A') }}-{{ \Carbon\Carbon::parse($schedule->end_time)->format('h:i A') }}
+                                                        </span>
+                                                    </td>
                                                     <td class="px-4 py-3 text-center font-black text-slate-900 dark:text-white">{{ $subject->units }}</td>
                                                     <td class="px-4 py-3">
                                                         <span class="inline-flex items-center px-2 py-1 rounded-full text-[9px] font-black uppercase {{ $subject->type === 'Major' ? 'bg-blue-100 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400' : 'bg-purple-100 dark:bg-purple-950/30 text-purple-700 dark:text-purple-400' }}">
@@ -331,11 +343,11 @@
                                                     </td>
                                                     <td class="px-4 py-3 text-center">
                                                         <span class="px-2 py-1 bg-green-100 dark:bg-green-950/30 text-green-700 dark:text-green-400 rounded-full text-[9px] font-black uppercase">
-                                                            Assigned
+                                                            {{ str_replace('_', ' ', $schedule->status) }}
                                                         </span>
                                                     </td>
                                                     <td class="px-4 py-3 text-center">
-                                                        <button wire:click="removeSubject({{ $subject->id }})" 
+                                                        <button wire:click="removeSubject({{ $schedule->id }})" 
                                                             class="text-slate-400 hover:text-red-600 dark:hover:text-red-400 font-bold transition-colors p-1 text-lg leading-none">
                                                             ✕
                                                         </button>
@@ -352,7 +364,7 @@
                                         Total Units Assigned
                                     </p>
                                     <p class="text-2xl font-black text-blue-600 dark:text-blue-400">
-                                        {{ $currentFaculty->subjects->sum('units') ?? 0 }}<span class="text-xs text-slate-500 dark:text-slate-400"> / {{ $currentFaculty->max_units }}</span>
+                                        {{ $assignedSubjects->sum('units') ?? 0 }}<span class="text-xs text-slate-500 dark:text-slate-400"> / {{ $currentFaculty->max_units }}</span>
                                     </p>
                                 </div>
                             @else
@@ -546,7 +558,11 @@
         <!-- Subject List -->
         <div class="flex-1 overflow-y-auto p-3 space-y-2 custom-scrollbar">
             @if($currentFaculty)
-                @forelse($availableSubjects as $subject)
+                @forelse($availableSubjects as $schedule)
+                    @php
+                        $subject = $schedule->subject;
+                        $room = $schedule->room;
+                    @endphp
                     <div class="p-3 bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-800 dark:to-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-blue-400 dark:hover:border-blue-600 transition-all group">
                         <div class="mb-2">
                             <p class="text-[8px] font-black text-orange-600 dark:text-orange-400 uppercase tracking-widest">EDP: {{ $subject->edp_code }}</p>
@@ -555,12 +571,20 @@
                         </div>
 
                         <div class="flex items-center gap-1 mb-2 text-[7px] flex-wrap">
+                            <span class="px-1.5 py-0.5 bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 rounded font-bold uppercase">{{ $subject->department }}</span>
                             <span class="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded font-bold uppercase">{{ $subject->section }}</span>
+                            <span class="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded font-bold uppercase">{{ $room?->room_name ?? 'No Room' }}</span>
+                            <span class="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded font-bold uppercase">{{ $schedule->day }}</span>
+                            <span class="px-1.5 py-0.5 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 rounded font-bold uppercase">{{ \Carbon\Carbon::parse($schedule->start_time)->format('h:i A') }}-{{ \Carbon\Carbon::parse($schedule->end_time)->format('h:i A') }}</span>
                             <span class="px-1.5 py-0.5 bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 rounded font-bold uppercase">{{ $subject->units }}u</span>
                             <span class="px-1.5 py-0.5 {{ $subject->type === 'Major' ? 'bg-amber-100 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400' : 'bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-400' }} rounded font-bold uppercase">{{ $subject->type }}</span>
                         </div>
 
-                        <button wire:click="assignSubject({{ $subject->id }})" 
+                        <div class="mb-2 text-[8px] font-bold text-slate-500 dark:text-slate-400">
+                            Faculty Status: <span class="uppercase">{{ $schedule->faculty_id ? 'Assigned' : 'Unassigned' }}</span>
+                        </div>
+
+                        <button wire:click="assignSubject({{ $schedule->id }})" 
                             class="w-full py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black rounded-lg uppercase transition-all shadow-md active:scale-95">
                             Assign to Faculty +
                         </button>   

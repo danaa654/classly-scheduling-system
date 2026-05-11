@@ -2,10 +2,13 @@
 
 namespace App\Livewire;
 
-use Livewire\Component;
 use App\Models\Faculty;
-use App\Models\Subject;
+use App\Models\Schedule;
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
+use Livewire\Component;
 
 class FacultyLoading extends Component
 {
@@ -22,9 +25,6 @@ class FacultyLoading extends Component
     public $activeTab = 'subjects';
     public $scheduleModalOpen = false;
 
-    /**
-     * Department & Major Hierarchy
-     */
     protected const DEPARTMENT_STRUCTURE = [
         'CCS' => ['IT', 'ACT'],
         'CTE' => ['ED'],
@@ -37,20 +37,13 @@ class FacultyLoading extends Component
         $this->dispatch('toast', type: $type, message: $message);
     }
 
-    /**
-     * Select a faculty member from the registry
-     */
     public function selectFaculty($id)
     {
         $this->selectedFacultyId = $id;
         $this->subjectSearch = '';
-        // Reset filters when selecting a new faculty
         $this->resetFilters();
     }
 
-    /**
-     * Reset all filter states
-     */
     private function resetFilters()
     {
         $this->subjectDepartmentFilter = 'all';
@@ -60,52 +53,60 @@ class FacultyLoading extends Component
         $this->subjectTypeFilter = 'all';
     }
 
-    /**
-     * Get the selected faculty with their current load (Computed Property)
-     */
     #[\Livewire\Attributes\Computed]
     public function selectedFaculty()
     {
         return $this->selectedFacultyId
-            ? Faculty::with('subjects')->find($this->selectedFacultyId)
+            ? Faculty::with(['schedules.subject', 'schedules.room'])->find($this->selectedFacultyId)
             : null;
     }
 
-    /**
-     * Toggle between tabs
-     */
     public function toggleTab($tab)
     {
         $this->activeTab = $tab;
     }
 
-    /**
-     * Toggle schedule modal
-     */
     public function toggleScheduleModal()
     {
         $this->scheduleModalOpen = !$this->scheduleModalOpen;
     }
 
-    /**
-     * Get faculty summary data for Load Summary tab
-     */
+    private function assignedSchedules(): Collection
+    {
+        if (!$this->selectedFacultyId) {
+            return collect();
+        }
+
+        return Schedule::query()
+            ->where('faculty_id', $this->selectedFacultyId)
+            ->with(['subject', 'room'])
+            ->orderByRaw("FIELD(day, 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday')")
+            ->orderBy('start_time')
+            ->get();
+    }
+
+    private function assignedSubjects(): Collection
+    {
+        return $this->assignedSchedules()
+            ->pluck('subject')
+            ->filter()
+            ->unique('id')
+            ->values();
+    }
+
     public function getFacultySummary()
     {
         if (!$this->selectedFaculty) {
             return null;
         }
 
-        $faculty = $this->selectedFaculty;
-        $subjects = $faculty->subjects;
-
+        $subjects = $this->assignedSubjects();
         $totalUnits = $subjects->sum('units') ?? 0;
-        $maxUnits = $faculty->max_units ?? 21;
+        $maxUnits = $this->selectedFaculty->max_units ?? 21;
         $utilizationPercent = $maxUnits > 0 ? round(($totalUnits / $maxUnits) * 100) : 0;
 
         $majorSubjects = $subjects->where('type', 'Major');
         $minorSubjects = $subjects->where('type', 'Minor');
-
         $majorCount = $majorSubjects->count();
         $minorCount = $minorSubjects->count();
         $majorUnits = $majorSubjects->sum('units') ?? 0;
@@ -125,22 +126,18 @@ class FacultyLoading extends Component
         ];
     }
 
-    /**
-     * Assign a subject to the selected faculty
-     * Includes RBAC checks and capacity validation
-     */
-    public function assignSubject($subjectId)
+    public function assignSubject($scheduleId)
     {
         if (!$this->selectedFacultyId) {
             $this->toast('error', 'Please select a faculty member first.');
             return;
         }
 
-        $subject = Subject::find($subjectId);
-        $faculty = Faculty::withSum('subjects', 'units')->find($this->selectedFacultyId);
+        $schedule = Schedule::with(['subject', 'room'])->find($scheduleId);
+        $faculty = Faculty::find($this->selectedFacultyId);
 
-        if (!$subject) {
-            $this->toast('error', 'Subject not found.');
+        if (!$schedule || !$schedule->subject) {
+            $this->toast('error', 'Scheduled subject not found.');
             return;
         }
 
@@ -149,84 +146,120 @@ class FacultyLoading extends Component
             return;
         }
 
-        if ($subject->faculty_id !== null) {
-            $this->toast('warning', "{$subject->subject_code} is already assigned to a faculty member.");
+        if ($schedule->faculty_id !== null && (int) $schedule->faculty_id !== (int) $faculty->id) {
+            $this->toast('warning', "{$schedule->subject->subject_code} is already assigned to another faculty member.");
             return;
         }
 
-        // RBAC & Specialization Check
-        if (!$this->canAssignSubject(Auth::user(), $faculty, $subject)) {
+        if (!$this->canAssignSubject(Auth::user(), $faculty, $schedule->subject)) {
             $this->toast('error', 'Unauthorized assignment.');
             return;
         }
 
-        // Capacity Check
-        $currentUnits = (int) ($faculty->subjects_sum_units ?? 0);
-        $subjectUnits = (int) $subject->units;
+        $currentUnits = $this->assignedSubjects()->sum('units');
+        $subjectAlreadyAssigned = $this->assignedSubjects()->contains('id', $schedule->subject_id);
+        $newTotal = $currentUnits + ($subjectAlreadyAssigned ? 0 : (int) $schedule->subject->units);
         $maxUnits = (int) ($faculty->max_units ?? 21);
-        $newTotal = $currentUnits + $subjectUnits;
 
         if ($newTotal > $maxUnits) {
-            $this->toast('warning', "Faculty overload detected. {$subject->subject_code} would bring {$faculty->full_name} to {$newTotal}/{$maxUnits} units.");
+            $this->toast('warning', "Faculty overload detected. {$schedule->subject->subject_code} would bring {$faculty->full_name} to {$newTotal}/{$maxUnits} units.");
+            return;
+        }
+
+        $conflict = $this->facultyConflict($faculty, $schedule);
+        if ($conflict) {
+            $this->toast('error', $conflict);
             return;
         }
 
         try {
-            // Update faculty_id so it leaves the catalog
-            $subject->update(['faculty_id' => $this->selectedFacultyId]);
+            $schedule->update([
+                'faculty_id' => $faculty->id,
+                'status' => 'partial',
+            ]);
 
-            // Clear search and notify user
             $this->subjectSearch = '';
             unset($this->selectedFaculty);
-            $this->toast('success', "{$subject->subject_code} assigned to {$faculty->full_name} successfully.");
+            $this->toast('success', "{$schedule->subject->subject_code} assigned to {$faculty->full_name} successfully.");
         } catch (\Throwable $exception) {
             report($exception);
             $this->toast('error', 'Database update failure. Subject was not assigned.');
         }
     }
 
-    /**
-     * Remove a subject from faculty assignment
-     */
-    public function removeSubject($subjectId)
+    public function removeSubject($scheduleId)
     {
-        $subject = Subject::find($subjectId);
-        if (!$subject) {
-            $this->toast('error', 'Subject not found.');
+        $schedule = Schedule::with('subject')->find($scheduleId);
+        if (!$schedule || !$schedule->subject) {
+            $this->toast('error', 'Scheduled subject not found.');
             return;
         }
 
-        $oldCode = $subject->subject_code;
-        $oldEDP = $subject->edp_code;
-        $oldUnits = $subject->units;
+        if ($schedule->status === 'finalized') {
+            $this->toast('error', 'Finalized schedules cannot be changed in Faculty Loading.');
+            return;
+        }
+
+        $oldCode = $schedule->subject->subject_code;
 
         try {
-            $subject->update(['faculty_id' => null]);
-            unset($this->selectedFaculty);
+            $schedule->update([
+                'faculty_id' => null,
+                'status' => 'partial',
+            ]);
 
-            if ($this->selectedFaculty) {
-                // Refresh the selected faculty
-                $faculty = Faculty::with('subjects')->find($this->selectedFacultyId);
-                $remainingUnits = $faculty->subjects->sum('units') ?? 0;
-                $this->toast('success', "Subject {$oldCode} (EDP: {$oldEDP}, {$oldUnits}u) removed. Remaining load: {$remainingUnits}/{$faculty->max_units} units.");
-            } else {
-                $this->toast('success', "Subject {$oldCode} removed successfully.");
-            }
+            unset($this->selectedFaculty);
+            $this->toast('success', "Subject {$oldCode} faculty assignment removed.");
         } catch (\Throwable $exception) {
             report($exception);
             $this->toast('error', 'Database update failure. Subject was not removed.');
         }
     }
 
-    /**
-     * RBAC Permission Check for Subject Assignment
-     * 
-     * Rules:
-     * 1. Super Users (Admin/Registrar): Always allow
-     * 2. Minor Subjects: Allow any Dean/OIC (cross-department OK)
-     * 3. Major Subjects: Only allow if user's department matches subject's department
-     * 4. Faculty Specialization: Must match subject type or have 'Both'
-     */
+    public function submitFacultyLoading(): void
+    {
+        $user = Auth::user();
+        $query = Schedule::query()
+            ->assignable()
+            ->whereNotNull('faculty_id');
+
+        if (in_array($user->role, ['dean', 'oic']) && $user->department) {
+            $query->where('department', $user->department);
+        }
+
+        $updated = $query->update(['status' => 'faculty_assigned']);
+
+        $this->toast(
+            $updated > 0 ? 'success' : 'warning',
+            $updated > 0
+                ? "Submitted {$updated} assigned schedule(s) to Registrar/Admin for approval."
+                : 'No assigned schedules are ready to submit.'
+        );
+    }
+
+    private function facultyConflict(Faculty $faculty, Schedule $schedule): ?string
+    {
+        $conflict = Schedule::query()
+            ->where('faculty_id', $faculty->id)
+            ->whereKeyNot($schedule->id)
+            ->where('day', $schedule->day)
+            ->where(function (Builder $query) use ($schedule) {
+                $query->where('start_time', '<', Carbon::parse($schedule->end_time)->format('H:i:s'))
+                    ->where('end_time', '>', Carbon::parse($schedule->start_time)->format('H:i:s'));
+            })
+            ->with(['subject:id,subject_code', 'room:id,room_name'])
+            ->first();
+
+        if (!$conflict) {
+            return null;
+        }
+
+        $subjectCode = $conflict->subject?->subject_code ?? 'another subject';
+        $roomName = $conflict->room?->room_name ?? 'Unknown Room';
+
+        return "Professor {$faculty->full_name} is already teaching {$subjectCode} in Room {$roomName} during this time.";
+    }
+
     private function canAssignSubject($user, $faculty, $subject)
     {
         $specialization = $faculty->teaching_specialization ?? 'Both';
@@ -243,35 +276,22 @@ class FacultyLoading extends Component
             return true;
         }
 
-        if ($subject->type === 'Major' && $user->department === $subject->department) {
-            return true;
-        }
-
-        // Otherwise, deny
-        return false;
+        return $subject->type === 'Major' && $user->department === $subject->department;
     }
 
-    /**
-     * Get faculty query with filters applied
-     */
     private function getFacultyQuery()
     {
         $user = Auth::user();
         $query = Faculty::query()
             ->approved()
-            ->withCount('subjects')
-            ->withSum('subjects', 'units');
+            ->withCount('schedules');
 
-        // Role-based department filtering
         if (in_array($user->role, ['dean', 'oic'])) {
-            // Deans/OICs can only see their own department
             $query->where('department', $user->department);
         } elseif ($user->role === 'associate_dean') {
-            // Associate Deans can see all departments but only Minor specialists
             $query->whereIn('teaching_specialization', ['Minor', 'Both']);
         }
 
-        // Apply search filter
         if ($this->search) {
             $query->where(function ($q) {
                 $q->where('full_name', 'like', '%' . $this->search . '%')
@@ -279,12 +299,10 @@ class FacultyLoading extends Component
             });
         }
 
-        // Apply status filter
         if ($this->statusFilter !== 'all') {
             $query->where('employment_type', $this->statusFilter);
         }
 
-        // Apply department filter
         if ($this->departmentFilter !== 'all') {
             $query->where('department', $this->departmentFilter);
         }
@@ -292,44 +310,37 @@ class FacultyLoading extends Component
         return $query;
     }
 
-    /**
-     * Get available subjects based on faculty specialization and user RBAC
-     * 
-     * Filtering Logic:
-     * - If faculty type is 'Minor': Show all unassigned Minor subjects (any department)
-     * - If faculty type is 'Major': Show unassigned Major subjects from faculty's department
-     * - If faculty type is 'Both': Show all Minor subjects + Major subjects from faculty's department
-     */
     private function getAvailableSubjects()
     {
-        $user = Auth::user();
-        $query = Subject::query()->whereNull('faculty_id');
+        $query = Schedule::query()
+            ->with(['subject', 'room', 'faculty'])
+            ->where('status', 'partial')
+            ->whereNull('faculty_id')
+            ->whereHas('subject');
 
         if ($this->selectedFacultyId) {
             $faculty = Faculty::find($this->selectedFacultyId);
 
             if ($faculty) {
-                if ($faculty->teaching_specialization === 'Minor') {
-                    // All minor subjects, any department
-                    $query->where('type', 'Minor');
-                } elseif ($faculty->teaching_specialization === 'Major') {
-                    // Only major subjects within the faculty's department
-                    $query->where('type', 'Major')
-                          ->where('department', $faculty->department);
-                } else {
-                    // "Both" — all Minors + department's Majors
-                    $query->where(function ($sub) use ($faculty) {
-                        $sub->where('type', 'Minor')
-                            ->orWhere(function ($inner) use ($faculty) {
-                                $inner->where('type', 'Major')
-                                      ->where('department', $faculty->department);
-                            });
-                    });
-                }
+                $query->whereHas('subject', function (Builder $subjectQuery) use ($faculty) {
+                    if ($faculty->teaching_specialization === 'Minor') {
+                        $subjectQuery->where('type', 'Minor');
+                    } elseif ($faculty->teaching_specialization === 'Major') {
+                        $subjectQuery->where('type', 'Major')
+                            ->where('department', $faculty->department);
+                    } else {
+                        $subjectQuery->where(function ($sub) use ($faculty) {
+                            $sub->where('type', 'Minor')
+                                ->orWhere(function ($inner) use ($faculty) {
+                                    $inner->where('type', 'Major')
+                                        ->where('department', $faculty->department);
+                                });
+                        });
+                    }
+                });
             }
         }
 
-        // Advanced filters
         if ($this->subjectDepartmentFilter !== 'all') {
             $query->where('department', $this->subjectDepartmentFilter);
         }
@@ -337,92 +348,78 @@ class FacultyLoading extends Component
             $query->where('major', $this->subjectMajorFilter);
         }
         if ($this->subjectYearLevelFilter !== 'all') {
-            $query->where('year_level', (int)$this->subjectYearLevelFilter);
+            $query->where('year_level', (int) $this->subjectYearLevelFilter);
         }
         if ($this->subjectSectionFilter !== 'all') {
             $query->where('section', $this->subjectSectionFilter);
         }
         if ($this->subjectTypeFilter !== 'all') {
-            $query->where('type', $this->subjectTypeFilter);
+            $query->whereHas('subject', fn (Builder $q) => $q->where('type', $this->subjectTypeFilter));
         }
 
-        // 🔍 Maintain search for EDP/subject code
         if (strlen($this->subjectSearch) > 1) {
             $term = $this->subjectSearch;
-            $query->where(function ($q) use ($term) {
+            $query->whereHas('subject', function (Builder $q) use ($term) {
                 $q->where('subject_code', 'like', "%{$term}%")
+                  ->orWhere('description', 'like', "%{$term}%")
                   ->orWhere('edp_code', 'like', "%{$term}%");
             });
         }
 
-        return $query->orderBy('subject_code')->get();
+        return $query
+            ->orderBy('day')
+            ->orderBy('start_time')
+            ->get();
     }
 
-    /**
-     * Get available departments based on user role
-     */
     private function getAvailableDepartments()
     {
         $user = Auth::user();
 
         if (in_array($user->role, ['dean', 'oic'])) {
-            // Deans/OICs see only their department
             return [$user->department];
         }
 
-        // Admin, Registrar, Associate Dean see all
         return array_keys(self::DEPARTMENT_STRUCTURE);
     }
 
-    /**
-     * Get available majors from the department hierarchy
-     */
     private function getAvailableMajors()
     {
         $majors = [];
-        foreach (self::DEPARTMENT_STRUCTURE as $dept => $majorList) {
+        foreach (self::DEPARTMENT_STRUCTURE as $majorList) {
             $majors = array_merge($majors, $majorList);
         }
+
         return array_unique($majors);
     }
 
-    /**
-     * Get available year levels
-     */
     private function getAvailableYearLevels()
     {
         return [1, 2, 3, 4];
     }
 
-    /**
-     * Get available sections from current subjects
-     */
     private function getAvailableSections()
     {
-        return Subject::distinct('section')->pluck('section')->sort()->values()->toArray();
+        return Schedule::distinct('section')->pluck('section')->filter()->sort()->values()->toArray();
     }
 
-    /**
-     * Get available subject types based on user role and selected faculty
-     */
     private function getAvailableSubjectTypes()
     {
         $user = Auth::user();
         $faculty = $this->selectedFaculty;
 
         if ($faculty) {
-            // Show types based on selected faculty's specialization
             if ($faculty->teaching_specialization === 'Minor') {
                 return ['Minor'];
-            } elseif ($faculty->teaching_specialization === 'Major') {
-                return ['Major'];
-            } else {
-                // Both
-                return ['Major', 'Minor'];
             }
+
+            if ($faculty->teaching_specialization === 'Major') {
+                return ['Major'];
+            }
+
+            return ['Major', 'Minor'];
         }
 
-        // No faculty selected - show based on role
         if ($user->role === 'associate_dean') {
             return ['Minor'];
         }
@@ -431,32 +428,28 @@ class FacultyLoading extends Component
             return ['Major'];
         }
 
-        // Admin & Registrar see both
         return ['Major', 'Minor'];
     }
 
-    /**
-     * Render the component with all data
-     */
     public function render()
     {
         $user = Auth::user();
-
-        // Get faculty list
         $faculties = $this->getFacultyQuery()
+            ->with('schedules.subject')
             ->orderBy('full_name', 'asc')
-            ->get();
-
-        // Get available subjects
+            ->get()
+            ->each(function (Faculty $faculty) {
+                $faculty->assigned_units = $faculty->schedules
+                    ->pluck('subject')
+                    ->filter()
+                    ->unique('id')
+                    ->sum('units');
+            });
         $availableSubjects = $this->getAvailableSubjects();
-
-        // Get current faculty
         $currentFaculty = $this->selectedFaculty;
-
-        // Get faculty summary
+        $assignedSchedules = $this->assignedSchedules();
+        $assignedSubjects = $this->assignedSubjects();
         $facultySummary = $this->getFacultySummary();
-
-        // Get filter options
         $departments = $this->getAvailableDepartments();
         $majors = $this->getAvailableMajors();
         $yearLevels = $this->getAvailableYearLevels();
@@ -467,6 +460,8 @@ class FacultyLoading extends Component
         return view('livewire.faculty-loading', [
             'faculties' => $faculties,
             'availableSubjects' => $availableSubjects,
+            'assignedSchedules' => $assignedSchedules,
+            'assignedSubjects' => $assignedSubjects,
             'currentFaculty' => $currentFaculty,
             'facultySummary' => $facultySummary,
             'departments' => $departments,

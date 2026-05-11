@@ -37,30 +37,32 @@ class ScheduleConflictService
     }
 
     public function checkFacultyConflict(
-        Subject $subject,
+        Subject|int $subject,
         string $day,
         string $startTime,
         string $endTime,
         ?int $ignoreScheduleId = null
     ): array {
-        if (!$subject->faculty_id) {
+        $facultyId = $subject instanceof Subject ? $subject->faculty_id : $subject;
+
+        if (!$facultyId) {
             return $this->pass();
         }
 
-        $subject->loadMissing('faculty:id,full_name');
+        $faculty = $subject instanceof Subject
+            ? $subject->loadMissing('faculty:id,full_name')->faculty
+            : \App\Models\Faculty::select('id', 'full_name')->find($facultyId);
 
         $conflict = $this->baseScheduleQuery($day, $startTime, $endTime, $ignoreScheduleId)
-            ->whereHas('subject', function (Builder $query) use ($subject) {
-                $query->where('faculty_id', $subject->faculty_id);
-            })
-            ->with(['subject:id,subject_code,faculty_id', 'room:id,room_name'])
+            ->where('faculty_id', $facultyId)
+            ->with(['subject:id,subject_code', 'room:id,room_name'])
             ->first();
 
         if (!$conflict) {
             return $this->pass();
         }
 
-        $facultyName = $subject->faculty?->full_name ?? 'Faculty Member';
+        $facultyName = $faculty?->full_name ?? 'Faculty Member';
         $subjectCode = $conflict->subject?->subject_code ?? 'another subject';
         $roomName = $conflict->room?->room_name ?? 'Unknown Room';
 
