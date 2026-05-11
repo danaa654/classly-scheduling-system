@@ -4,6 +4,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Faculty extends Model
 {
@@ -45,9 +46,9 @@ class Faculty extends Model
     /**
      * A faculty member can be assigned to many subjects (schedules).
      */
-    public function subjects()
+    public function subjects(): HasMany
     {
-        return $this->hasMany(Subject::class); 
+        return $this->hasMany(Subject::class, 'faculty_id');
     }
 
     /**

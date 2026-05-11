@@ -15,7 +15,7 @@ return new class extends Migration
                 $table->foreignId('faculty_id')
                     ->nullable()
                     ->after('meetings_per_week')
-                    ->constrained('users')
+                    ->constrained('faculties')
                     ->onDelete('set null');
             });
         }
@@ -42,7 +42,7 @@ return new class extends Migration
     {
         Schema::table('subjects', function (Blueprint $table) {
             if (Schema::hasColumn('subjects', 'faculty_id')) {
-                $table->dropForeignIdFor('users', 'faculty_id');
+                $table->dropForeign(['faculty_id']);
             }
         });
     }

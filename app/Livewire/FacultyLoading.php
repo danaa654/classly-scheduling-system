@@ -121,68 +121,57 @@ class FacultyLoading extends Component
     }
 
     /**
-     * Assign a subject to the active faculty
-     * Enforces RBAC and subject type restrictions
+     * Assign a subject to the selected faculty
+     * Includes RBAC checks and capacity validation
      */
     public function assignSubject($subjectId)
     {
         if (!$this->selectedFacultyId) {
-            session()->flash('error', 'No faculty selected.');
+            session()->flash('error', 'Please select a faculty member first.');
             return;
         }
 
         $subject = Subject::find($subjectId);
-        if (!$subject) {
-            session()->flash('error', 'Subject not found.');
+        $faculty = Faculty::withSum('subjects', 'units')->find($this->selectedFacultyId);
+
+        if (!$subject || !$faculty) {
+            session()->flash('error', 'Data error: Could not find subject or faculty.');
             return;
         }
 
-        // Prevent double assignment
-        if ($subject->faculty_id) {
-            session()->flash('error', 'Subject already assigned.');
+        if ($subject->faculty_id !== null) {
+            session()->flash('warning', "{$subject->subject_code} is already assigned to a faculty member.");
             return;
         }
 
-        // Get current user and selected faculty
-        $user = Auth::user();
-        $faculty = Faculty::find($this->selectedFacultyId);
-
-        if (!$faculty) {
-            session()->flash('error', 'Faculty not found.');
+        // RBAC & Specialization Check
+        if (!$this->canAssignSubject(Auth::user(), $faculty, $subject)) {
+            session()->flash('error', 'You cannot assign this type of subject to this faculty.');
             return;
         }
 
-        // RBAC Enforcement: Check if user can assign this subject type to this faculty
-        if (!$this->canAssignSubject($user, $faculty, $subject)) {
-            session()->flash('error', 'You do not have permission to assign this subject to this faculty.');
+        // Capacity Check
+        $currentUnits = (int) ($faculty->subjects_sum_units ?? 0);
+        $subjectUnits = (int) $subject->units;
+        $maxUnits = (int) ($faculty->max_units ?? 21);
+        $newTotal = $currentUnits + $subjectUnits;
+
+        if ($newTotal > $maxUnits) {
+            session()->flash('warning', "Overload prevented: assigning {$subject->subject_code} would bring {$faculty->full_name} to {$newTotal}/{$maxUnits} units.");
             return;
         }
 
-        // Check if faculty would exceed max units
-        $currentUnits = $faculty->subjects->sum('units') ?? 0;
-        $newTotal = $currentUnits + $subject->units;
-
-        if ($newTotal > $faculty->max_units) {
-            session()->flash('warning', "⚠️ Conflict: Assignment of {$subject->units} units would exceed {$faculty->full_name}'s maximum ({$faculty->max_units} units). Current load: {$currentUnits} units. Remaining capacity: " . ($faculty->max_units - $currentUnits) . " units.");
-            return;
-        }
-
-        // Assignment successful - update subject
+        // Update faculty_id so it leaves the catalog
         $subject->update(['faculty_id' => $this->selectedFacultyId]);
         
-        // Refresh the selected faculty to update total units
-        $faculty = Faculty::with('subjects')->find($this->selectedFacultyId);
-        $finalTotal = $faculty->subjects->sum('units') ?? 0;
-        
+        // Clear search and notify user
         $this->subjectSearch = '';
-        $this->resetFilters();
-        
-        // Flash success with details
-        session()->flash('success', "✓ Subject {$subject->subject_code} (EDP: {$subject->edp_code}) assigned to {$faculty->full_name}. Total load: {$finalTotal}/{$faculty->max_units} units.");
+        unset($this->selectedFaculty);
+        session()->flash('success', "Assigned {$subject->subject_code} to {$faculty->full_name} successfully.");
     }
 
     /**
-     * Remove a subject from the faculty's load
+     * Remove a subject from faculty assignment
      */
     public function removeSubject($subjectId)
     {
@@ -193,56 +182,52 @@ class FacultyLoading extends Component
             $oldUnits = $subject->units;
             
             $subject->update(['faculty_id' => null]);
+            unset($this->selectedFaculty);
             
             if ($this->selectedFaculty) {
                 // Refresh the selected faculty
                 $faculty = Faculty::with('subjects')->find($this->selectedFacultyId);
                 $remainingUnits = $faculty->subjects->sum('units') ?? 0;
-                session()->flash('success', "✓ Subject {$oldCode} (EDP: {$oldEDP}, {$oldUnits}u) removed. Remaining load: {$remainingUnits}/{$faculty->max_units} units.");
+                session()->flash('success', "Subject {$oldCode} (EDP: {$oldEDP}, {$oldUnits}u) removed. Remaining load: {$remainingUnits}/{$faculty->max_units} units.");
             }
         }
     }
 
     /**
-     * Check if the current user can assign a subject to a faculty member
-     * Implements RBAC logic based on role and subject type
+     * RBAC Permission Check for Subject Assignment
+     * 
+     * Rules:
+     * 1. Super Users (Admin/Registrar): Always allow
+     * 2. Minor Subjects: Allow any Dean/OIC (cross-department OK)
+     * 3. Major Subjects: Only allow if user's department matches subject's department
+     * 4. Faculty Specialization: Must match subject type or have 'Both'
      */
-    private function canAssignSubject($user, Faculty $faculty, Subject $subject): bool
+    private function canAssignSubject($user, $faculty, $subject)
     {
-        // Admin & Registrar: full access
+        $specialization = $faculty->teaching_specialization ?? 'Both';
+
+        if ($specialization !== 'Both' && $specialization !== $subject->type) {
+            return false;
+        }
+
         if (in_array($user->role, ['admin', 'registrar'])) {
             return true;
         }
 
-        // Associate Dean: can only manage Minor subjects
-        if ($user->role === 'associate_dean') {
-            // Check if faculty can teach Minor
-            if (!in_array($faculty->teaching_specialization, ['Minor', 'Both'])) {
-                return false;
-            }
-            // Check if subject is Minor
-            return $subject->type === 'Minor';
+        if ($subject->type === 'Minor') {
+            return true;
         }
 
-        // Dean & OIC: restricted to their department and Major subjects
-        if (in_array($user->role, ['dean', 'oic'])) {
-            // Check department restriction
-            if ($faculty->department !== $user->department) {
-                return false;
-            }
-            // Check if faculty can teach Major
-            if (!in_array($faculty->teaching_specialization, ['Major', 'Both'])) {
-                return false;
-            }
-            // Check if subject is Major
-            return $subject->type === 'Major';
+        if ($subject->type === 'Major' && $user->department === $subject->department) {
+            return true;
         }
 
+        // Otherwise, deny
         return false;
     }
 
     /**
-     * Get filtered faculty list based on user role
+     * Get faculty query with filters applied
      */
     private function getFacultyQuery()
     {
@@ -283,110 +268,73 @@ class FacultyLoading extends Component
     }
 
     /**
-     * Get available subjects based on:
-     * 1. User role permissions
-     * 2. Selected faculty's teaching specialization (CROSS-DEPARTMENT LOGIC)
-     * 3. Advanced filters (Department, Major, Year Level, Section, Type)
+     * Get available subjects based on faculty specialization and user RBAC
      * 
-     * INTELLIGENT CROSS-DEPARTMENT LOGIC:
-     * - Minor specialists can see Minor subjects from ANY department
-     * - Major specialists see only Major subjects from their home department
-     * - Both specialists see all Minor + Major from home department
+     * Filtering Logic:
+     * - If faculty type is 'Minor': Show all unassigned Minor subjects (any department)
+     * - If faculty type is 'Major': Show unassigned Major subjects from faculty's department
+     * - If faculty type is 'Both': Show all Minor subjects + Major subjects from faculty's department
      */
     private function getAvailableSubjects()
     {
         $user = Auth::user();
         $query = Subject::query()->whereNull('faculty_id');
 
-        // ============================================================
-        // CROSS-DEPARTMENT ASSIGNMENT LOGIC
-        // ============================================================
-        
         if ($this->selectedFacultyId) {
-            // Faculty is selected - filter based on their qualifications
             $faculty = Faculty::find($this->selectedFacultyId);
-            
+
             if ($faculty) {
                 if ($faculty->teaching_specialization === 'Minor') {
-                    // Minor specialist: Can teach ANY Minor subjects regardless of department
+                    // All minor subjects, any department
                     $query->where('type', 'Minor');
                 } elseif ($faculty->teaching_specialization === 'Major') {
-                    // Major specialist: Only Major subjects from their home department
+                    // Only major subjects within the faculty's department
                     $query->where('type', 'Major')
                           ->where('department', $faculty->department);
-                } elseif ($faculty->teaching_specialization === 'Both') {
-                    // Can teach both: All Minor subjects + Major from their department
-                    $query->where(function ($q) use ($faculty) {
-                        $q->where('type', 'Minor')
-                          ->orWhere(function ($subQ) use ($faculty) {
-                              $subQ->where('type', 'Major')
-                                   ->where('department', $faculty->department);
-                          });
+                } else {
+                    // "Both" — all Minors + department's Majors
+                    $query->where(function ($sub) use ($faculty) {
+                        $sub->where('type', 'Minor')
+                            ->orWhere(function ($inner) use ($faculty) {
+                                $inner->where('type', 'Major')
+                                      ->where('department', $faculty->department);
+                            });
                     });
                 }
             }
-        } else {
-            // No faculty selected - show based on user role
-            if ($user->role === 'associate_dean') {
-                // Associate Deans can only see Minor subjects
-                $query->where('type', 'Minor');
-            } elseif (in_array($user->role, ['dean', 'oic'])) {
-                // Deans/OICs can only see Major subjects in their department
-                $query->where('type', 'Major')
-                      ->where('department', $user->department);
-            }
-            // Admin/Registrar see all (unless filtered below)
         }
 
-        // ============================================================
-        // ADVANCED FILTERING (Department, Major, Year Level, Section, Type)
-        // ============================================================
-        
-        // Department filter (only for admin/registrar when no faculty selected)
-        if (!$this->selectedFacultyId && ($user->role === 'admin' || $user->role === 'registrar')) {
-            if ($this->subjectDepartmentFilter !== 'all') {
-                $query->where('department', $this->subjectDepartmentFilter);
-            }
+        // Advanced filters
+        if ($this->subjectDepartmentFilter !== 'all') {
+            $query->where('department', $this->subjectDepartmentFilter);
         }
-
-        // Major filter (only for admin/registrar when no faculty selected)
-        if (!$this->selectedFacultyId && ($user->role === 'admin' || $user->role === 'registrar')) {
-            if ($this->subjectMajorFilter !== 'all') {
-                $query->where('major', $this->subjectMajorFilter);
-            }
+        if ($this->subjectMajorFilter !== 'all') {
+            $query->where('major', $this->subjectMajorFilter);
         }
-
-        // Year Level filter (applies to all)
         if ($this->subjectYearLevelFilter !== 'all') {
             $query->where('year_level', (int)$this->subjectYearLevelFilter);
         }
-
-        // Section filter (applies to all)
         if ($this->subjectSectionFilter !== 'all') {
             $query->where('section', $this->subjectSectionFilter);
         }
-
-        // Subject Type filter (only for admin/registrar when no faculty selected)
-        if (!$this->selectedFacultyId && ($user->role === 'admin' || $user->role === 'registrar')) {
-            if ($this->subjectTypeFilter !== 'all') {
-                $query->where('type', $this->subjectTypeFilter);
-            }
+        if ($this->subjectTypeFilter !== 'all') {
+            $query->where('type', $this->subjectTypeFilter);
         }
 
-        // Apply search filters (EDP Code, Subject Code, Description)
+        // 🔍 Maintain search for EDP/subject code
         if (strlen($this->subjectSearch) > 1) {
-            $query->where(function ($q) {
-                $q->where('subject_code', 'like', '%' . $this->subjectSearch . '%')
-                  ->orWhere('description', 'like', '%' . $this->subjectSearch . '%')
-                  ->orWhere('edp_code', 'like', '%' . $this->subjectSearch . '%');
+            $term = $this->subjectSearch;
+            $query->where(function ($q) use ($term) {
+                $q->where('subject_code', 'like', "%{$term}%")
+                  ->orWhere('edp_code', 'like', "%{$term}%");
             });
         }
 
-        return $query->orderBy('subject_code', 'asc')->get();
+        return $query->orderBy('subject_code')->get();
     }
 
     /**
-     * Get available departments for dropdown filters
+     * Get available departments based on user role
      */
     private function getAvailableDepartments()
     {
@@ -462,6 +410,9 @@ class FacultyLoading extends Component
         return ['Major', 'Minor'];
     }
 
+    /**
+     * Render the component with all data
+     */
     public function render()
     {
         $user = Auth::user();

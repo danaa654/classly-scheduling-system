@@ -522,9 +522,9 @@
                         </div>
 
                         <button wire:click="assignSubject({{ $subject->id }})" 
-                            class="w-full px-2 py-1.5 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white rounded text-[9px] font-black uppercase tracking-widest transition-all transform active:scale-95">
-                            + Assign
-                        </button>
+                            class="w-full py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black rounded-lg uppercase transition-all shadow-md active:scale-95">
+                            Assign to Faculty +
+                        </button>   
                     </div>
                 @empty
                     <div class="h-48 flex flex-col items-center justify-center opacity-40 text-center p-4">
@@ -560,22 +560,25 @@
     </aside>
 </div>
 
-<!-- Session Alerts -->
-@if(session('success'))
-    <div class="fixed top-4 right-4 px-4 py-3 bg-green-100 dark:bg-green-950 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-400 rounded-lg text-sm font-bold uppercase tracking-widest animate-pulse z-50 max-w-md">
-        {{ session('success') }}
+<!-- Session Alerts - Fixed position toasts (always visible) -->
+@if (session()->has('success'))
+    <div class="fixed top-5 right-5 z-[9999] flex items-center gap-3 px-5 py-4 bg-green-600 text-white rounded-xl shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300">
+        <span class="text-xl font-bold flex-shrink-0">✓</span>
+        <p class="text-sm font-bold tracking-wide">{{ session('success') }}</p>
     </div>
 @endif
 
-@if(session('error'))
-    <div class="fixed top-4 right-4 px-4 py-3 bg-red-100 dark:bg-red-950 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 rounded-lg text-sm font-bold uppercase tracking-widest animate-pulse z-50 max-w-md">
-        {{ session('error') }}
+@if (session()->has('error'))
+    <div class="fixed top-5 right-5 z-[9999] flex items-center gap-3 px-5 py-4 bg-red-600 text-white rounded-xl shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300">
+        <span class="text-xl font-bold flex-shrink-0">⚠️</span>
+        <p class="text-sm font-bold tracking-wide">{{ session('error') }}</p>
     </div>
 @endif
 
-@if(session('warning'))
-    <div class="fixed top-4 right-4 px-4 py-3 bg-orange-100 dark:bg-orange-950 border border-orange-200 dark:border-orange-800 text-orange-700 dark:text-orange-400 rounded-lg text-sm font-bold uppercase tracking-widest animate-pulse z-50 max-w-md">
-        {{ session('warning') }}
+@if (session()->has('warning'))
+    <div class="fixed top-5 right-5 z-[9999] flex items-center gap-3 px-5 py-4 bg-amber-500 text-white rounded-xl shadow-2xl animate-in fade-in slide-in-from-top-4 duration-300">
+        <span class="text-xl font-bold flex-shrink-0">!</span>
+        <p class="text-sm font-bold tracking-wide">{{ session('warning') }}</p>
     </div>
 @endif
 

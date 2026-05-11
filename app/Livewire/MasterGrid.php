@@ -364,7 +364,7 @@ class MasterGrid extends Component
             ->first();
 
             if ($facultyConflict) {
-                $facultyName = $subject->faculty->name ?? 'Faculty Member';
+                $facultyName = $subject->faculty->full_name ?? 'Faculty Member';
                 return [
                     'type' => 'FACULTY_CONFLICT',
                     'title' => '👨‍🏫 Faculty Member Already Teaching',
