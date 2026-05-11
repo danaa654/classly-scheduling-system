@@ -8,6 +8,7 @@ use App\Models\Subject;
 use App\Models\Room;
 use App\Models\Schedule;
 use App\Models\Setting;
+use App\Services\ScheduleConflictService;
 use Carbon\Carbon;
 use Livewire\WithPagination;
 
@@ -272,13 +273,10 @@ class MasterGrid extends Component
 
     private function hasRoomConflict($roomId, $day, $startTime, $endTime): bool
     {
-        return Schedule::where('room_id', $roomId)
-            ->where('day', $day)
-            ->where(function ($query) use ($startTime, $endTime) {
-                $query->where('start_time', '<', $endTime)
-                      ->where('end_time', '>', $startTime);
-            })
-            ->exists();
+        $result = app(ScheduleConflictService::class)
+            ->checkRoomConflict((int) $roomId, $day, $startTime, $endTime);
+
+        return ($result['status'] ?? true) === false;
     }
 
     private function hasFacultyConflict($subjectId, $day, $startTime, $endTime): bool
@@ -288,15 +286,10 @@ class MasterGrid extends Component
             return false;
         }
 
-        return Schedule::where('day', $day)
-            ->whereHas('subject', function ($query) use ($subject) {
-                $query->where('faculty_id', $subject->faculty_id);
-            })
-            ->where(function ($query) use ($startTime, $endTime) {
-                $query->where('start_time', '<', $endTime)
-                      ->where('end_time', '>', $startTime);
-            })
-            ->exists();
+        $result = app(ScheduleConflictService::class)
+            ->checkFacultyConflict($subject, $day, $startTime, $endTime);
+
+        return ($result['status'] ?? true) === false;
     }
 
     /**
@@ -309,6 +302,14 @@ class MasterGrid extends Component
         if (!$subject) {
             return null;
         }
+
+        $room = Room::find($roomId);
+
+        if (!$room) {
+            return null;
+        }
+
+        return $this->validateScheduleWithService($subject, $room, $day, $startTime, $endTime);
 
         // ===== 1. SECTION CONFLICT CHECK =====
         // Check if this specific Section (within the same Department, Major, Year, and Section) 
@@ -423,6 +424,58 @@ class MasterGrid extends Component
         return null;
     }
     // ===== END CONFLICT VALIDATION =====
+
+    private function validateScheduleWithService(
+        Subject $subject,
+        Room $room,
+        string $day,
+        string $startTime,
+        string $endTime,
+        ?int $ignoreScheduleId = null
+    ): ?array {
+        $service = app(ScheduleConflictService::class);
+
+        $checks = [
+            $service->checkRoomConflict($room->id, $day, $startTime, $endTime, $ignoreScheduleId),
+            $service->checkFacultyConflict($subject, $day, $startTime, $endTime, $ignoreScheduleId),
+            $service->checkSectionConflict($subject, $day, $startTime, $endTime, $ignoreScheduleId),
+        ];
+
+        foreach ($checks as $check) {
+            if (($check['status'] ?? true) === false) {
+                return $this->formatConflictResponse($check, $subject, $day, $startTime, $endTime);
+            }
+        }
+
+        return null;
+    }
+
+    private function formatConflictResponse(array $conflict, Subject $subject, string $day, string $startTime, string $endTime): array
+    {
+        $details = array_merge($conflict['details'] ?? [], [
+            'conflict_type' => $conflict['conflict_type'] ?? 'SCHEDULE_CONFLICT',
+            'requested_subject' => $subject->subject_code,
+            'requested_start' => Carbon::parse($startTime)->format(self::TIME_FORMAT_12H),
+            'requested_end' => Carbon::parse($endTime)->format(self::TIME_FORMAT_12H),
+            'requested_day' => $day,
+        ]);
+
+        return [
+            'status' => false,
+            'type' => $conflict['conflict_type'] ?? 'SCHEDULE_CONFLICT',
+            'toast_type' => $conflict['type'] ?? 'error',
+            'title' => $conflict['title'] ?? 'Schedule Conflict',
+            'message' => $conflict['message'] ?? 'This schedule conflicts with an existing schedule.',
+            'details' => $details,
+        ];
+    }
+
+    private function checkCurriculumWarning(Subject $subject, Room $room): ?array
+    {
+        $warning = app(ScheduleConflictService::class)->checkCurriculumConflict($subject, $room);
+
+        return ($warning['type'] ?? null) === 'warning' ? $warning : null;
+    }
 
     public function generateDisplaySlots()
     {
@@ -583,15 +636,15 @@ class MasterGrid extends Component
             return;
         }
 
-        $isLectureRoom = strtoupper($this->selectedRoomType) === 'LECTURE';
-        $isLabSubject = in_array(strtoupper($subject->type), ['LABORATORY', 'LAB']);
+        $room = Room::find($this->selectedRoomId);
 
-        if ($isLectureRoom && $isLabSubject) {
+        if (!$room) {
             $this->dispatch('toast', [
-                'type' => 'warning',
-                'message' => '🔬 Compatibility Warning',
-                'detail' => 'You are placing a Lab subject in a Lecture room.'
+                'type' => 'error',
+                'message' => 'Room Not Found',
+                'detail' => 'The selected room could not be found.'
             ]);
+            return;
         }
 
         $remaining = $this->getRemainingMeetings($subject);
@@ -640,14 +693,26 @@ class MasterGrid extends Component
         }
 
         // ===== COMPREHENSIVE CONFLICT VALIDATION =====
-        $conflictData = $this->validateSchedule($subjectId, $day, $startTime, $endTime, $this->selectedRoomId);
+        $conflictData = $this->validateScheduleWithService($subject, $room, $day, $startTime, $endTime);
 
         if ($conflictData) {
-            // Dispatch the conflict modal event with proper Livewire v3 syntax
+            $this->dispatch('toast', [
+                'type' => $conflictData['toast_type'] ?? 'error',
+                'message' => $conflictData['message']
+            ]);
+
             $this->dispatch('show-conflict-modal', conflictData: $conflictData);
             return;
         }
         // ===== END CONFLICT VALIDATION =====
+
+        $curriculumWarning = $this->checkCurriculumWarning($subject, $room);
+        if ($curriculumWarning) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => $curriculumWarning['message']
+            ]);
+        }
 
         try {
             Schedule::create([
@@ -905,7 +970,7 @@ class MasterGrid extends Component
                         'id', 'subject_code', 'description', 'edp_code', 
                         'duration_hours', 'department', 'type', 'major', 'year_level', 'faculty_id'
                     );
-                }])
+                }, 'subject.faculty:id,full_name'])
                 ->get()
             : collect();
 

@@ -93,8 +93,8 @@ class Schedule extends Model
      */
     public function scopeWithinTimeRange($query, $startTime, $endTime)
     {
-        return $query->whereBetween('start_time', [$startTime, $endTime])
-                     ->orWhereBetween('end_time', [$startTime, $endTime]);
+        return $query->where('start_time', '<', $endTime)
+                     ->where('end_time', '>', $startTime);
     }
 
     /**
@@ -301,12 +301,8 @@ class Schedule extends Model
         $query = static::where('room_id', $roomId)
                       ->where('day', $day)
                       ->where(function ($q) use ($startTime, $endTime) {
-                          $q->whereBetween('start_time', [$startTime, $endTime])
-                            ->orWhereBetween('end_time', [$startTime, $endTime])
-                            ->orWhere(function ($subQ) use ($startTime, $endTime) {
-                                $subQ->where('start_time', '<=', $startTime)
-                                     ->where('end_time', '>=', $endTime);
-                            });
+                          $q->where('start_time', '<', $endTime)
+                            ->where('end_time', '>', $startTime);
                       });
 
         if ($excludeScheduleId) {
@@ -325,12 +321,8 @@ class Schedule extends Model
                     ->where('day', $this->day)
                     ->where('id', '!=', $this->id)
                     ->where(function ($q) {
-                        $q->whereBetween('start_time', [$this->start_time, $this->end_time])
-                          ->orWhereBetween('end_time', [$this->start_time, $this->end_time])
-                          ->orWhere(function ($subQ) {
-                              $subQ->where('start_time', '<=', $this->start_time)
-                                   ->where('end_time', '>=', $this->end_time);
-                          });
+                        $q->where('start_time', '<', $this->end_time)
+                          ->where('end_time', '>', $this->start_time);
                     })
                     ->get();
     }

@@ -181,12 +181,8 @@ class Room extends Model
         return $this->schedules()
                     ->where('day', $day)
                     ->where(function ($query) use ($startTime, $endTime) {
-                        $query->whereBetween('start_time', [$startTime, $endTime])
-                              ->orWhereBetween('end_time', [$startTime, $endTime])
-                              ->orWhere(function ($q) use ($startTime, $endTime) {
-                                  $q->where('start_time', '<=', $startTime)
-                                    ->where('end_time', '>=', $endTime);
-                              });
+                        $query->where('start_time', '<', $endTime)
+                              ->where('end_time', '>', $startTime);
                     })
                     ->exists();
     }

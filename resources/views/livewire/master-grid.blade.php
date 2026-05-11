@@ -13,7 +13,7 @@
      @room-selected.window="roomsOpen = false"
      @show-conflict-modal.window="
         console.log('🔴 CONFLICT MODAL EVENT RECEIVED:', \$event.detail);
-        conflictData = \$event.detail;
+        conflictData = \$event.detail.conflictData || \$event.detail[0] || \$event.detail;
         showConflictModal = true;
         console.log('✅ CONFLICT MODAL STATE UPDATED:', conflictData);
      ">

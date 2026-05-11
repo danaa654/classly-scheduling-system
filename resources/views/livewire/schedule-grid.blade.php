@@ -170,22 +170,30 @@
                         // 6. Color Mapping based on Department
                         $colorMap = [
                             'CCS'  => ['light' => 'bg-yellow-400/85 text-yellow-950', 'dark' => 'dark:bg-yellow-600/80 dark:text-yellow-50', 'border' => 'border-l-yellow-600'],
+                            'IT'   => ['light' => 'bg-yellow-400/85 text-yellow-950', 'dark' => 'dark:bg-yellow-600/80 dark:text-yellow-50', 'border' => 'border-l-yellow-600'],
+                            'ACT'  => ['light' => 'bg-yellow-400/85 text-yellow-950', 'dark' => 'dark:bg-yellow-600/80 dark:text-yellow-50', 'border' => 'border-l-yellow-600'],
                             'CTE'  => ['light' => 'bg-blue-400/85 text-blue-950', 'dark' => 'dark:bg-blue-600/80 dark:text-blue-50', 'border' => 'border-l-blue-600'],
+                            'ED'   => ['light' => 'bg-blue-400/85 text-blue-950', 'dark' => 'dark:bg-blue-600/80 dark:text-blue-50', 'border' => 'border-l-blue-600'],
                             'COC'  => ['light' => 'bg-purple-400/85 text-purple-950', 'dark' => 'dark:bg-purple-600/80 dark:text-purple-50', 'border' => 'border-l-purple-600'],
+                            'FB'   => ['light' => 'bg-purple-400/85 text-purple-950', 'dark' => 'dark:bg-purple-600/80 dark:text-purple-50', 'border' => 'border-l-purple-600'],
+                            'LD'   => ['light' => 'bg-purple-400/85 text-purple-950', 'dark' => 'dark:bg-purple-600/80 dark:text-purple-50', 'border' => 'border-l-purple-600'],
+                            'QD'   => ['light' => 'bg-purple-400/85 text-purple-950', 'dark' => 'dark:bg-purple-600/80 dark:text-purple-50', 'border' => 'border-l-purple-600'],
                             'SHTM' => ['light' => 'bg-orange-400/85 text-orange-950', 'dark' => 'dark:bg-orange-600/80 dark:text-orange-50', 'border' => 'border-l-orange-600'],
+                            'HM'   => ['light' => 'bg-orange-400/85 text-orange-950', 'dark' => 'dark:bg-orange-600/80 dark:text-orange-50', 'border' => 'border-l-orange-600'],
+                            'TM'   => ['light' => 'bg-orange-400/85 text-orange-950', 'dark' => 'dark:bg-orange-600/80 dark:text-orange-50', 'border' => 'border-l-orange-600'],
                         ];
                         
                         $colors = $colorMap[$subject->department] ?? [
                             'light' => 'bg-slate-400/85 text-slate-950', 'dark' => 'dark:bg-slate-600/80 dark:text-slate-50', 'border' => 'border-l-slate-600'
                         ];
 
-                        $instructor = $subject->faculty?->name ?? 'N/A';
+                        $instructor = $subject->faculty?->full_name ?? 'N/A';
                         $startTimeDisplay = $startTime->format('g:i A');
                         $endTimeDisplay = $endTime->format('g:i A');
                     @endphp
 
                     <div 
-                        class="absolute pointer-events-auto z-20 rounded-r-lg border-2 border-r-slate-400 border-t-slate-300 border-b-slate-300 shadow-lg backdrop-blur-sm transition-all hover:shadow-2xl hover:z-50 group/card overflow-hidden 
+                        class="absolute pointer-events-auto z-20 rounded-r-lg border-2 border-r-slate-400 border-t-slate-300 border-b-slate-300 shadow-lg backdrop-blur-sm transition-all hover:shadow-2xl hover:z-50 group/card overflow-hidden ring-1 ring-black/10 dark:ring-white/10
                                {{ $colors['light'] }} {{ $colors['dark'] }} {{ $colors['border'] }} border-l-4"
                         style="
                             /* Vertical: Aligns with the 45px rows */
@@ -215,19 +223,19 @@
                         @mouseleave="hideSchedulePopover()"
                     >
                         {{-- SCHEDULE CARD CONTENT --}}
-                        <div class="flex flex-col items-center justify-center w-full h-full p-1 space-y-0.5 pointer-events-none overflow-hidden">
+                        <div class="flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden bg-white/20 px-1.5 py-1 text-center leading-tight pointer-events-none dark:bg-black/15">
                             {{-- EDP CODE (Top) --}}
-                            <div class="text-[9px] sm:text-[10px] font-black uppercase leading-tight line-clamp-1 text-center w-full">
+                            <div class="w-full truncate text-[9px] font-black uppercase tracking-tight text-current drop-shadow-sm sm:text-[10px]">
                                 {{ $subject->edp_code ?? 'N/A' }}
                             </div>
                             
                             {{-- SUBJECT CODE (Bold Center) --}}
-                            <div class="text-[10px] sm:text-[11px] font-black uppercase leading-tight line-clamp-2 text-center w-full">
+                            <div class="w-full truncate text-[10px] font-black uppercase tracking-tight text-current drop-shadow-sm sm:text-[11px]">
                                 {{ $subject->subject_code }}
                             </div>
                             
                             {{-- TIME (Bottom) --}}
-                            <div class="text-[8px] sm:text-[9px] font-semibold leading-tight opacity-90 text-center w-full line-clamp-1">
+                            <div class="w-full truncate text-[8px] font-bold opacity-95 drop-shadow-sm sm:text-[9px]">
                                 {{ $startTimeDisplay }} - {{ $endTimeDisplay }}
                             </div>
                         </div>
