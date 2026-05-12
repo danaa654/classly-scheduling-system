@@ -29,6 +29,14 @@ return new class extends Migration
             if (!Schema::hasColumn('schedules', 'year_level')) {
                 $table->unsignedTinyInteger('year_level')->nullable()->after('major')->index();
             }
+
+            if (!Schema::hasColumn('schedules', 'duration_hours')) {
+                $table->decimal('duration_hours', 4, 2)->nullable()->after('end_time');
+            }
+
+            if (!Schema::hasColumn('schedules', 'meetings_per_week')) {
+                $table->unsignedTinyInteger('meetings_per_week')->nullable()->after('duration_hours');
+            }
         });
 
         if (Schema::hasColumn('schedules', 'status')) {
@@ -45,6 +53,16 @@ return new class extends Migration
                 'schedules.department' => DB::raw('subjects.department'),
                 'schedules.major' => DB::raw('subjects.major'),
                 'schedules.year_level' => DB::raw('subjects.year_level'),
+                'schedules.duration_hours' => DB::raw('subjects.duration_hours'),
+                'schedules.meetings_per_week' => DB::raw('subjects.meetings_per_week'),
+            ]);
+
+        DB::table('schedules')
+            ->join('subjects', 'subjects.id', '=', 'schedules.subject_id')
+            ->whereNull('schedules.duration_hours')
+            ->update([
+                'schedules.duration_hours' => DB::raw('subjects.duration_hours'),
+                'schedules.meetings_per_week' => DB::raw('subjects.meetings_per_week'),
             ]);
 
         if (Schema::hasColumn('subjects', 'faculty_id') && Schema::hasColumn('schedules', 'faculty_id')) {
@@ -73,6 +91,14 @@ return new class extends Migration
 
             if (Schema::hasColumn('schedules', 'department')) {
                 $table->dropColumn('department');
+            }
+
+            if (Schema::hasColumn('schedules', 'meetings_per_week')) {
+                $table->dropColumn('meetings_per_week');
+            }
+
+            if (Schema::hasColumn('schedules', 'duration_hours')) {
+                $table->dropColumn('duration_hours');
             }
         });
     }

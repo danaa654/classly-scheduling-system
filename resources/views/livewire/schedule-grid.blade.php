@@ -226,19 +226,28 @@
                     >
                         {{-- SCHEDULE CARD CONTENT --}}
                         <div class="flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden bg-white/25 px-2 py-1.5 text-center leading-tight pointer-events-none dark:bg-black/15">
-                            {{-- EDP CODE (Top) --}}
-                            <div class="w-full truncate text-[8px] font-black uppercase text-current opacity-80 sm:text-[9px]">
-                                {{ $subject->edp_code ?? 'N/A' }}
+                            <div class="w-full truncate text-[7px] font-black uppercase text-current opacity-80 sm:text-[8px]">
+                                {{ $subject->type ?? 'N/A' }} · S{{ $schedule->section ?? 'N/A' }}
                             </div>
                             
-                            {{-- SUBJECT CODE (Bold Center) --}}
                             <div class="w-full truncate text-[11px] font-black uppercase text-current sm:text-[12px]">
                                 {{ $subject->subject_code }}
                             </div>
-                            
-                            {{-- TIME (Bottom) --}}
+
+                            <div class="w-full truncate text-[7px] font-bold opacity-80">
+                                EDP: {{ $subject->edp_code ?? 'N/A' }}
+                            </div>
+
+                            <div class="w-full truncate text-[8px] font-bold opacity-90">
+                                {{ $subject->description ?? 'No subject name' }}
+                            </div>
+
                             <div class="w-full truncate text-[8px] font-bold opacity-90 sm:text-[9px]">
                                 {{ $startTimeDisplay }} - {{ $endTimeDisplay }}
+                            </div>
+
+                            <div class="w-full truncate text-[7px] font-bold opacity-80">
+                                {{ $schedule->room?->room_name ?? $selectedRoomName ?? 'No room' }} · {{ $instructor }}
                             </div>
                         </div>
 
@@ -380,30 +389,33 @@
                 popover.style.display = 'block';
                 popover.style.opacity = '0';
                 popover.style.transform = 'scale(0.96)';
+                popover.style.left = '0px';
+                popover.style.top = '0px';
 
-                const anchorRect = anchor.getBoundingClientRect();
-                const popoverRect = popover.getBoundingClientRect();
-                const gap = 12;
-                const margin = 8;
-                const popoverWidth = popoverRect.width || 320;
-                const popoverHeight = popoverRect.height || 220;
-
-                let x = anchorRect.right + gap;
-                let y = anchorRect.top + (anchorRect.height / 2) - (popoverHeight / 2);
-
-                if (x + popoverWidth + margin > window.innerWidth) {
-                    x = anchorRect.left - popoverWidth - gap;
-                }
-
-                if (x < margin) {
-                    x = Math.min(window.innerWidth - popoverWidth - margin, anchorRect.right + gap);
-                }
-
-                y = Math.max(margin, Math.min(y, window.innerHeight - popoverHeight - margin));
-
-                popover.style.left = x + 'px';
-                popover.style.top = y + 'px';
                 requestAnimationFrame(() => {
+                    const anchorRect = anchor.getBoundingClientRect();
+                    const popoverRect = popover.getBoundingClientRect();
+                    const gap = 12;
+                    const margin = 8;
+                    const popoverWidth = Math.min(popoverRect.width || 320, window.innerWidth - (margin * 2));
+                    const popoverHeight = popoverRect.height || 220;
+
+                    let x = anchorRect.right + gap;
+                    let y = anchorRect.top + (anchorRect.height / 2) - (popoverHeight / 2);
+
+                    if (window.innerWidth < 640) {
+                        x = (window.innerWidth - popoverWidth) / 2;
+                        y = anchorRect.bottom + gap;
+                    } else if (x + popoverWidth + margin > window.innerWidth) {
+                        x = anchorRect.left - popoverWidth - gap;
+                    }
+
+                    x = Math.max(margin, Math.min(x, window.innerWidth - popoverWidth - margin));
+                    y = Math.max(margin, Math.min(y, window.innerHeight - popoverHeight - margin));
+
+                    popover.style.left = x + 'px';
+                    popover.style.top = y + 'px';
+                    popover.style.maxWidth = popoverWidth + 'px';
                     popover.style.opacity = '1';
                     popover.style.transform = 'scale(1)';
                 });

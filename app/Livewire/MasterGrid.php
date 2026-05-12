@@ -8,8 +8,13 @@ use App\Models\Subject;
 use App\Models\Room;
 use App\Models\Schedule;
 use App\Models\Setting;
+use App\Models\User;
+use App\Notifications\GeneralNotification;
+use App\Services\Scheduling\AutoGenerateScheduler;
 use App\Services\ScheduleConflictService;
 use Carbon\Carbon;
+use Carbon\CarbonPeriod;
+use Illuminate\Support\Facades\Notification;
 use Livewire\WithPagination;
 
 class MasterGrid extends Component
@@ -37,6 +42,13 @@ class MasterGrid extends Component
     public $schoolYear = '2026-2027';
     public $semester = '1st';
     public $semesterName = 'First Semester 2026-2027';
+    public ?array $generationSummary = null;
+    public bool $showGenerateModal = false;
+    public array $pendingGeneratedSchedules = [];
+    public $generateDepartment = null;
+    public $generateMajor = null;
+    public $generateYearLevel = null;
+    public $generateSection = null;
 
     // Hard-coded lunch break
     public const LUNCH_START = '12:00';
@@ -113,6 +125,11 @@ class MasterGrid extends Component
     { 
         $this->selectedMajor = ''; 
         $this->resetPage(); 
+    }
+
+    public function updatedGenerateDepartment(): void
+    {
+        $this->generateMajor = null;
     }
 
     public function updatedSelectedSection() 
@@ -311,144 +328,6 @@ class MasterGrid extends Component
         return ($result['status'] ?? true) === false;
     }
 
-    private function hasFacultyConflict($subjectId, $day, $startTime, $endTime): bool
-    {
-        return false;
-    }
-
-    /**
-     * ===== COMPREHENSIVE CONFLICT VALIDATION =====
-     * Checks all three types of conflicts before scheduling
-     */
-    private function validateSchedule($subjectId, $day, $startTime, $endTime, $roomId): ?array
-    {
-        $subject = Subject::find($subjectId);
-        if (!$subject) {
-            return null;
-        }
-
-        $room = Room::find($roomId);
-
-        if (!$room) {
-            return null;
-        }
-
-        return $this->validateScheduleWithService($subject, $room, $day, $startTime, $endTime);
-
-        // ===== 1. SECTION CONFLICT CHECK =====
-        // Check if this specific Section (within the same Department, Major, Year, and Section) 
-        // is already scheduled in ANY room during this time slot
-        $sectionConflict = Schedule::whereHas('subject', function ($query) use ($subject) {
-            $query->where('department', $subject->department)
-                  ->where('major', $subject->major)
-                  ->where('year_level', $subject->year_level)
-                  ->where('section', $subject->section);
-        })
-        ->where('day', $day)
-        ->where(function ($query) use ($startTime, $endTime) {
-            $query->where('start_time', '<', $endTime)
-                  ->where('end_time', '>', $startTime);
-        })
-        ->with(['subject', 'room'])
-        ->first();
-
-        if ($sectionConflict) {
-            return [
-                'type' => 'SECTION_CONFLICT',
-                'title' => '⚠️ Student Group Already Scheduled',
-                'message' => 'This student group is already scheduled in another class during this time.',
-                'details' => [
-                    'conflict_type' => 'SECTION',
-                    'group' => "{$subject->department}-{$subject->major}-{$subject->year_level}-{$subject->section}",
-                    'conflicting_subject' => $sectionConflict->subject->subject_code ?? 'Unknown',
-                    'conflicting_room' => $sectionConflict->room->room_name ?? 'Unknown',
-                    'conflicting_start' => Carbon::parse($sectionConflict->start_time)->format(self::TIME_FORMAT_12H),
-                    'conflicting_end' => Carbon::parse($sectionConflict->end_time)->format(self::TIME_FORMAT_12H),
-                    'conflicting_day' => $sectionConflict->day,
-                    'requested_subject' => $subject->subject_code,
-                    'requested_start' => Carbon::parse($startTime)->format(self::TIME_FORMAT_12H),
-                    'requested_end' => Carbon::parse($endTime)->format(self::TIME_FORMAT_12H),
-                    'requested_day' => $day,
-                    'suggestion' => 'Choose a different time slot when this group is free.',
-                ]
-            ];
-        }
-
-        // ===== 2. FACULTY CONFLICT CHECK =====
-        // Check if the assigned Faculty Member is already teaching in ANY room during this time slot
-        if ($subject->faculty_id) {
-            $facultyConflict = Schedule::whereHas('subject', function ($query) use ($subject) {
-                $query->where('faculty_id', $subject->faculty_id);
-            })
-            ->where('day', $day)
-            ->where(function ($query) use ($startTime, $endTime) {
-                $query->where('start_time', '<', $endTime)
-                      ->where('end_time', '>', $startTime);
-            })
-            ->with(['subject', 'room'])
-            ->first();
-
-            if ($facultyConflict) {
-                $facultyName = $subject->faculty->full_name ?? 'Faculty Member';
-                return [
-                    'type' => 'FACULTY_CONFLICT',
-                    'title' => '👨‍🏫 Faculty Member Already Teaching',
-                    'message' => $facultyName . ' is already assigned to teach another class during this time.',
-                    'details' => [
-                        'conflict_type' => 'FACULTY',
-                        'faculty_name' => $facultyName,
-                        'conflicting_subject' => $facultyConflict->subject->subject_code ?? 'Unknown',
-                        'conflicting_room' => $facultyConflict->room->room_name ?? 'Unknown',
-                        'conflicting_start' => Carbon::parse($facultyConflict->start_time)->format(self::TIME_FORMAT_12H),
-                        'conflicting_end' => Carbon::parse($facultyConflict->end_time)->format(self::TIME_FORMAT_12H),
-                        'conflicting_day' => $facultyConflict->day,
-                        'requested_subject' => $subject->subject_code,
-                        'requested_start' => Carbon::parse($startTime)->format(self::TIME_FORMAT_12H),
-                        'requested_end' => Carbon::parse($endTime)->format(self::TIME_FORMAT_12H),
-                        'requested_day' => $day,
-                        'suggestion' => 'Assign a different faculty member or choose another time slot.',
-                    ]
-                ];
-            }
-        }
-
-        // ===== 3. ROOM CONFLICT CHECK =====
-        // Ensure the specific Room is not already occupied during this time slot
-        $roomConflict = Schedule::where('room_id', $roomId)
-            ->where('day', $day)
-            ->where(function ($query) use ($startTime, $endTime) {
-                $query->where('start_time', '<', $endTime)
-                      ->where('end_time', '>', $startTime);
-            })
-            ->with(['subject', 'room'])
-            ->first();
-
-        if ($roomConflict) {
-            return [
-                'type' => 'ROOM_CONFLICT',
-                'title' => '🏢 Room Already Occupied',
-                'message' => 'This room is already booked during the requested time slot.',
-                'details' => [
-                    'conflict_type' => 'ROOM',
-                    'room_name' => $roomConflict->room->room_name ?? 'Unknown',
-                    'conflicting_subject' => $roomConflict->subject->subject_code ?? 'Unknown',
-                    'conflicting_start' => Carbon::parse($roomConflict->start_time)->format(self::TIME_FORMAT_12H),
-                    'conflicting_end' => Carbon::parse($roomConflict->end_time)->format(self::TIME_FORMAT_12H),
-                    'conflicting_day' => $roomConflict->day,
-                    'requested_subject' => $subject->subject_code,
-                    'requested_start' => Carbon::parse($startTime)->format(self::TIME_FORMAT_12H),
-                    'requested_end' => Carbon::parse($endTime)->format(self::TIME_FORMAT_12H),
-                    'requested_day' => $day,
-                    'suggestion' => 'Select a different room or time slot.',
-                ]
-            ];
-        }
-
-        // ===== NO CONFLICTS FOUND =====
-        return null;
-    }
-    // ===== END CONFLICT VALIDATION =====
-
     private function validateScheduleWithService(
         Subject $subject,
         Room $room,
@@ -498,6 +377,306 @@ class MasterGrid extends Component
         $warning = app(ScheduleConflictService::class)->checkCurriculumConflict($subject, $room);
 
         return ($warning['type'] ?? null) === 'warning' ? $warning : null;
+    }
+
+    public function openGenerateModal(): void
+    {
+        $this->generateDepartment = $this->selectedDept;
+        $this->generateMajor = $this->selectedMajor;
+        $this->generateYearLevel = $this->selectedYear;
+        $this->generateSection = $this->selectedSection;
+        $this->showGenerateModal = true;
+        $this->generationSummary = null;
+        $this->pendingGeneratedSchedules = [];
+    }
+
+    public function closeGenerateModal(): void
+    {
+        $this->showGenerateModal = false;
+    }
+
+    public function startGeneration(): void
+    {
+        if (!$this->hasFullAccess()) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Permission Denied',
+                'detail' => 'Only scheduling officers can auto-generate partial schedules.'
+            ]);
+            return;
+        }
+
+        $this->loadSettings();
+
+        $missingFilters = app(AutoGenerateScheduler::class)->missingRequiredFilters([
+            'department' => $this->generateDepartment,
+            'major' => $this->generateMajor,
+            'year_level' => $this->generateYearLevel,
+            'section' => $this->generateSection,
+        ]);
+
+        if ($missingFilters) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Select scheduling filters first.',
+                'detail' => 'Required: Department, Major, Year Level, and Section.'
+            ]);
+            return;
+        }
+
+        $result = app(AutoGenerateScheduler::class)->generatePartialSchedules([
+            'department' => $this->generateDepartment,
+            'major' => $this->generateMajor,
+            'year_level' => $this->generateYearLevel,
+            'section' => $this->generateSection,
+        ], auth()->id());
+
+        $scheduled = (int) $result['scheduled'];
+        $failedCount = (int) $result['failed'];
+        $warnings = (int) $result['warnings'];
+
+        $detailParts = [];
+
+        if ($failedCount > 0) {
+            $reasons = collect($result['failure_reasons'] ?? [])->take(3)->implode(' ');
+            $detailParts[] = "{$failedCount} failed. {$reasons}";
+        }
+
+        if ($warnings > 0) {
+            $detailParts[] = "{$warnings} fallback/general room warning(s) were allowed.";
+        }
+
+        $this->pendingGeneratedSchedules = $result['scheduled_items'] ?? [];
+        $this->showGenerationSummary($result);
+        $this->showGenerateModal = false;
+
+        $hasNoCompatibleRoom = collect($result['failure_reasons'] ?? [])
+            ->contains(fn (string $reason) => str_contains(strtolower($reason), 'no compatible room'));
+
+        $this->dispatch('toast', [
+            'type' => $scheduled > 0 ? 'success' : ($hasNoCompatibleRoom ? 'error' : 'warning'),
+            'message' => "{$scheduled} schedule slot(s) prepared.",
+            'detail' => $detailParts ? implode(' ', $detailParts) : 'Review the summary, then save the generated schedules.'
+        ]);
+
+        $this->dispatch('refreshGrid');
+    }
+
+    public function autoGeneratePartialSchedule(): void
+    {
+        $this->openGenerateModal();
+    }
+
+    public function confirmGeneratedSchedules(): void
+    {
+        if (empty($this->pendingGeneratedSchedules)) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'No generated schedules to save.',
+                'detail' => 'Run AI generation first.'
+            ]);
+            return;
+        }
+
+        $result = app(AutoGenerateScheduler::class)->persistGeneratedSchedules(
+            $this->pendingGeneratedSchedules,
+            auth()->id()
+        );
+
+        $saved = (int) ($result['saved'] ?? 0);
+        $failed = (int) ($result['failed'] ?? 0);
+
+        if ($saved > 0) {
+            $this->notifyDeans($saved, $failed);
+        }
+
+        $this->pendingGeneratedSchedules = [];
+        $this->generationSummary = null;
+
+        $this->dispatch('toast', [
+            'type' => $saved > 0 ? 'success' : 'error',
+            'message' => "{$saved} schedules generated successfully.",
+            'detail' => $failed > 0 ? "{$failed} generated schedules could not be saved due to new conflicts." : 'Saved as partial schedules.'
+        ]);
+
+        $this->dispatch('refreshGrid');
+    }
+
+    public function showGenerationSummary(array $result): void
+    {
+        $this->generationSummary = [
+            'scheduled' => (int) ($result['scheduled'] ?? 0),
+            'failed' => (int) ($result['failed'] ?? 0),
+            'warnings' => (int) ($result['warnings'] ?? 0),
+            'filters' => $result['filters'] ?? [
+                'department' => $this->selectedDept,
+                'major' => $this->selectedMajor,
+                'year_level' => $this->selectedYear,
+                'section' => $this->selectedSection,
+            ],
+            'scheduled_items' => array_slice($result['scheduled_items'] ?? [], 0, 50),
+            'failure_reasons' => array_slice($result['failure_reasons'] ?? [], 0, 50),
+            'fallback_warnings' => array_slice($result['fallback_warnings'] ?? [], 0, 20),
+        ];
+
+        $this->dispatch('show-generation-summary');
+    }
+
+    public function closeGenerationSummary(): void
+    {
+        $this->generationSummary = null;
+        $this->pendingGeneratedSchedules = [];
+    }
+
+    private function findFirstValidPlacement(Subject $subject, $rooms, int $meetingIndex): ?array
+    {
+        $minutesPerMeeting = (int) ceil($this->calculateMinutesPerMeeting($subject));
+        $days = $this->prioritizedDays($meetingIndex);
+
+        foreach ($days as $day) {
+            foreach ($this->getSectionTimeWindows($subject->section) as $window) {
+                if ($window['start']->copy()->addMinutes($minutesPerMeeting)->gt($window['end'])) {
+                    continue;
+                }
+
+                $period = CarbonPeriod::create(
+                    $window['start'],
+                    self::BRICK_DURATION_MINUTES . ' minutes',
+                    $window['end']->copy()->subMinutes($minutesPerMeeting)
+                );
+
+                foreach ($period as $slotStart) {
+                    $slotEnd = $slotStart->copy()->addMinutes($minutesPerMeeting);
+
+                    if (!$this->isValidSchedulingWindow($subject, $slotStart, $slotEnd, $window)) {
+                        continue;
+                    }
+
+                    foreach ($rooms as $room) {
+                        if (!$this->roomCanHostSubject($room, $subject)) {
+                            continue;
+                        }
+
+                        if (!$this->validateScheduleWithService(
+                            $subject,
+                            $room,
+                            $day,
+                            $slotStart->format(self::TIME_FORMAT_24H),
+                            $slotEnd->format(self::TIME_FORMAT_24H)
+                        )) {
+                            return [
+                                'room' => $room,
+                                'day' => $day,
+                                'start' => $slotStart->format(self::TIME_FORMAT_24H),
+                                'end' => $slotEnd->format(self::TIME_FORMAT_24H),
+                            ];
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private function prioritizedDays(int $meetingIndex): array
+    {
+        $days = $this->days;
+        $offset = $meetingIndex % count($days);
+
+        return array_merge(array_slice($days, $offset), array_slice($days, 0, $offset));
+    }
+
+    private function getSectionTimeWindows(?string $section): array
+    {
+        $dayStart = Carbon::parse($this->dayStart);
+        $dayEnd = Carbon::parse($this->dayEnd);
+        $lunchStart = Carbon::parse(self::LUNCH_START);
+        $lunchEnd = Carbon::parse(self::LUNCH_END);
+        $section = strtoupper((string) $section);
+
+        $morning = [
+            'start' => $dayStart->copy(),
+            'end' => $dayEnd->lt($lunchStart) ? $dayEnd->copy() : $lunchStart->copy(),
+        ];
+
+        $afternoon = [
+            'start' => $dayStart->gt($lunchEnd) ? $dayStart->copy() : $lunchEnd->copy(),
+            'end' => $dayEnd->copy(),
+        ];
+
+        return match ($section) {
+            'A' => $this->validWindows([$morning]),
+            'B' => $this->validWindows([$afternoon]),
+            default => $this->validWindows([$morning, $afternoon]),
+        };
+    }
+
+    private function validWindows(array $windows): array
+    {
+        return array_values(array_filter($windows, fn (array $window) => $window['start']->lt($window['end'])));
+    }
+
+    private function isValidSchedulingWindow(Subject $subject, Carbon $slotStart, Carbon $slotEnd, array $window): bool
+    {
+        $service = app(ScheduleConflictService::class);
+
+        return $slotStart->gte($window['start'])
+            && $slotEnd->lte($window['end'])
+            && $slotStart->between(Carbon::parse($this->dayStart), Carbon::parse($this->dayEnd), true)
+            && $slotEnd->between(Carbon::parse($this->dayStart), Carbon::parse($this->dayEnd), true)
+            && !$service->overlapsLunchBreak($slotStart->format(self::TIME_FORMAT_24H), $slotEnd->format(self::TIME_FORMAT_24H))
+            && $service->respectsSectionSession($subject->section, $slotStart->format(self::TIME_FORMAT_24H), $slotEnd->format(self::TIME_FORMAT_24H));
+    }
+
+    private function roomCanHostSubject(Room $room, Subject $subject): bool
+    {
+        $expectedSize = $subject->student_count
+            ?? $subject->enrollment
+            ?? $subject->class_size
+            ?? null;
+
+        return !$expectedSize || !$room->capacity || (int) $room->capacity >= (int) $expectedSize;
+    }
+
+    private function createPartialSchedule(Subject $subject, Room $room, string $day, string $startTime, string $endTime): Schedule
+    {
+        return Schedule::create([
+            'subject_id' => $subject->id,
+            'room_id' => $room->id,
+            'user_id' => auth()->id() ?? 1,
+            'department' => $subject->department,
+            'major' => $subject->major,
+            'year_level' => $subject->year_level,
+            'section' => $subject->section,
+            'day' => $day,
+            'start_time' => $startTime,
+            'end_time' => $endTime,
+            'duration_hours' => round(Carbon::parse($startTime)->diffInMinutes(Carbon::parse($endTime)) / 60, 2),
+            'meetings_per_week' => $subject->meetings_per_week,
+            'status' => Schedule::STATUS_PARTIAL,
+        ]);
+    }
+
+    private function notifyDeans(int $scheduledCount, int $failedCount): void
+    {
+        $recipients = User::query()
+            ->whereIn('role', ['admin', 'dean', 'oic', 'associate_dean'])
+            ->get();
+
+        if ($recipients->isEmpty()) {
+            return;
+        }
+
+        Notification::send($recipients, new GeneralNotification([
+            'title' => 'Partial Schedules Generated',
+            'message' => "{$scheduledCount} partial schedule slot(s) are ready for faculty loading. {$failedCount} subject(s) need manual review.",
+            'type' => 'schedule_generation',
+            'url' => route('faculty-loading', absolute: false),
+            'sender_name' => auth()->user()?->name ?? 'Classly',
+        ]));
+
+        $this->dispatch('notify')->to(NotificationCenter::class);
     }
 
     public function generateDisplaySlots()
@@ -715,6 +894,17 @@ class MasterGrid extends Component
             return;
         }
 
+        if (!app(ScheduleConflictService::class)->respectsSectionSession($subject->section, $startTime, $endTime)) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Section Session Rule Blocked',
+                'detail' => $subject->section === 'A'
+                    ? 'Section A can only be scheduled from day start until 12:00 PM.'
+                    : 'Section B can only be scheduled from 1:00 PM until day end.'
+            ]);
+            return;
+        }
+
         // ===== COMPREHENSIVE CONFLICT VALIDATION =====
         $conflictData = $this->validateScheduleWithService($subject, $room, $day, $startTime, $endTime);
 
@@ -738,19 +928,7 @@ class MasterGrid extends Component
         }
 
         try {
-            Schedule::create([
-                'subject_id' => $subjectId,
-                'room_id' => $this->selectedRoomId,
-                'user_id' => auth()->id() ?? 1,
-                'department' => $subject->department,
-                'major' => $subject->major,
-                'year_level' => $subject->year_level,
-                'day' => $day,
-                'start_time' => $startTime,
-                'end_time' => $endTime,
-                'section' => $subject->section,
-                'status' => 'partial',
-            ]);
+            $this->createPartialSchedule($subject, $room, $day, $startTime, $endTime);
 
             $remainingHours = $this->getRemainingHoursDecimal($subjectId);
             $remainingMeetings = $this->getRemainingMeetings($subject) - 1;
@@ -997,7 +1175,7 @@ class MasterGrid extends Component
                         'id', 'subject_code', 'description', 'edp_code', 
                         'duration_hours', 'department', 'type', 'major', 'year_level', 'faculty_id'
                     );
-                }, 'faculty:id,full_name'])
+                }, 'faculty:id,full_name', 'room:id,room_name'])
                 ->get()
             : collect();
 

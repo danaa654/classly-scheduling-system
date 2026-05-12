@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use App\Models\Faculty;
 use App\Models\Schedule;
+use App\Services\ScheduleConflictService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
@@ -166,9 +167,29 @@ class FacultyLoading extends Component
             return;
         }
 
-        $conflict = $this->facultyConflict($faculty, $schedule);
-        if ($conflict) {
-            $this->toast('error', $conflict);
+        $conflictService = app(ScheduleConflictService::class);
+        $facultyConflict = $conflictService->checkFacultyConflict(
+            $faculty->id,
+            $schedule->day,
+            Carbon::parse($schedule->start_time)->format('H:i:s'),
+            Carbon::parse($schedule->end_time)->format('H:i:s'),
+            $schedule->id
+        );
+
+        if (($facultyConflict['status'] ?? true) === false) {
+            $this->toast('error', $facultyConflict['message'] ?? 'Faculty schedule conflict detected.');
+            return;
+        }
+
+        $availability = $conflictService->checkFacultyAvailability(
+            $faculty,
+            $schedule->day,
+            Carbon::parse($schedule->start_time)->format('H:i:s'),
+            Carbon::parse($schedule->end_time)->format('H:i:s')
+        );
+
+        if (($availability['status'] ?? true) === false) {
+            $this->toast('error', $availability['message'] ?? 'Faculty is not available during this time.');
             return;
         }
 
@@ -225,6 +246,8 @@ class FacultyLoading extends Component
 
         if (in_array($user->role, ['dean', 'oic']) && $user->department) {
             $query->where('department', $user->department);
+        } elseif ($user->role === 'associate_dean') {
+            $query->whereHas('subject', fn (Builder $subjectQuery) => $subjectQuery->where('type', 'Minor'));
         }
 
         $updated = $query->update(['status' => 'faculty_assigned']);
@@ -270,6 +293,14 @@ class FacultyLoading extends Component
 
         if (in_array($user->role, ['admin', 'registrar'])) {
             return true;
+        }
+
+        if ($user->role === 'associate_dean') {
+            return $subject->type === 'Minor';
+        }
+
+        if (in_array($user->role, ['dean', 'oic'])) {
+            return $subject->type === 'Major' && $user->department === $subject->department;
         }
 
         if ($subject->type === 'Minor') {
@@ -322,10 +353,12 @@ class FacultyLoading extends Component
             $faculty = Faculty::find($this->selectedFacultyId);
 
             if ($faculty) {
-                $query->whereHas('subject', function (Builder $subjectQuery) use ($faculty) {
-                    if ($faculty->teaching_specialization === 'Minor') {
+                $user = Auth::user();
+
+                $query->whereHas('subject', function (Builder $subjectQuery) use ($faculty, $user) {
+                    if ($user->role === 'associate_dean' || $faculty->teaching_specialization === 'Minor') {
                         $subjectQuery->where('type', 'Minor');
-                    } elseif ($faculty->teaching_specialization === 'Major') {
+                    } elseif (in_array($user->role, ['dean', 'oic']) || $faculty->teaching_specialization === 'Major') {
                         $subjectQuery->where('type', 'Major')
                             ->where('department', $faculty->department);
                     } else {

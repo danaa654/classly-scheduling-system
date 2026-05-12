@@ -25,6 +25,7 @@ class Faculty extends Model
         'employment_type',
         'teaching_specialization',
         'max_units',
+        'availability',
         'requested_by',
         'rejection_reason',
     ];
@@ -33,6 +34,7 @@ class Faculty extends Model
         'created_at' => 'datetime',
         'updated_at' => 'datetime',
         'max_units' => 'integer',
+        'availability' => 'array',
     ];
 
     /**

@@ -150,7 +150,7 @@ class Subject extends Model
      */
     public function getStudentGroupIdentifier(): string
     {
-        return "{$this->department}|{$this->major}|{$this->section}";
+        return "{$this->department}|{$this->major}|{$this->year_level}|{$this->section}";
     }
 
     /**

@@ -250,10 +250,11 @@ class Room extends Model
      */
     public function isCompatibleWithSubject(Subject $subject): bool
     {
-        if ($subject->type === 'Laboratory') {
-            return $this->type === 'Laboratory';
-        }
+        return $this->compatibilityScoreForSubject($subject) > 0;
+    }
 
-        return true; // Lecture subjects can go anywhere
+    public function compatibilityScoreForSubject(Subject $subject): int
+    {
+        return app(\App\Services\AutoScheduleService::class)->compatibilityScore($this, $subject);
     }
 }

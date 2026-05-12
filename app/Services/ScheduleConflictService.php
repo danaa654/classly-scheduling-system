@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Models\Room;
 use App\Models\Schedule;
 use App\Models\Subject;
+use App\Models\Faculty;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -78,6 +79,65 @@ class ScheduleConflictService
         ];
     }
 
+    public function checkFacultyAvailability(
+        Faculty $faculty,
+        string $day,
+        string $startTime,
+        string $endTime
+    ): array {
+        $availability = $faculty->getAttribute('availability');
+
+        if (empty($availability) || !is_array($availability)) {
+            return $this->pass();
+        }
+
+        $dayWindows = $availability[$day] ?? $availability[strtolower($day)] ?? [];
+
+        if (empty($dayWindows)) {
+            return [
+                'status' => false,
+                'type' => 'error',
+                'conflict_type' => 'FACULTY_AVAILABILITY',
+                'title' => 'Faculty Not Available',
+                'message' => "Professor {$faculty->full_name} is not available on {$day}.",
+                'details' => ['faculty_name' => $faculty->full_name, 'day' => $day],
+            ];
+        }
+
+        $requestedStart = Carbon::parse($startTime);
+        $requestedEnd = Carbon::parse($endTime);
+
+        foreach ($dayWindows as $window) {
+            $windowStartValue = $window['start'] ?? $window[0] ?? null;
+            $windowEndValue = $window['end'] ?? $window[1] ?? null;
+
+            if (!$windowStartValue || !$windowEndValue) {
+                continue;
+            }
+
+            $windowStart = Carbon::parse($windowStartValue);
+            $windowEnd = Carbon::parse($windowEndValue);
+
+            if ($requestedStart->gte($windowStart) && $requestedEnd->lte($windowEnd)) {
+                return $this->pass();
+            }
+        }
+
+        return [
+            'status' => false,
+            'type' => 'error',
+            'conflict_type' => 'FACULTY_AVAILABILITY',
+            'title' => 'Faculty Not Available',
+            'message' => "Professor {$faculty->full_name} is not available during this time.",
+            'details' => [
+                'faculty_name' => $faculty->full_name,
+                'day' => $day,
+                'requested_start' => Carbon::parse($startTime)->format('h:i A'),
+                'requested_end' => Carbon::parse($endTime)->format('h:i A'),
+            ],
+        ];
+    }
+
     public function checkSectionConflict(
         Subject $subject,
         string $day,
@@ -135,8 +195,37 @@ class ScheduleConflictService
 
     public function hasTimeOverlap(string $newStart, string $newEnd, string $existingStart, string $existingEnd): bool
     {
-        return $this->normalizeTime($newStart) < $this->normalizeTime($existingEnd)
-            && $this->normalizeTime($newEnd) > $this->normalizeTime($existingStart);
+        $newStartCarbon = Carbon::parse($newStart);
+        $newEndCarbon = Carbon::parse($newEnd);
+        $existingStartCarbon = Carbon::parse($existingStart);
+        $existingEndCarbon = Carbon::parse($existingEnd);
+
+        return $newStartCarbon->lt($existingEndCarbon)
+            && $newEndCarbon->gt($existingStartCarbon);
+    }
+
+    public function overlapsLunchBreak(string $startTime, string $endTime): bool
+    {
+        return $this->hasTimeOverlap($startTime, $endTime, '12:00:00', '13:00:00');
+    }
+
+    public function respectsSectionSession(?string $section, string $startTime, string $endTime): bool
+    {
+        $section = strtoupper((string) $section);
+        $start = Carbon::parse($startTime);
+        $end = Carbon::parse($endTime);
+        $lunchStart = Carbon::parse('12:00:00');
+        $lunchEnd = Carbon::parse('13:00:00');
+
+        if ($section === 'A') {
+            return $start->lt($lunchStart) && $end->between($start, $lunchStart, true);
+        }
+
+        if ($section === 'B') {
+            return $start->between($lunchEnd, Carbon::parse('23:59:59'), true) && $end->gt($lunchEnd);
+        }
+
+        return true;
     }
 
     public function baseScheduleQuery(

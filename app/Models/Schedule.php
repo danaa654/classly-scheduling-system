@@ -17,7 +17,7 @@ class Schedule extends Model
     public const SECTION_TIME_PREFERENCES = [
         'A' => 'morning',
         'B' => 'afternoon',
-        'C' => 'evening',
+        'C' => 'flexible',
     ];
 
     protected $fillable = [
@@ -32,12 +32,16 @@ class Schedule extends Model
         'day',
         'start_time',
         'end_time',
+        'duration_hours',
+        'meetings_per_week',
         'status',
     ];
 
     protected $casts = [
         'start_time' => 'datetime:H:i:s',
         'end_time' => 'datetime:H:i:s',
+        'duration_hours' => 'float',
+        'meetings_per_week' => 'integer',
     ];
 
     // ============================================================
@@ -159,8 +163,11 @@ class Schedule extends Model
      */
     public function scopeByDepartment($query, $department)
     {
-        return $query->whereHas('subject', function ($q) use ($department) {
-            $q->where('department', $department);
+        return $query->where(function ($query) use ($department) {
+            $query->where('department', $department)
+                ->orWhereHas('subject', function ($q) use ($department) {
+                    $q->where('department', $department);
+                });
         });
     }
 
@@ -169,8 +176,11 @@ class Schedule extends Model
      */
     public function scopeByYearLevel($query, $yearLevel)
     {
-        return $query->whereHas('subject', function ($q) use ($yearLevel) {
-            $q->where('year_level', (int)$yearLevel);
+        return $query->where(function ($query) use ($yearLevel) {
+            $query->where('year_level', (int) $yearLevel)
+                ->orWhereHas('subject', function ($q) use ($yearLevel) {
+                    $q->where('year_level', (int) $yearLevel);
+                });
         });
     }
 
@@ -236,7 +246,7 @@ class Schedule extends Model
         try {
             $start = Carbon::parse($this->start_time);
             $end = Carbon::parse($this->end_time);
-            return round($start->diffInHours($end), 2);
+            return round($start->diffInMinutes($end) / 60, 2);
         } catch (\Exception $e) {
             return 0;
         }
@@ -342,9 +352,23 @@ class Schedule extends Model
         return $errors;
     }
 
-    /**
-     * Static method to check room availability before creating
-     */
+    public function respectsSectionSession(): bool
+    {
+        $start = Carbon::parse($this->start_time);
+        $end = Carbon::parse($this->end_time);
+        $lunchStart = Carbon::parse('12:00:00');
+        $lunchEnd = Carbon::parse('13:00:00');
+
+        if (strtoupper((string) $this->section) === 'A') {
+            return $start->lt($lunchStart) && $end->lte($lunchStart);
+        }
+
+        if (strtoupper((string) $this->section) === 'B') {
+            return $start->gte($lunchEnd) && $end->gt($lunchEnd);
+        }
+
+        return true;
+    }
     public static function roomIsAvailable(int $roomId, string $day, string $startTime, string $endTime, ?int $excludeScheduleId = null): bool
     {
         $query = static::where('room_id', $roomId)
