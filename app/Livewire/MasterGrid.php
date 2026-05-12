@@ -45,6 +45,7 @@ class MasterGrid extends Component
     public ?array $generationSummary = null;
     public bool $showGenerateModal = false;
     public array $pendingGeneratedSchedules = [];
+    public array $failedRetryInputs = [];
     public $generateDepartment = null;
     public $generateMajor = null;
     public $generateYearLevel = null;
@@ -159,38 +160,6 @@ class MasterGrid extends Component
         
         $role = $user->role ?? 'guest';
         return in_array($role, ['admin', 'registrar', 'associate_dean']);
-    }
-
-    public function canFinalizeSchedules(): bool
-    {
-        $role = auth()->user()?->role ?? 'guest';
-
-        return in_array($role, ['admin', 'registrar'], true);
-    }
-
-    public function finalizeFacultyAssignedSchedules(): void
-    {
-        if (!$this->canFinalizeSchedules()) {
-            $this->dispatch('toast', [
-                'type' => 'error',
-                'message' => 'Permission Denied',
-                'detail' => 'Only Registrar/Admin can finalize schedules.'
-            ]);
-            return;
-        }
-
-        $updated = Schedule::where('status', Schedule::STATUS_FACULTY_ASSIGNED)
-            ->update(['status' => Schedule::STATUS_FINALIZED]);
-
-        $this->dispatch('toast', [
-            'type' => $updated > 0 ? 'success' : 'warning',
-            'message' => $updated > 0 ? 'Schedules Finalized' : 'No Schedules Ready',
-            'detail' => $updated > 0
-                ? "{$updated} faculty-assigned schedule(s) are now finalized."
-                : 'There are no faculty-assigned schedules pending final approval.'
-        ]);
-
-        $this->dispatch('refreshGrid');
     }
 
     public function getUserDepartment(): ?string
@@ -379,6 +348,67 @@ class MasterGrid extends Component
         return ($warning['type'] ?? null) === 'warning' ? $warning : null;
     }
 
+    public function findCompatibleRooms(int $subjectId): array
+    {
+        $subject = Subject::find($subjectId);
+
+        if (!$subject) {
+            return [];
+        }
+
+        return app(AutoGenerateScheduler::class)
+            ->findCompatibleRooms($subject)
+            ->map(fn (array $candidate) => [
+                'room_id' => $candidate['room']->id,
+                'room_name' => $candidate['room']->room_name,
+                'score' => $candidate['score'],
+            ])
+            ->values()
+            ->all();
+    }
+
+    public function findAvailableTimeSlot(int $subjectId): ?array
+    {
+        $subject = Subject::find($subjectId);
+
+        if (!$subject) {
+            return null;
+        }
+
+        $rooms = Room::query()->available()->get();
+        $schedules = Schedule::query()
+            ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
+            ->with('subject:id,subject_code,department,major,year_level,section')
+            ->get();
+
+        return app(AutoGenerateScheduler::class)->findAvailableSlot($subject, $rooms, $schedules);
+    }
+
+    public function hasConflict(int $roomId, string $day, string $startTime, string $endTime, ?int $subjectId = null): bool
+    {
+        $schedules = Schedule::query()
+            ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
+            ->with('subject:id,subject_code,department,major,year_level,section')
+            ->get();
+
+        if (app(AutoGenerateScheduler::class)->hasRoomConflict($schedules, $roomId, $day, $startTime, $endTime)) {
+            return true;
+        }
+
+        $subject = $subjectId ? Subject::find($subjectId) : null;
+
+        return $subject
+            ? app(AutoGenerateScheduler::class)->hasSectionConflict($schedules, $subject, $day, $startTime, $endTime)
+            : false;
+    }
+
+    public function hasFacultyConflict(int $facultyId, string $day, string $startTime, string $endTime): bool
+    {
+        $conflict = app(ScheduleConflictService::class)->checkFacultyConflict($facultyId, $day, $startTime, $endTime);
+
+        return ($conflict['status'] ?? true) === false;
+    }
+
     public function openGenerateModal(): void
     {
         $this->generateDepartment = $this->selectedDept;
@@ -388,6 +418,7 @@ class MasterGrid extends Component
         $this->showGenerateModal = true;
         $this->generationSummary = null;
         $this->pendingGeneratedSchedules = [];
+        $this->failedRetryInputs = [];
     }
 
     public function closeGenerateModal(): void
@@ -485,9 +516,16 @@ class MasterGrid extends Component
 
         $saved = (int) ($result['saved'] ?? 0);
         $failed = (int) ($result['failed'] ?? 0);
+        $filters = $this->generationSummary['filters'] ?? [
+            'department' => $this->generateDepartment,
+            'major' => $this->generateMajor,
+            'year_level' => $this->generateYearLevel,
+            'section' => $this->generateSection,
+        ];
 
         if ($saved > 0) {
-            $this->notifyDeans($saved, $failed);
+            $this->syncToBlockSchedule($result['saved_items'] ?? []);
+            $this->notifyScheduleStakeholders($filters, $saved, $failed);
         }
 
         $this->pendingGeneratedSchedules = [];
@@ -516,16 +554,76 @@ class MasterGrid extends Component
             ],
             'scheduled_items' => array_slice($result['scheduled_items'] ?? [], 0, 50),
             'failure_reasons' => array_slice($result['failure_reasons'] ?? [], 0, 50),
+            'failed_items' => array_slice($result['failed_items'] ?? [], 0, 50),
             'fallback_warnings' => array_slice($result['fallback_warnings'] ?? [], 0, 20),
         ];
 
+        $this->failedRetryInputs = collect($this->generationSummary['failed_items'])
+            ->mapWithKeys(fn (array $item) => [
+                $item['subject_id'] => [
+                    'meetings_per_week' => $item['meetings_per_week'] ?? 1,
+                    'duration_hours' => $item['duration_hours'] ?? 1,
+                    'preferred_room_type' => $item['preferred_room_type'] ?? '',
+                ],
+            ])
+            ->all();
+
         $this->dispatch('show-generation-summary');
+    }
+
+    public function retryFailedSubject(int $subjectId): void
+    {
+        if (!$this->generationSummary) {
+            return;
+        }
+
+        $retry = app(AutoGenerateScheduler::class)->previewSubjectSchedule(
+            $subjectId,
+            $this->generationSummary['filters'] ?? [],
+            $this->failedRetryInputs[$subjectId] ?? [],
+            $this->pendingGeneratedSchedules,
+            auth()->id()
+        );
+
+        if (($retry['scheduled'] ?? 0) <= 0) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Retry failed.',
+                'detail' => collect($retry['failure_reasons'] ?? [])->first() ?? 'No valid slot found.'
+            ]);
+            return;
+        }
+
+        $firstScheduled = $retry['scheduled_items'][0] ?? null;
+        $subjectCode = $firstScheduled['subject_code'] ?? null;
+
+        $this->pendingGeneratedSchedules = array_values(array_merge($this->pendingGeneratedSchedules, $retry['scheduled_items'] ?? []));
+        $this->generationSummary['scheduled'] += (int) ($retry['scheduled'] ?? 0);
+        $this->generationSummary['scheduled_items'] = array_values(array_merge($this->generationSummary['scheduled_items'], $retry['scheduled_items'] ?? []));
+        $this->generationSummary['failed_items'] = array_values(array_filter(
+            $this->generationSummary['failed_items'],
+            fn (array $item) => (int) $item['subject_id'] !== $subjectId
+        ));
+        $this->generationSummary['failure_reasons'] = array_values(array_filter(
+            $this->generationSummary['failure_reasons'],
+            fn (string $reason) => !$subjectCode || !str_starts_with($reason, "{$subjectCode}:")
+        ));
+        $this->generationSummary['failed'] = count($this->generationSummary['failed_items']);
+
+        unset($this->failedRetryInputs[$subjectId]);
+
+        $this->dispatch('toast', [
+            'type' => 'success',
+            'message' => 'Subject retry scheduled.',
+            'detail' => 'Review the updated summary before saving.'
+        ]);
     }
 
     public function closeGenerationSummary(): void
     {
         $this->generationSummary = null;
         $this->pendingGeneratedSchedules = [];
+        $this->failedRetryInputs = [];
     }
 
     private function findFirstValidPlacement(Subject $subject, $rooms, int $meetingIndex): ?array
@@ -654,25 +752,77 @@ class MasterGrid extends Component
             'end_time' => $endTime,
             'duration_hours' => round(Carbon::parse($startTime)->diffInMinutes(Carbon::parse($endTime)) / 60, 2),
             'meetings_per_week' => $subject->meetings_per_week,
+            'pairing_key' => "manual-{$subject->id}-" . now()->format('YmdHisv'),
             'status' => Schedule::STATUS_PARTIAL,
         ]);
     }
 
-    private function notifyDeans(int $scheduledCount, int $failedCount): void
+    public function generateLinkedMeetingPattern(int $subjectId): ?array
     {
+        $subject = Subject::find($subjectId);
+
+        if (!$subject) {
+            return null;
+        }
+
+        $rooms = Room::query()->available()->get();
+        $schedules = Schedule::query()
+            ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
+            ->with('subject:id,subject_code,department,major,year_level,section')
+            ->get();
+
+        return app(AutoGenerateScheduler::class)->generateLinkedMeetingPattern(
+            $subject,
+            $rooms,
+            $schedules,
+            Setting::getDayBounds(),
+            $this->getRemainingMeetings($subject)
+        );
+    }
+
+    public function findConsistentRoomAndTime(int $subjectId): ?array
+    {
+        return $this->generateLinkedMeetingPattern($subjectId);
+    }
+
+    public function syncToBlockSchedule(array $savedItems = []): int
+    {
+        $this->dispatch('refreshBlockSchedule')->to(BlockSchedule::class);
+        $this->dispatch('refreshGrid')->to(FacultyLoading::class);
+
+        return count($savedItems);
+    }
+
+    public function notifyScheduleStakeholders(array $filters, int $scheduledCount, int $failedCount): void
+    {
+        $department = strtoupper((string) ($filters['department'] ?? ''));
+        $major = strtoupper((string) ($filters['major'] ?? ''));
+        $yearLevel = (string) ($filters['year_level'] ?? '');
+        $section = strtoupper((string) ($filters['section'] ?? ''));
+
         $recipients = User::query()
-            ->whereIn('role', ['admin', 'dean', 'oic', 'associate_dean'])
+            ->where(function ($query) use ($department) {
+                $query->whereIn('role', ['admin', 'associate_dean'])
+                    ->orWhere(function ($inner) use ($department) {
+                        $inner->whereIn('role', ['dean', 'oic'])
+                            ->when($department !== '', fn ($deptQuery) => $deptQuery->where('department', $department));
+                    });
+            })
             ->get();
 
         if ($recipients->isEmpty()) {
             return;
         }
 
+        $failedMessage = $failedCount > 0
+            ? " {$failedCount} subject(s) need manual review."
+            : '';
+
         Notification::send($recipients, new GeneralNotification([
-            'title' => 'Partial Schedules Generated',
-            'message' => "{$scheduledCount} partial schedule slot(s) are ready for faculty loading. {$failedCount} subject(s) need manual review.",
+            'title' => 'Partial Schedule Generated',
+            'message' => "Partial Schedule Generated for: {$department} - {$major} - {$yearLevel} Year - Section {$section}. {$scheduledCount} slot(s) saved.{$failedMessage}",
             'type' => 'schedule_generation',
-            'url' => route('faculty-loading', absolute: false),
+            'url' => route('block-schedule', absolute: false),
             'sender_name' => auth()->user()?->name ?? 'Classly',
         ]));
 
@@ -1195,7 +1345,6 @@ class MasterGrid extends Component
             'brickDurationMinutes' => self::BRICK_DURATION_MINUTES,
             'brickHeightPx'        => self::BRICK_HEIGHT_PX,
             'hasFullAccess'        => $this->hasFullAccess(),
-            'canFinalizeSchedules'  => $this->canFinalizeSchedules(),
             'departmentMajors'     => self::DEPARTMENT_MAJORS,
             'departmentColors'     => self::DEPARTMENT_COLORS,
             'selectedRoomId'       => $this->selectedRoomId,

@@ -1,4 +1,4 @@
-<div 
+﻿<div 
     x-data="scheduleGridApp()" 
     x-init="initializeGrid()" 
     class="relative w-full h-full bg-white/40 dark:bg-slate-900/30 backdrop-blur-sm rounded-xl border border-slate-300 dark:border-slate-700 overflow-hidden shadow-sm"
@@ -106,7 +106,7 @@
                         "
                     >
                         <span class="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-widest">
-                            🍽️ Institutional Lunch Break
+                            ðŸ½ï¸ Institutional Lunch Break
                         </span>
                     </div>
                 @endif
@@ -219,6 +219,9 @@
                             instructor: @js($instructor),
                             room: @js($schedule->room?->room_name ?? $selectedRoomName ?? 'N/A'),
                             type: @js($subject->type ?? 'N/A'),
+                            department: @js($subject->department ?? 'N/A'),
+                            major: @js($subject->major ?? 'N/A'),
+                            status: @js($schedule->status ?? 'partial'),
                             time: @js($startTimeDisplay . ' - ' . $endTimeDisplay),
                             day: @js($dayFull)
                         })"
@@ -227,7 +230,7 @@
                         {{-- SCHEDULE CARD CONTENT --}}
                         <div class="flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden bg-white/25 px-2 py-1.5 text-center leading-tight pointer-events-none dark:bg-black/15">
                             <div class="w-full truncate text-[7px] font-black uppercase text-current opacity-80 sm:text-[8px]">
-                                {{ $subject->type ?? 'N/A' }} · S{{ $schedule->section ?? 'N/A' }}
+                                {{ $subject->type ?? 'N/A' }} Â· S{{ $schedule->section ?? 'N/A' }}
                             </div>
                             
                             <div class="w-full truncate text-[11px] font-black uppercase text-current sm:text-[12px]">
@@ -247,7 +250,7 @@
                             </div>
 
                             <div class="w-full truncate text-[7px] font-bold opacity-80">
-                                {{ $schedule->room?->room_name ?? $selectedRoomName ?? 'No room' }} · {{ $instructor }}
+                                {{ $schedule->room?->room_name ?? $selectedRoomName ?? 'No room' }} Â· {{ $instructor }}
                             </div>
                         </div>
 
@@ -312,7 +315,7 @@
     {{-- SCHEDULE DETAIL POPOVER (COMPACT) --}}
     <div 
         id="schedulePopover" 
-        class="schedule-popover hidden fixed z-[9999] w-80 bg-white dark:bg-slate-800 rounded-lg shadow-2xl border border-slate-200 dark:border-slate-700 p-3 backdrop-blur-sm pointer-events-auto opacity-0 scale-95 transition-all duration-150"
+        class="schedule-popover hidden fixed z-[9999] w-[26rem] max-h-[min(32rem,calc(100vh-2rem))] overflow-y-auto bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-4 backdrop-blur-sm pointer-events-auto opacity-0 scale-95 transition-all duration-150"
         style="max-width: calc(100vw - 16px);"
     >
         <div class="space-y-2">
@@ -326,38 +329,50 @@
             </div>
 
             {{-- INFO GRID (COMPACT) --}}
-            <div class="grid grid-cols-3 gap-2 text-[9px]">
+            <div class="grid grid-cols-2 gap-3 text-[10px]">
                 <div>
                     <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">EDP</span>
-                    <span class="font-black text-slate-900 dark:text-slate-100 block truncate text-[8px]" id="popEdp">—</span>
+                    <span class="font-black text-slate-900 dark:text-slate-100 block truncate text-[10px]" id="popEdp">â€”</span>
                 </div>
                 <div>
                     <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Section</span>
-                    <span class="font-black text-slate-900 dark:text-slate-100 block text-[8px]" id="popSection">—</span>
+                    <span class="font-black text-slate-900 dark:text-slate-100 block text-[10px]" id="popSection">â€”</span>
                 </div>
                 <div>
                     <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Type</span>
-                    <span class="font-black text-slate-900 dark:text-slate-100 block text-[8px]" id="popType2">—</span>
+                    <span class="font-black text-slate-900 dark:text-slate-100 block text-[10px]" id="popType2">â€”</span>
+                </div>
+                <div>
+                    <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Status</span>
+                    <span class="font-black text-slate-900 dark:text-slate-100 block text-[10px] uppercase" id="popStatus">â€”</span>
+                </div>
+                <div>
+                    <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Department</span>
+                    <span class="font-black text-slate-900 dark:text-slate-100 block text-[10px]" id="popDepartment">â€”</span>
+                </div>
+                <div>
+                    <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Major</span>
+                    <span class="font-black text-slate-900 dark:text-slate-100 block text-[10px]" id="popMajor">â€”</span>
                 </div>
             </div>
 
             {{-- SCHEDULE INFO (COMPACT) --}}
-            <div class="bg-slate-50 dark:bg-slate-900/50 rounded p-2 space-y-1 text-[8px]">
+            <div class="bg-slate-50 dark:bg-slate-950/50 rounded-lg p-3 space-y-2 text-[10px]">
                 <div class="flex justify-between font-bold">
                     <span class="text-slate-600 dark:text-slate-400">Time:</span>
-                    <span class="text-slate-900 dark:text-slate-100" id="popTime">—</span>
+                    <span class="text-slate-900 dark:text-slate-100" id="popTime">â€”</span>
                 </div>
                 <div class="flex justify-between font-bold">
                     <span class="text-slate-600 dark:text-slate-400">Day:</span>
-                    <span class="text-slate-900 dark:text-slate-100" id="popDay">—</span>
+                    <span class="text-slate-900 dark:text-slate-100" id="popDay">â€”</span>
                 </div>
                 <div class="flex justify-between font-bold">
                     <span class="text-slate-600 dark:text-slate-400">Instructor:</span>
-                    <span class="text-slate-900 dark:text-slate-100 truncate ml-1" id="popInstructor">—</span>
+                    <span class="text-slate-900 dark:text-slate-100 truncate ml-1" id="popInstructor">â€”</span>
                 </div>
                 <div class="flex justify-between font-bold">
                     <span class="text-slate-600 dark:text-slate-400">Room:</span>
-                    <span class="text-slate-900 dark:text-slate-100 truncate ml-1" id="popRoom">—</span>
+                    <span class="text-slate-900 dark:text-slate-100 truncate ml-1" id="popRoom">â€”</span>
                 </div>
             </div>
         </div>
@@ -368,7 +383,7 @@
     function scheduleGridApp() {
         return {
             initializeGrid() {
-                console.log('✅ Schedule grid initialized');
+                console.log('âœ… Schedule grid initialized');
             },
 
             showSchedulePopover(event, anchor, data) {
@@ -385,6 +400,9 @@
                 document.getElementById('popDay').textContent = data.day || 'N/A';
                 document.getElementById('popType').textContent = data.type || 'N/A';
                 document.getElementById('popType2').textContent = data.type || 'N/A';
+                document.getElementById('popDepartment').textContent = data.department || 'N/A';
+                document.getElementById('popMajor').textContent = data.major || 'N/A';
+                document.getElementById('popStatus').textContent = data.status || 'N/A';
 
                 popover.style.display = 'block';
                 popover.style.opacity = '0';
@@ -475,3 +493,5 @@
         animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     }
 </style>
+
+

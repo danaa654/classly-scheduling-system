@@ -26,6 +26,10 @@ class FacultyLoading extends Component
     public $activeTab = 'subjects';
     public $scheduleModalOpen = false;
 
+    protected $listeners = [
+        'refreshGrid' => '$refresh',
+    ];
+
     protected const DEPARTMENT_STRUCTURE = [
         'CCS' => ['IT', 'ACT'],
         'CTE' => ['ED'],

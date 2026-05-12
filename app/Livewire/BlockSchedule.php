@@ -19,6 +19,7 @@ class BlockSchedule extends Component
 
     protected $listeners = [
         'settings-updated' => 'loadSettings',
+        'refreshBlockSchedule' => '$refresh',
     ];
 
     public function mount()
@@ -53,7 +54,12 @@ class BlockSchedule extends Component
         // =====================================================
         // Get all schedules for selected section
         // =====================================================
-        $allSchedules = Schedule::finalized()
+        $allSchedules = Schedule::query()
+            ->whereIn('status', [
+                Schedule::STATUS_PARTIAL,
+                Schedule::STATUS_FACULTY_ASSIGNED,
+                Schedule::STATUS_FINALIZED,
+            ])
             ->where('section', $this->selectedSection)
             ->with(['subject', 'room', 'faculty'])
             ->get();
@@ -68,8 +74,10 @@ class BlockSchedule extends Component
             }
 
             // Match both department and year level
-            return ($schedule->subject->department === $this->selectedDepartment && 
-                    (int)$schedule->subject->year_level === (int)$this->selectedYear);
+            return (
+                $schedule->subject->department === $this->selectedDepartment
+                || $schedule->subject->major === $this->selectedDepartment
+            ) && (int)$schedule->subject->year_level === (int)$this->selectedYear;
         })
         ->groupBy('day'); // Group by day for display
 

@@ -46,7 +46,13 @@ class DiagnosticController extends Controller
         $section = $request->query('section', 'A');
 
         // Get all schedules for this section
-        $allSchedules = Schedule::where('section', $section)
+        $allSchedules = Schedule::query()
+            ->whereIn('status', [
+                Schedule::STATUS_PARTIAL,
+                Schedule::STATUS_FACULTY_ASSIGNED,
+                Schedule::STATUS_FINALIZED,
+            ])
+            ->where('section', $section)
             ->with(['subject', 'room'])
             ->get();
 
@@ -55,8 +61,10 @@ class DiagnosticController extends Controller
             if (!$schedule->subject) {
                 return false;
             }
-            return ($schedule->subject->department === $dept && 
-                    (int)$schedule->subject->year_level === (int)$year);
+            return (
+                $schedule->subject->department === $dept
+                || $schedule->subject->major === $dept
+            ) && (int)$schedule->subject->year_level === (int)$year;
         });
 
         // Group by day
@@ -80,6 +88,8 @@ class DiagnosticController extends Controller
                         'subject_year_level' => $schedule->subject->year_level,
                         'time' => $schedule->start_time . ' - ' . $schedule->end_time,
                         'room' => $schedule->room->room_name ?? 'N/A',
+                        'status' => $schedule->status,
+                        'pairing_key' => $schedule->pairing_key,
                     ];
                 })->toArray();
             })->toArray(),

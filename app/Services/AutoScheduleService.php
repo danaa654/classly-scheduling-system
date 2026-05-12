@@ -9,6 +9,7 @@ use App\Models\Subject;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
 
 class AutoScheduleService
 {
@@ -16,6 +17,25 @@ class AutoScheduleService
     private const SLOT_MINUTES = 30;
     private const LUNCH_START = '12:00:00';
     private const LUNCH_END = '13:00:00';
+    private const DAY_PAIRINGS = [
+        1 => [
+            ['Monday'],
+            ['Tuesday'],
+            ['Wednesday'],
+            ['Thursday'],
+            ['Friday'],
+            ['Saturday'],
+        ],
+        2 => [
+            ['Monday', 'Wednesday'],
+            ['Tuesday', 'Thursday'],
+            ['Wednesday', 'Friday'],
+        ],
+        3 => [
+            ['Monday', 'Wednesday', 'Friday'],
+            ['Tuesday', 'Thursday', 'Saturday'],
+        ],
+    ];
 
     public function __construct(private ScheduleConflictService $conflicts)
     {
@@ -41,7 +61,7 @@ class AutoScheduleService
         }
 
         $existingSchedules = Schedule::query()
-            ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'status')
+            ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
             ->with('subject:id,subject_code,department,major,year_level,section')
             ->where(function ($query) use ($filters) {
                 $query->where('department', strtoupper($filters['department']))
@@ -62,6 +82,7 @@ class AutoScheduleService
             'failed' => 0,
             'warnings' => 0,
             'failure_reasons' => [],
+            'failed_items' => [],
             'fallback_warnings' => [],
             'scheduled_items' => [],
             'filters' => [
@@ -76,18 +97,24 @@ class AutoScheduleService
             foreach ($groupSubjects as $subject) {
                 $remainingMeetings = max(0, (int) $subject->meetings_per_week - (int) $subject->schedules_count);
 
-                for ($meetingIndex = 0; $meetingIndex < $remainingMeetings; $meetingIndex++) {
-                    $placement = $this->findPlacement($subject, $rooms, $existingSchedules, $bounds, $meetingIndex);
+                if ($remainingMeetings <= 0) {
+                    continue;
+                }
 
-                    if (!$placement) {
-                        $reason = $this->compatibleRooms($rooms, $subject)->isEmpty()
-                            ? 'no compatible room'
-                            : 'no valid time slot';
+                $linkedPattern = $this->generateLinkedMeetingPattern($subject, $rooms, $existingSchedules, $bounds, $remainingMeetings);
 
-                        $this->recordFailure($result, $subject->subject_code, $reason);
-                        break;
-                    }
+                if (!$linkedPattern) {
+                    $reason = $this->compatibleRooms($rooms, $subject)->isEmpty()
+                        ? 'no compatible room'
+                        : 'no linked room/time group';
 
+                    $this->recordFailure($result, $subject, $reason);
+                    continue;
+                }
+
+                $pairingKey = $linkedPattern['pairing_key'];
+
+                foreach ($linkedPattern['placements'] as $placement) {
                     $scheduleData = [
                         'subject_id' => $subject->id,
                         'room_id' => $placement['room']->id,
@@ -101,6 +128,7 @@ class AutoScheduleService
                         'end_time' => $placement['end'],
                         'duration_hours' => round(Carbon::parse($placement['start'])->diffInMinutes(Carbon::parse($placement['end'])) / 60, 2),
                         'meetings_per_week' => $subject->meetings_per_week,
+                        'pairing_key' => $pairingKey,
                         'status' => Schedule::STATUS_PARTIAL,
                     ];
 
@@ -114,17 +142,20 @@ class AutoScheduleService
                     $result['scheduled']++;
                     $result['scheduled_items'][] = [
                         'subject_code' => $subject->subject_code,
+                        'subject_name' => $subject->description,
                         'edp_code' => $subject->edp_code,
                         'room' => $placement['room']->room_name,
                         'day' => $placement['day'],
                         'start_time' => Carbon::parse($placement['start'])->format('h:i A'),
                         'end_time' => Carbon::parse($placement['end'])->format('h:i A'),
+                        'instructor' => 'Unassigned',
                         'raw_start_time' => $placement['start'],
                         'raw_end_time' => $placement['end'],
                         'subject_id' => $subject->id,
                         'room_id' => $placement['room']->id,
                         'duration_hours' => $scheduleData['duration_hours'],
                         'meetings_per_week' => $subject->meetings_per_week,
+                        'pairing_key' => $pairingKey,
                     ];
 
                     if ($placement['fallback']) {
@@ -158,7 +189,7 @@ class AutoScheduleService
             ->keyBy('id');
 
         $existingSchedules = Schedule::query()
-            ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'status')
+            ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
             ->with('subject:id,subject_code,department,major,year_level,section')
             ->whereIn('room_id', $roomIds)
             ->orWhereIn('subject_id', $subjectIds)
@@ -171,54 +202,100 @@ class AutoScheduleService
             'failure_reasons' => [],
         ];
 
-        foreach ($items as $item) {
-            $subject = $subjects->get($item['subject_id'] ?? null);
-            $room = $rooms->get($item['room_id'] ?? null);
-            $day = (string) ($item['day'] ?? '');
-            $start = (string) ($item['raw_start_time'] ?? '');
-            $end = (string) ($item['raw_end_time'] ?? '');
+        $groups = collect($items)
+            ->values()
+            ->groupBy(fn (array $item, int $index) => filled($item['pairing_key'] ?? null)
+                ? 'pairing:' . $item['pairing_key']
+                : 'single:' . $index);
 
-            if (!$subject || !$room || !$day || !$start || !$end) {
-                $result['failure_reasons'][] = ($item['subject_code'] ?? 'Unknown subject') . ': invalid generated schedule data';
+        foreach ($groups as $groupItems) {
+            $validatedSchedules = collect();
+            $schedulePayloads = [];
+            $groupFailed = false;
+
+            foreach ($groupItems as $item) {
+                $subject = $subjects->get($item['subject_id'] ?? null);
+                $room = $rooms->get($item['room_id'] ?? null);
+                $day = (string) ($item['day'] ?? '');
+                $start = (string) ($item['raw_start_time'] ?? '');
+                $end = (string) ($item['raw_end_time'] ?? '');
+                $pairingKey = $item['pairing_key'] ?? null;
+
+                if (!$subject || !$room || !$day || !$start || !$end) {
+                    $result['failure_reasons'][] = ($item['subject_code'] ?? 'Unknown subject') . ': invalid generated schedule data';
+                    $groupFailed = true;
+                    break;
+                }
+
+                $start = Carbon::parse($start)->format('H:i:s');
+                $end = Carbon::parse($end)->format('H:i:s');
+                $validationSchedules = $existingSchedules->concat($validatedSchedules);
+
+                if (!$this->isRoomCompatible($room, $subject, allowMinorLabFallback: true)) {
+                    $result['failure_reasons'][] = "{$subject->subject_code}: room is no longer compatible";
+                    $groupFailed = true;
+                    break;
+                }
+
+                if ($this->conflicts->overlapsLunchBreak($start, $end)) {
+                    $result['failure_reasons'][] = "{$subject->subject_code}: generated slot overlaps lunch break";
+                    $groupFailed = true;
+                    break;
+                }
+
+                if (!$this->conflicts->respectsSectionSession($subject->section, $start, $end)) {
+                    $result['failure_reasons'][] = "{$subject->subject_code}: generated slot violates section session rules";
+                    $groupFailed = true;
+                    break;
+                }
+
+                if ($this->hasRoomConflict($validationSchedules, $room->id, $day, $start, $end)) {
+                    $result['failure_reasons'][] = "{$subject->subject_code}: room conflict detected before save";
+                    $groupFailed = true;
+                    break;
+                }
+
+                if ($this->hasSectionConflict($validationSchedules, $subject, $day, $start, $end)) {
+                    $result['failure_reasons'][] = "{$subject->subject_code}: section conflict detected before save";
+                    $groupFailed = true;
+                    break;
+                }
+
+                $payload = [
+                    'subject_id' => $subject->id,
+                    'room_id' => $room->id,
+                    'user_id' => $userId,
+                    'department' => $subject->department,
+                    'major' => $subject->major,
+                    'year_level' => $subject->year_level,
+                    'section' => $subject->section,
+                    'day' => $day,
+                    'start_time' => $start,
+                    'end_time' => $end,
+                    'duration_hours' => $item['duration_hours'] ?? round(Carbon::parse($start)->diffInMinutes(Carbon::parse($end)) / 60, 2),
+                    'meetings_per_week' => $item['meetings_per_week'] ?? $subject->meetings_per_week,
+                    'pairing_key' => $pairingKey,
+                    'status' => Schedule::STATUS_PARTIAL,
+                ];
+
+                $previewSchedule = new Schedule($payload);
+                $previewSchedule->setRelation('subject', $subject);
+                $validatedSchedules->push($previewSchedule);
+                $schedulePayloads[] = [$payload, $item, $subject];
+            }
+
+            if ($groupFailed) {
                 continue;
             }
 
-            if (!$this->isRoomCompatible($room, $subject, allowMinorLabFallback: true)) {
-                $result['failure_reasons'][] = "{$subject->subject_code}: room is no longer compatible";
-                continue;
+            foreach ($schedulePayloads as [$payload, $item, $subject]) {
+                $schedule = Schedule::create($payload);
+                $schedule->setRelation('subject', $subject);
+                $existingSchedules->push($schedule);
+
+                $result['saved']++;
+                $result['saved_items'][] = $item;
             }
-
-            if ($this->hasRoomConflict($existingSchedules, $room->id, $day, $start, $end)) {
-                $result['failure_reasons'][] = "{$subject->subject_code}: room conflict detected before save";
-                continue;
-            }
-
-            if ($this->hasSectionConflict($existingSchedules, $subject, $day, $start, $end)) {
-                $result['failure_reasons'][] = "{$subject->subject_code}: section conflict detected before save";
-                continue;
-            }
-
-            $schedule = Schedule::create([
-                'subject_id' => $subject->id,
-                'room_id' => $room->id,
-                'user_id' => $userId,
-                'department' => $subject->department,
-                'major' => $subject->major,
-                'year_level' => $subject->year_level,
-                'section' => $subject->section,
-                'day' => $day,
-                'start_time' => $start,
-                'end_time' => $end,
-                'duration_hours' => $item['duration_hours'] ?? round(Carbon::parse($start)->diffInMinutes(Carbon::parse($end)) / 60, 2),
-                'meetings_per_week' => $item['meetings_per_week'] ?? $subject->meetings_per_week,
-                'status' => Schedule::STATUS_PARTIAL,
-            ]);
-
-            $schedule->setRelation('subject', $subject);
-            $existingSchedules->push($schedule);
-
-            $result['saved']++;
-            $result['saved_items'][] = $item;
         }
 
         $result['failed'] = count($result['failure_reasons']);
@@ -330,7 +407,9 @@ class AutoScheduleService
 
     public function findAvailableSlot(Subject $subject, Collection $rooms, Collection $existingSchedules, int $meetingIndex = 0): ?array
     {
-        return $this->findPlacement($subject, $rooms, $existingSchedules, Setting::getDayBounds(), $meetingIndex);
+        $pattern = $this->findConsistentRoomAndTime($subject, $rooms, $existingSchedules, Setting::getDayBounds(), 1, $meetingIndex);
+
+        return $pattern['placements'][0] ?? null;
     }
 
     public function generateTimeSlots(?string $section = null): array
@@ -371,68 +450,439 @@ class AutoScheduleService
             ->orderBy('year_level')
             ->orderBy('section')
             ->orderBy('type')
+            ->orderByDesc('duration_hours')
             ->orderBy('subject_code');
     }
 
-    private function findPlacement(Subject $subject, Collection $rooms, Collection $existingSchedules, array $bounds, int $meetingIndex): ?array
+    public function previewSubjectSchedule(int $subjectId, array $filters, array $overrides = [], array $pendingItems = [], ?int $userId = null): array
     {
-        $minutes = max(self::SLOT_MINUTES, (int) ceil(((float) $subject->duration_hours * 60) / max(1, (int) $subject->meetings_per_week)));
+        set_time_limit(300);
+
+        $subject = Subject::query()
+            ->select('id', 'edp_code', 'subject_code', 'description', 'section', 'major', 'year_level', 'department', 'units', 'duration_hours', 'type', 'meetings_per_week')
+            ->find($subjectId);
+
+        if (!$subject) {
+            return $this->emptyResult('subject not found');
+        }
+
+        if (isset($overrides['duration_hours']) && is_numeric($overrides['duration_hours'])) {
+            $subject->duration_hours = max(0.5, (float) $overrides['duration_hours']);
+        }
+
+        if (isset($overrides['meetings_per_week']) && is_numeric($overrides['meetings_per_week'])) {
+            $subject->meetings_per_week = max(1, (int) $overrides['meetings_per_week']);
+        }
+
+        $rooms = Room::query()
+            ->select('id', 'room_name', 'type', 'capacity', 'specialization', 'floor')
+            ->available()
+            ->when(!empty($overrides['preferred_room_type']), function ($query) use ($overrides) {
+                $query->where('type', $overrides['preferred_room_type']);
+            })
+            ->get();
+
+        $existingSchedules = Schedule::query()
+            ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
+            ->with('subject:id,subject_code,department,major,year_level,section')
+            ->where(function ($query) use ($subject) {
+                $query->where('department', $subject->department)
+                    ->where('major', $subject->major)
+                    ->where('year_level', (int) $subject->year_level)
+                    ->where('section', $subject->section);
+            })
+            ->orWhereIn('room_id', $rooms->pluck('id'))
+            ->get();
+
+        foreach ($pendingItems as $item) {
+            if (($item['subject_id'] ?? null) === $subject->id) {
+                continue;
+            }
+
+            $existingSchedules->push(new Schedule([
+                'subject_id' => $item['subject_id'] ?? null,
+                'room_id' => $item['room_id'] ?? null,
+                'department' => $filters['department'] ?? null,
+                'major' => $filters['major'] ?? null,
+                'year_level' => $filters['year_level'] ?? null,
+                'section' => $filters['section'] ?? null,
+                'day' => $item['day'] ?? null,
+                'start_time' => $item['raw_start_time'] ?? null,
+                'end_time' => $item['raw_end_time'] ?? null,
+                'pairing_key' => $item['pairing_key'] ?? null,
+                'status' => Schedule::STATUS_PARTIAL,
+            ]));
+        }
+
+        $result = [
+            'scheduled' => 0,
+            'failed' => 0,
+            'warnings' => 0,
+            'failure_reasons' => [],
+            'failed_items' => [],
+            'fallback_warnings' => [],
+            'scheduled_items' => [],
+            'filters' => [
+                'department' => strtoupper((string) ($filters['department'] ?? $subject->department)),
+                'major' => strtoupper((string) ($filters['major'] ?? $subject->major)),
+                'year_level' => (int) ($filters['year_level'] ?? $subject->year_level),
+                'section' => strtoupper((string) ($filters['section'] ?? $subject->section)),
+            ],
+        ];
+
+        $linkedPattern = $this->generateLinkedMeetingPattern($subject, $rooms, $existingSchedules, Setting::getDayBounds(), (int) $subject->meetings_per_week);
+
+        if (!$linkedPattern) {
+            $reason = $this->compatibleRooms($rooms, $subject)->isEmpty()
+                ? 'No compatible room available'
+                : 'No linked room/time group';
+
+            $this->recordFailure($result, $subject, $reason);
+            $result['failed'] = count($result['failed_items']);
+
+            return $result;
+        }
+
+        foreach ($linkedPattern['placements'] as $placement) {
+            $pairingKey = $linkedPattern['pairing_key'];
+
+            $schedule = new Schedule([
+                'subject_id' => $subject->id,
+                'room_id' => $placement['room']->id,
+                'department' => $subject->department,
+                'major' => $subject->major,
+                'year_level' => $subject->year_level,
+                'section' => $subject->section,
+                'day' => $placement['day'],
+                'start_time' => $placement['start'],
+                'end_time' => $placement['end'],
+                'pairing_key' => $pairingKey,
+                'status' => Schedule::STATUS_PARTIAL,
+            ]);
+
+            $schedule->setRelation('subject', $subject);
+            $existingSchedules->push($schedule);
+            $result['scheduled']++;
+            $result['scheduled_items'][] = [
+                'subject_code' => $subject->subject_code,
+                'subject_name' => $subject->description,
+                'edp_code' => $subject->edp_code,
+                'room' => $placement['room']->room_name,
+                'day' => $placement['day'],
+                'start_time' => Carbon::parse($placement['start'])->format('h:i A'),
+                'end_time' => Carbon::parse($placement['end'])->format('h:i A'),
+                'instructor' => 'Unassigned',
+                'raw_start_time' => $placement['start'],
+                'raw_end_time' => $placement['end'],
+                'subject_id' => $subject->id,
+                'room_id' => $placement['room']->id,
+                'duration_hours' => round(Carbon::parse($placement['start'])->diffInMinutes(Carbon::parse($placement['end'])) / 60, 2),
+                'meetings_per_week' => $subject->meetings_per_week,
+                'pairing_key' => $pairingKey,
+            ];
+        }
+
+        $result['failed'] = count($result['failed_items']);
+
+        return $result;
+    }
+
+    public function generateLinkedMeetingPattern(
+        Subject $subject,
+        Collection $rooms,
+        Collection $existingSchedules,
+        ?array $bounds = null,
+        ?int $meetingsNeeded = null
+    ): ?array {
+        return $this->findConsistentRoomAndTime(
+            $subject,
+            $rooms,
+            $existingSchedules,
+            $bounds ?? Setting::getDayBounds(),
+            $meetingsNeeded
+        );
+    }
+
+    public function findConsistentRoomAndTime(
+        Subject $subject,
+        Collection $rooms,
+        Collection $existingSchedules,
+        array $bounds,
+        ?int $meetingsNeeded = null,
+        int $meetingIndex = 0
+    ): ?array {
+        $meetingsNeeded = max(1, min(count(self::DAYS), $meetingsNeeded ?? (int) $subject->meetings_per_week));
+
+        $anchoredPattern = $this->findAnchoredLinkedPattern($subject, $rooms, $existingSchedules, $meetingsNeeded);
+        if ($anchoredPattern) {
+            return $anchoredPattern;
+        }
+
+        $minutes = $this->minutesPerMeeting($subject);
         $compatibleRooms = $this->compatibleRooms($rooms, $subject, $existingSchedules, $meetingIndex);
 
         if ($compatibleRooms->isEmpty()) {
             return null;
         }
 
-        foreach ($this->prioritizedDays($subject, $existingSchedules, $meetingIndex) as $day) {
-            foreach ($this->sectionWindows($subject->section, $bounds) as $window) {
-                if ($window['start']->copy()->addMinutes($minutes)->gt($window['end'])) {
-                    continue;
-                }
+        foreach ($compatibleRooms as $candidate) {
+            $room = $candidate['room'];
 
-                $period = CarbonPeriod::create(
-                    $window['start'],
-                    self::SLOT_MINUTES . ' minutes',
-                    $window['end']->copy()->subMinutes($minutes)
-                );
-
-                foreach ($period as $slotStart) {
-                    $slotEnd = $slotStart->copy()->addMinutes($minutes);
-                    $start = $slotStart->format('H:i:s');
-                    $end = $slotEnd->format('H:i:s');
-
-                    if ($this->conflicts->overlapsLunchBreak($start, $end)) {
+            foreach ($this->meetingDayPatterns($meetingsNeeded) as $days) {
+                foreach ($this->sectionWindows($subject->section, $bounds) as $window) {
+                    if ($window['start']->copy()->addMinutes($minutes)->gt($window['end'])) {
                         continue;
                     }
 
-                    if (!$this->conflicts->respectsSectionSession($subject->section, $start, $end)) {
-                        continue;
-                    }
+                    $period = CarbonPeriod::create(
+                        $window['start'],
+                        self::SLOT_MINUTES . ' minutes',
+                        $window['end']->copy()->subMinutes($minutes)
+                    );
 
-                    foreach ($compatibleRooms as $candidate) {
-                        $room = $candidate['room'];
+                    foreach ($period as $slotStart) {
+                        $slotEnd = $slotStart->copy()->addMinutes($minutes);
+                        $start = $slotStart->format('H:i:s');
+                        $end = $slotEnd->format('H:i:s');
 
-                        if (!$this->roomAvailable($existingSchedules, $room->id, $day, $start, $end)) {
+                        if ($this->conflicts->overlapsLunchBreak($start, $end)) {
                             continue;
                         }
 
-                        if (!$this->sectionAvailable($existingSchedules, $subject, $day, $start, $end)) {
+                        if (!$this->conflicts->respectsSectionSession($subject->section, $start, $end)) {
                             continue;
                         }
 
-                        return [
-                            'room' => $room,
-                            'day' => $day,
-                            'start' => $start,
-                            'end' => $end,
-                            'score' => $candidate['score'],
-                            'fallback' => $candidate['fallback'],
-                        ];
+                        $placements = $this->buildPlacementsForDays(
+                            $existingSchedules,
+                            $subject,
+                            $room,
+                            $days,
+                            $start,
+                            $end,
+                            $candidate['score'],
+                            $candidate['fallback']
+                        );
+
+                        if ($placements) {
+                            return [
+                                'pairing_key' => $this->makePairingKey($subject),
+                                'placements' => $placements,
+                            ];
+                        }
                     }
                 }
             }
         }
 
         return null;
+    }
+
+    private function findPlacement(Subject $subject, Collection $rooms, Collection $existingSchedules, array $bounds, int $meetingIndex): ?array
+    {
+        $pattern = $this->findConsistentRoomAndTime($subject, $rooms, $existingSchedules, $bounds, 1, $meetingIndex);
+
+        return $pattern['placements'][0] ?? null;
+    }
+
+    private function findAnchoredLinkedPattern(Subject $subject, Collection $rooms, Collection $existingSchedules, int $meetingsNeeded): ?array
+    {
+        $existingForSubject = $existingSchedules
+            ->filter(fn (Schedule $schedule) => (int) $schedule->subject_id === (int) $subject->id)
+            ->filter(fn (Schedule $schedule) => filled($schedule->room_id) && filled($schedule->day) && filled($schedule->start_time) && filled($schedule->end_time))
+            ->values();
+
+        if ($existingForSubject->isEmpty()) {
+            return null;
+        }
+
+        $anchor = $existingForSubject->first();
+        $room = $rooms->first(fn (Room $room) => (int) $room->id === (int) $anchor->room_id);
+
+        if (!$room || !$this->isRoomCompatible($room, $subject, allowMinorLabFallback: true)) {
+            return null;
+        }
+
+        $usedDays = $existingForSubject
+            ->pluck('day')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $totalMeetings = max(count($usedDays) + $meetingsNeeded, (int) $subject->meetings_per_week);
+        $start = Carbon::parse($anchor->start_time)->format('H:i:s');
+        $end = Carbon::parse($anchor->end_time)->format('H:i:s');
+        $score = $this->compatibilityScore($room, $subject);
+
+        foreach ($this->meetingDayPatterns($totalMeetings, $usedDays) as $pattern) {
+            if (array_diff($usedDays, $pattern)) {
+                continue;
+            }
+
+            $days = array_values(array_diff($pattern, $usedDays));
+
+            if (count($days) < $meetingsNeeded) {
+                continue;
+            }
+
+            $placements = $this->buildPlacementsForDays(
+                $existingSchedules,
+                $subject,
+                $room,
+                array_slice($days, 0, $meetingsNeeded),
+                $start,
+                $end,
+                $score,
+                false
+            );
+
+            if ($placements) {
+                return [
+                    'pairing_key' => $anchor->pairing_key ?: $this->makePairingKey($subject),
+                    'placements' => $placements,
+                ];
+            }
+        }
+
+        return null;
+    }
+
+    private function buildPlacementsForDays(
+        Collection $existingSchedules,
+        Subject $subject,
+        Room $room,
+        array $days,
+        string $start,
+        string $end,
+        int $score,
+        bool $fallback
+    ): ?array {
+        if (count($days) !== count(array_unique($days))) {
+            return null;
+        }
+
+        $placements = [];
+
+        foreach ($days as $day) {
+            if (!$this->roomAvailable($existingSchedules, $room->id, $day, $start, $end)) {
+                return null;
+            }
+
+            if (!$this->sectionAvailable($existingSchedules, $subject, $day, $start, $end)) {
+                return null;
+            }
+
+            $placements[] = [
+                'room' => $room,
+                'day' => $day,
+                'start' => $start,
+                'end' => $end,
+                'score' => $score,
+                'fallback' => $fallback,
+            ];
+        }
+
+        return $placements;
+    }
+
+    private function minutesPerMeeting(Subject $subject): int
+    {
+        return max(
+            self::SLOT_MINUTES,
+            (int) ceil(((float) $subject->duration_hours * 60) / max(1, (int) $subject->meetings_per_week))
+        );
+    }
+
+    private function meetingDayPatterns(int $meetings, array $mustIncludeDays = []): array
+    {
+        $meetings = max(1, min(count(self::DAYS), $meetings));
+        $patterns = array_merge(
+            self::DAY_PAIRINGS[$meetings] ?? [],
+            $this->fallbackDayPatterns($meetings),
+            $this->dayCombinations($meetings)
+        );
+
+        $unique = [];
+        foreach ($patterns as $pattern) {
+            $pattern = array_values(array_intersect(self::DAYS, $pattern));
+
+            if (count($pattern) !== $meetings) {
+                continue;
+            }
+
+            $unique[implode('|', $pattern)] = $pattern;
+        }
+
+        $patterns = array_values($unique);
+
+        if ($mustIncludeDays) {
+            usort($patterns, function (array $a, array $b) use ($mustIncludeDays) {
+                $aContainsAll = empty(array_diff($mustIncludeDays, $a));
+                $bContainsAll = empty(array_diff($mustIncludeDays, $b));
+
+                if ($aContainsAll !== $bContainsAll) {
+                    return $aContainsAll ? -1 : 1;
+                }
+
+                $aMatches = count(array_intersect($mustIncludeDays, $a));
+                $bMatches = count(array_intersect($mustIncludeDays, $b));
+
+                return $bMatches <=> $aMatches;
+            });
+        }
+
+        return $patterns;
+    }
+
+    private function fallbackDayPatterns(int $meetings): array
+    {
+        return match ($meetings) {
+            4 => [
+                ['Monday', 'Tuesday', 'Thursday', 'Friday'],
+                ['Monday', 'Wednesday', 'Thursday', 'Saturday'],
+                ['Tuesday', 'Wednesday', 'Friday', 'Saturday'],
+            ],
+            5 => [
+                ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'],
+                ['Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'],
+            ],
+            6 => [self::DAYS],
+            default => [],
+        };
+    }
+
+    private function dayCombinations(int $meetings): array
+    {
+        $result = [];
+        $days = self::DAYS;
+
+        $build = function (int $start, array $current) use (&$build, &$result, $days, $meetings) {
+            if (count($current) === $meetings) {
+                $result[] = $current;
+                return;
+            }
+
+            $needed = $meetings - count($current);
+            $limit = count($days) - $needed;
+
+            for ($index = $start; $index <= $limit; $index++) {
+                $build($index + 1, array_merge($current, [$days[$index]]));
+            }
+        };
+
+        $build(0, []);
+
+        return $result;
+    }
+
+    private function makePairingKey(Subject $subject): string
+    {
+        return implode('-', [
+            'pair',
+            $subject->id,
+            Str::orderedUuid()->toString(),
+        ]);
     }
 
     private function compatibleRooms(Collection $rooms, Subject $subject, ?Collection $existingSchedules = null, int $meetingIndex = 0): Collection
@@ -635,9 +1085,23 @@ class AutoScheduleService
         ]);
     }
 
-    private function recordFailure(array &$result, string $subjectCode, string $reason): void
+    private function recordFailure(array &$result, Subject|string $subject, string $reason): void
     {
+        $subjectCode = $subject instanceof Subject ? $subject->subject_code : $subject;
         $result['failure_reasons'][] = "{$subjectCode}: {$reason}";
+
+        if ($subject instanceof Subject) {
+            $result['failed_items'][] = [
+                'subject_id' => $subject->id,
+                'subject_code' => $subject->subject_code,
+                'subject_name' => $subject->description,
+                'edp_code' => $subject->edp_code,
+                'duration_hours' => $subject->duration_hours,
+                'meetings_per_week' => $subject->meetings_per_week,
+                'preferred_room_type' => '',
+                'reason' => $reason,
+            ];
+        }
     }
 
     private function emptyResult(string $reason): array
@@ -647,7 +1111,9 @@ class AutoScheduleService
             'failed' => 1,
             'warnings' => 0,
             'failure_reasons' => [$reason],
+            'failed_items' => [],
             'fallback_warnings' => [],
+            'scheduled_items' => [],
         ];
     }
 }

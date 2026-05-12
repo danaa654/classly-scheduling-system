@@ -48,17 +48,6 @@
             </div>
 
             <div class="flex items-center gap-3">
-                @if($canFinalizeSchedules ?? false)
-                    <button 
-                        wire:click="finalizeFacultyAssignedSchedules"
-                        wire:confirm="Finalize all faculty-assigned schedules?"
-                        class="px-3 py-1.5 rounded-md text-[8px] font-black uppercase transition-all flex items-center gap-1 border-2 border-emerald-400 dark:border-emerald-600 bg-emerald-100/70 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-200/70 dark:hover:bg-emerald-900/50 shadow-md hover:shadow-lg"
-                        title="Finalize submitted faculty loading schedules">
-                        <span>OK</span>
-                        Finalize
-                    </button>
-                @endif
-
                 <!-- AI GENERATION BUTTON -->
                 <button 
                     wire:click="openGenerateModal"
@@ -132,7 +121,7 @@
 
     @if($showGenerateModal)
         <div class="fixed inset-0 z-[9997] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
-            <div class="w-full max-w-2xl rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div class="w-full max-w-2xl rounded-3xl border border-white/50 bg-white/70 shadow-2xl backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-900/75">
                 <div class="border-b border-slate-200 p-5 dark:border-slate-700">
                     <p class="text-xs font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400">AI Auto Generate</p>
                     <h3 class="mt-1 text-xl font-black uppercase text-slate-900 dark:text-white">Choose Schedule Group</h3>
@@ -198,7 +187,7 @@
             x-cloak
             class="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
             @click.self="$wire.closeGenerationSummary()">
-            <div class="max-h-[85vh] w-full max-w-4xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900">
+            <div class="max-h-[85vh] w-full max-w-4xl overflow-hidden rounded-3xl border border-white/50 bg-white/70 shadow-2xl backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-900/75">
                 <div class="flex items-start justify-between border-b border-slate-200 p-5 dark:border-slate-700">
                     <div>
                         <p class="text-xs font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400">AI Generation Summary</p>
@@ -232,7 +221,9 @@
                                 @forelse($generationSummary['scheduled_items'] as $item)
                                     <div class="rounded-lg border border-slate-200 p-3 text-xs dark:border-slate-700">
                                         <p class="font-black text-slate-900 dark:text-white">{{ $item['subject_code'] }} <span class="text-slate-500">EDP: {{ $item['edp_code'] }}</span></p>
+                                        <p class="mt-1 font-bold text-slate-700 dark:text-slate-200">{{ $item['subject_name'] ?? 'No subject name' }}</p>
                                         <p class="mt-1 font-bold text-slate-600 dark:text-slate-300">{{ $item['room'] }} - {{ $item['day'] }} - {{ $item['start_time'] }} to {{ $item['end_time'] }}</p>
+                                        <p class="mt-1 font-bold text-slate-500 dark:text-slate-400">Instructor: {{ $item['instructor'] ?? 'Unassigned' }}</p>
                                     </div>
                                 @empty
                                     <p class="text-xs font-bold text-slate-500">No schedules were created.</p>
@@ -243,8 +234,36 @@
                         <section>
                             <h4 class="mb-3 text-xs font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">Failed / Warnings</h4>
                             <div class="space-y-2">
-                                @forelse($generationSummary['failure_reasons'] as $reason)
-                                    <div class="rounded-lg border border-red-200 bg-red-50 p-3 text-xs font-bold text-red-700 dark:border-red-900 dark:bg-red-950/20 dark:text-red-300">{{ $reason }}</div>
+                                @forelse($generationSummary['failed_items'] ?? [] as $item)
+                                    <div class="rounded-xl border border-red-200 bg-red-50/80 p-3 text-xs dark:border-red-900 dark:bg-red-950/20">
+                                        <p class="font-black text-red-700 dark:text-red-300">{{ $item['subject_code'] }} <span class="text-red-500">EDP: {{ $item['edp_code'] }}</span></p>
+                                        <p class="mt-1 font-bold text-slate-700 dark:text-slate-300">{{ $item['subject_name'] }}</p>
+                                        <p class="mt-1 font-bold text-red-700 dark:text-red-300">Reason: {{ $item['reason'] }}</p>
+
+                                        <div class="mt-3 grid grid-cols-3 gap-2">
+                                            <label class="space-y-1">
+                                                <span class="block text-[8px] font-black uppercase text-slate-500">Meetings</span>
+                                                <input type="number" min="1" max="6" step="1" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.meetings_per_week" class="w-full rounded border border-red-200 bg-white px-2 py-1 text-[10px] font-bold dark:border-red-900 dark:bg-slate-900">
+                                            </label>
+                                            <label class="space-y-1">
+                                                <span class="block text-[8px] font-black uppercase text-slate-500">Hours</span>
+                                                <input type="number" min="0.5" max="8" step="0.5" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.duration_hours" class="w-full rounded border border-red-200 bg-white px-2 py-1 text-[10px] font-bold dark:border-red-900 dark:bg-slate-900">
+                                            </label>
+                                            <label class="space-y-1">
+                                                <span class="block text-[8px] font-black uppercase text-slate-500">Room Type</span>
+                                                <select wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.preferred_room_type" class="w-full rounded border border-red-200 bg-white px-2 py-1 text-[10px] font-bold dark:border-red-900 dark:bg-slate-900">
+                                                    <option value="">Any</option>
+                                                    <option value="Lecture">Lecture</option>
+                                                    <option value="Lab">Lab</option>
+                                                    <option value="Laboratory">Laboratory</option>
+                                                </select>
+                                            </label>
+                                        </div>
+
+                                        <button wire:click="retryFailedSubject({{ $item['subject_id'] }})" wire:loading.attr="disabled" class="mt-3 w-full rounded-lg bg-red-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:bg-red-700 disabled:opacity-60">
+                                            Edit & Retry
+                                        </button>
+                                    </div>
                                 @empty
                                     <p class="text-xs font-bold text-slate-500">No failed subjects.</p>
                                 @endforelse

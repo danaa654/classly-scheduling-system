@@ -34,6 +34,7 @@ class Schedule extends Model
         'end_time',
         'duration_hours',
         'meetings_per_week',
+        'pairing_key',
         'status',
     ];
 
