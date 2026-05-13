@@ -25,6 +25,8 @@ return new class extends Migration
             $table->integer('units')->default(3);
             $table->decimal('duration_hours', 4, 2)->default(3.00);
             $table->enum('type', ['Major', 'Minor'])->default('Major');
+            $table->string('subject_type')->nullable();
+            $table->string('specialization')->nullable();
             $table->integer('meetings_per_week')->default(1);
             
             $table->timestamps();

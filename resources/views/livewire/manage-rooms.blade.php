@@ -212,7 +212,7 @@
     <div x-show="bulkOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-md" x-cloak x-transition>
         <div class="bg-white dark:bg-slate-900 w-full max-w-xl rounded-[3rem] p-10 shadow-2xl border border-slate-200 dark:border-slate-800 transition-colors" @click.away="bulkOpen = false">
             <h3 class="text-2xl font-black text-slate-800 dark:text-slate-100 tracking-tighter mb-2 uppercase">Batch Room Import</h3>
-            <p class="text-xs text-slate-400 dark:text-slate-500 mb-6 font-medium italic underline decoration-blue-500/30">CSV Required Headers: <span class="text-slate-600 dark:text-slate-300 font-bold italic">room_name, room_type, capacity, specialization (optional), floor (optional)</span></p>
+            <p class="text-xs text-slate-400 dark:text-slate-500 mb-6 font-medium italic underline decoration-blue-500/30">CSV Required Headers: <span class="text-slate-600 dark:text-slate-300 font-bold italic">room_name, room_type, specialization, capacity, floor</span></p>
             
             <div class="space-y-6">
                 <div class="group border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-3xl p-8 flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-800/30 hover:bg-white dark:hover:bg-slate-800/50 hover:border-blue-400 transition-all cursor-pointer relative shadow-inner"
@@ -252,10 +252,13 @@
                                             <td class="px-4 py-3 text-slate-400 dark:text-slate-500 italic font-medium uppercase">{{ $preview['type'] }}</td>
                                             <td class="px-4 py-3 text-slate-600 dark:text-slate-400 text-[10px]">{{ $preview['floor'] ?? 'N/A' }}</td>
                                             <td class="px-4 py-3 text-right">
-                                                <span class="px-2 py-0.5 rounded-full text-[8px] uppercase font-black
-                                                    {{ $preview['status'] === 'DUPLICATE' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400' }}">
+                                                <span title="{{ $preview['errors'] ?? '' }}" class="px-2 py-0.5 rounded-full text-[8px] uppercase font-black
+                                                    {{ $preview['status'] === 'INVALID' ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300' : ($preview['status'] === 'DUPLICATE' ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400' : 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400') }}">
                                                     {{ $preview['status'] }}
                                                 </span>
+                                                @if(($preview['status'] ?? '') === 'INVALID')
+                                                    <div class="mt-1 text-[8px] font-bold text-amber-700 dark:text-amber-300">{{ $preview['errors'] ?? 'Invalid row' }}</div>
+                                                @endif
                                             </td>
                                         </tr>
                                     @endforeach

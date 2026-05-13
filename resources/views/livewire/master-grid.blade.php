@@ -8,8 +8,7 @@
             title: '',
             message: '',
             details: {}
-        },
-        showGenerationSummary: @entangle('generationSummary').live
+        }
      }"
      @room-selected.window="roomsOpen = false"
      @show-conflict-modal.window="
@@ -49,16 +48,18 @@
 
             <div class="flex items-center gap-3">
                 <!-- AI GENERATION BUTTON -->
+                @if($canAutoGenerate ?? false)
                 <button 
                     wire:click="openGenerateModal"
                     wire:loading.attr="disabled"
-                    wire:target="startGeneration"
-                    class="px-3 py-1.5 rounded-md text-[8px] font-black uppercase transition-all flex items-center gap-1 border-2 border-indigo-400 dark:border-indigo-600 bg-indigo-100/70 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-200/70 dark:hover:bg-indigo-900/50 shadow-md hover:shadow-lg"
-                    title="Generate schedule using AI">
+                    wire:target="openGenerateModal,startGeneration,runGeneration,confirmGeneratedSchedules,saveGeneratedSchedules"
+                    class="px-3 py-1.5 rounded-md text-[8px] font-black uppercase transition-all flex items-center gap-1 border-2 border-indigo-400 dark:border-indigo-600 bg-indigo-100/70 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-200/70 dark:hover:bg-indigo-900/50 shadow-md hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
+                    title="Generate schedule using the local heuristic scheduler">
                     <span>✨</span>
-                    <span wire:loading.remove wire:target="startGeneration">AI Generate</span>
-                    <span wire:loading wire:target="startGeneration">Generating</span>
+                    <span wire:loading.remove wire:target="openGenerateModal,startGeneration,runGeneration">Generate</span>
+                    <span wire:loading wire:target="openGenerateModal,startGeneration,runGeneration">Working</span>
                 </button>
+                @endif
 
                 <div class="flex bg-slate-100/70 dark:bg-slate-800/60 p-0.5 rounded-lg border-2 border-slate-300 dark:border-slate-700 backdrop-blur-sm">
                     <button 
@@ -102,186 +103,271 @@
         </div>
     </main>
 
-    <div
-        wire:loading.flex
-        wire:target="startGeneration"
-        class="fixed inset-0 z-[9998] hidden items-center justify-center bg-slate-950/60 backdrop-blur-sm">
-        <div class="rounded-xl border border-white/10 bg-white p-6 text-center shadow-2xl dark:bg-slate-900">
-            <div class="mx-auto mb-4 h-10 w-10 animate-spin rounded-full border-4 border-indigo-200 border-t-indigo-600"></div>
-            <p class="text-sm font-black uppercase tracking-widest text-slate-900 dark:text-white">AI is generating schedules...</p>
-            <p class="mt-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                {{ $generateDepartment ?: 'Dept' }} - {{ $generateMajor ?: 'Major' }} - Year {{ $generateYearLevel ?: '?' }} - Section {{ $generateSection ?: '?' }}
-            </p>
-            <p class="mt-2 text-[10px] font-black uppercase tracking-widest text-slate-400">Processing selected subject group</p>
-            <div class="mt-4 h-2 w-72 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
-                <div class="h-full w-1/2 animate-pulse rounded-full bg-indigo-600"></div>
+    @if($showGeneratingModal)
+        <div
+            wire:key="generating-modal-{{ $generationProcessId }}"
+            wire:init="runGeneration"
+            class="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-xl"
+            style="font-family: Inter, Montserrat, ui-sans-serif, system-ui, sans-serif;">
+            <div
+                x-data="{
+                    step: 0,
+                    messages: [
+                        'Analyzing rooms and time slots',
+                        'Checking section conflicts',
+                        'Optimizing linked meeting patterns',
+                        'Preparing the generation summary'
+                    ]
+                }"
+                x-init="setInterval(() => step = (step + 1) % messages.length, 1700)"
+                class="w-full max-w-md rounded-3xl border border-white/50 bg-white/75 p-8 text-center shadow-2xl backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-900/80">
+                <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-indigo-50 shadow-inner dark:bg-indigo-950/40">
+                    <div class="h-10 w-10 animate-spin rounded-full border-4 border-indigo-200 border-t-indigo-600 dark:border-indigo-900 dark:border-t-indigo-300"></div>
+                </div>
+                <p class="mt-5 text-xs font-black uppercase tracking-[0.28em] text-indigo-600 dark:text-indigo-300">Generating Schedule...</p>
+                <h3 class="mt-2 text-xl font-black uppercase text-slate-950 dark:text-white">
+                    {{ $generateDepartment ?: 'Dept' }} - {{ $generateMajor ?: 'Major' }} - Year {{ $generateYearLevel ?: '?' }} - Section {{ $generateSection ?: '?' }}
+                </h3>
+                <p class="mt-3 text-sm font-semibold leading-6 text-slate-600 dark:text-slate-300">
+                    Please wait while the AI scheduler analyzes rooms, time slots, and conflicts.
+                </p>
+                <p class="mt-4 h-5 text-[11px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400" x-text="messages[step]">
+                    Analyzing rooms and time slots
+                </p>
+                <div class="mt-5 h-2 overflow-hidden rounded-full bg-slate-200/90 dark:bg-slate-700/80">
+                    <div class="ai-progress-bar h-full rounded-full bg-indigo-600"></div>
+                </div>
             </div>
         </div>
-    </div>
+    @endif
+
+    @if($showSavingModal)
+        <div
+            wire:key="saving-modal-{{ $saveProcessId }}"
+            wire:init="saveGeneratedSchedules"
+            class="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-xl"
+            style="font-family: Inter, Montserrat, ui-sans-serif, system-ui, sans-serif;">
+            <div class="w-full max-w-md rounded-3xl border border-white/50 bg-white/75 p-8 text-center shadow-2xl backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-900/80">
+                <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-50 shadow-inner dark:bg-emerald-950/40">
+                    <div class="h-10 w-10 animate-spin rounded-full border-4 border-emerald-200 border-t-emerald-600 dark:border-emerald-900 dark:border-t-emerald-300"></div>
+                </div>
+                <p class="mt-5 text-xs font-black uppercase tracking-[0.28em] text-emerald-600 dark:text-emerald-300">Saving Generated Schedule...</p>
+                <h3 class="mt-2 text-xl font-black uppercase text-slate-950 dark:text-white">Writing To Database</h3>
+                <p class="mt-3 text-sm font-semibold leading-6 text-slate-600 dark:text-slate-300">
+                    Please wait while schedules are being saved to the database.
+                </p>
+                <div class="mt-5 h-2 overflow-hidden rounded-full bg-slate-200/90 dark:bg-slate-700/80">
+                    <div class="ai-progress-bar h-full rounded-full bg-emerald-600"></div>
+                </div>
+            </div>
+        </div>
+    @endif
 
     @if($showGenerateModal)
-        <div class="fixed inset-0 z-[9997] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm">
-            <div class="w-full max-w-2xl rounded-3xl border border-white/50 bg-white/70 shadow-2xl backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-900/75">
-                <div class="border-b border-slate-200 p-5 dark:border-slate-700">
-                    <p class="text-xs font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400">AI Auto Generate</p>
-                    <h3 class="mt-1 text-xl font-black uppercase text-slate-900 dark:text-white">Choose Schedule Group</h3>
+        <div
+            class="fixed inset-0 z-[9997] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-xl"
+            style="font-family: Inter, Montserrat, ui-sans-serif, system-ui, sans-serif;"
+            @click.self="$wire.closeGenerateModal()">
+            <div class="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/75 shadow-2xl backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-900/80">
+                <div class="shrink-0 border-b border-white/60 p-6 dark:border-slate-700/70">
+                    <p class="text-xs font-black uppercase tracking-[0.26em] text-indigo-600 dark:text-indigo-300">AI Auto Generate</p>
+                    <h3 class="mt-2 text-2xl font-black uppercase text-slate-950 dark:text-white">Choose Schedule Group</h3>
                 </div>
 
-                <div class="grid gap-4 p-5 sm:grid-cols-2">
-                    <label class="space-y-2">
-                        <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Department</span>
-                        <select wire:model.live="generateDepartment" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold dark:border-slate-700 dark:bg-slate-800">
-                            <option value="">Select Department</option>
-                            @foreach($departmentMajors as $dept => $majors)
-                                <option value="{{ $dept }}">{{ $dept }}</option>
-                            @endforeach
-                        </select>
-                    </label>
+                <div class="min-h-0 flex-1 overflow-y-auto p-6 custom-scrollbar">
+                    <div class="grid gap-5 sm:grid-cols-2">
+                        <label class="space-y-2">
+                            <span class="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Department</span>
+                            <select wire:model.live="generateDepartment" class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-sm font-black text-slate-900 shadow-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-800/90 dark:text-white dark:focus:ring-indigo-950">
+                                <option value="">Select Department</option>
+                                @foreach($departmentMajors as $dept => $majors)
+                                    <option value="{{ $dept }}">{{ $dept }}</option>
+                                @endforeach
+                            </select>
+                        </label>
 
-                    <label class="space-y-2">
-                        <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Major</span>
-                        <select wire:model.live="generateMajor" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold dark:border-slate-700 dark:bg-slate-800">
-                            <option value="">Select Major</option>
-                            @foreach(($departmentMajors[$generateDepartment] ?? []) as $major)
-                                <option value="{{ $major }}">{{ $major }}</option>
-                            @endforeach
-                        </select>
-                    </label>
+                        <label class="space-y-2">
+                            <span class="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Major</span>
+                            <select wire:model.live="generateMajor" class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-sm font-black text-slate-900 shadow-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-800/90 dark:text-white dark:focus:ring-indigo-950">
+                                <option value="">Select Major</option>
+                                @foreach(($departmentMajors[$generateDepartment] ?? []) as $major)
+                                    <option value="{{ $major }}">{{ $major }}</option>
+                                @endforeach
+                            </select>
+                        </label>
 
-                    <label class="space-y-2">
-                        <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Year Level</span>
-                        <select wire:model.live="generateYearLevel" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold dark:border-slate-700 dark:bg-slate-800">
-                            <option value="">Select Year</option>
-                            @foreach([1, 2, 3, 4] as $year)
-                                <option value="{{ $year }}">{{ $year }}{{ $year === 1 ? 'st' : ($year === 2 ? 'nd' : ($year === 3 ? 'rd' : 'th')) }} Year</option>
-                            @endforeach
-                        </select>
-                    </label>
+                        <label class="space-y-2">
+                            <span class="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Year Level</span>
+                            <select wire:model.live="generateYearLevel" class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-sm font-black text-slate-900 shadow-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-800/90 dark:text-white dark:focus:ring-indigo-950">
+                                <option value="">Select Year</option>
+                                @foreach([1, 2, 3, 4] as $year)
+                                    <option value="{{ $year }}">{{ $year }}{{ $year === 1 ? 'st' : ($year === 2 ? 'nd' : ($year === 3 ? 'rd' : 'th')) }} Year</option>
+                                @endforeach
+                            </select>
+                        </label>
 
-                    <label class="space-y-2">
-                        <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Section</span>
-                        <select wire:model.live="generateSection" class="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-bold dark:border-slate-700 dark:bg-slate-800">
-                            <option value="">Select Section</option>
-                            @foreach(['A', 'B', 'C'] as $section)
-                                <option value="{{ $section }}">Section {{ $section }}</option>
-                            @endforeach
-                        </select>
-                    </label>
+                        <label class="space-y-2">
+                            <span class="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Section</span>
+                            <select wire:model.live="generateSection" class="w-full rounded-xl border border-slate-200 bg-white/90 px-4 py-3 text-sm font-black text-slate-900 shadow-sm outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-800/90 dark:text-white dark:focus:ring-indigo-950">
+                                <option value="">Select Section</option>
+                                @foreach(['A', 'B', 'C'] as $section)
+                                    <option value="{{ $section }}">Section {{ $section }}</option>
+                                @endforeach
+                            </select>
+                        </label>
+                    </div>
                 </div>
 
-                <div class="flex justify-end gap-3 border-t border-slate-200 p-5 dark:border-slate-700">
-                    <button wire:click="closeGenerateModal" class="rounded-lg bg-slate-100 px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+                <div class="sticky bottom-0 z-10 flex shrink-0 flex-col gap-3 border-t border-white/60 bg-white/80 p-5 backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-900/85 sm:flex-row sm:justify-end">
+                    <button wire:click="closeGenerateModal" wire:loading.attr="disabled" wire:target="startGeneration" class="rounded-xl bg-slate-100 px-5 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-200 disabled:opacity-60 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
                         Cancel
                     </button>
-                    <button wire:click="startGeneration" wire:loading.attr="disabled" wire:target="startGeneration" class="rounded-lg bg-indigo-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white hover:bg-indigo-700 disabled:opacity-60">
-                        Start Generation
+                    <button wire:click="startGeneration" wire:loading.attr="disabled" wire:target="startGeneration" class="rounded-xl bg-indigo-600 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-indigo-600/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60">
+                        <span wire:loading.remove wire:target="startGeneration">Start Generation</span>
+                        <span wire:loading wire:target="startGeneration">Starting...</span>
                     </button>
                 </div>
             </div>
         </div>
     @endif
 
-    @if($generationSummary)
+    @if($generationSummary && $showSummaryModal)
         <div
-            x-show="showGenerationSummary"
-            x-cloak
-            class="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm"
+            class="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-950/65 p-3 backdrop-blur-xl sm:p-4"
+            style="font-family: Inter, Montserrat, ui-sans-serif, system-ui, sans-serif;"
             @click.self="$wire.closeGenerationSummary()">
-            <div class="max-h-[85vh] w-full max-w-4xl overflow-hidden rounded-3xl border border-white/50 bg-white/70 shadow-2xl backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-900/75">
-                <div class="flex items-start justify-between border-b border-slate-200 p-5 dark:border-slate-700">
-                    <div>
-                        <p class="text-xs font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400">AI Generation Summary</p>
-                        <h3 class="mt-1 text-xl font-black uppercase text-slate-900 dark:text-white">
-                            {{ $generationSummary['filters']['department'] }} - {{ $generationSummary['filters']['major'] }} - Year {{ $generationSummary['filters']['year_level'] }} - Section {{ $generationSummary['filters']['section'] }}
-                        </h3>
-                    </div>
-                    <button wire:click="closeGenerationSummary" class="rounded-md px-3 py-1 text-lg font-black text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-800">&times;</button>
-                </div>
-
-                <div class="grid grid-cols-3 gap-3 border-b border-slate-200 p-5 text-center dark:border-slate-700">
-                    <div class="rounded-lg bg-emerald-50 p-3 dark:bg-emerald-950/30">
-                        <p class="text-2xl font-black text-emerald-700 dark:text-emerald-300">{{ $generationSummary['scheduled'] }}</p>
-                        <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-400">Scheduled</p>
-                    </div>
-                    <div class="rounded-lg bg-red-50 p-3 dark:bg-red-950/30">
-                        <p class="text-2xl font-black text-red-700 dark:text-red-300">{{ $generationSummary['failed'] }}</p>
-                        <p class="text-[10px] font-black uppercase tracking-widest text-red-700 dark:text-red-400">Failed</p>
-                    </div>
-                    <div class="rounded-lg bg-amber-50 p-3 dark:bg-amber-950/30">
-                        <p class="text-2xl font-black text-amber-700 dark:text-amber-300">{{ $generationSummary['warnings'] }}</p>
-                        <p class="text-[10px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-400">Warnings</p>
+            <div class="flex max-h-[90vh] w-full max-w-6xl flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/75 shadow-2xl backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-900/80">
+                <div class="shrink-0 border-b border-white/60 p-5 dark:border-slate-700/70 sm:p-6">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="min-w-0">
+                            <p class="text-xs font-black uppercase tracking-[0.26em] text-indigo-600 dark:text-indigo-300">AI Generation Summary</p>
+                            <h3 class="mt-2 break-words text-2xl font-black uppercase text-slate-950 dark:text-white">
+                                {{ $generationSummary['filters']['department'] ?? 'Dept' }} - {{ $generationSummary['filters']['major'] ?? 'Major' }} - Year {{ $generationSummary['filters']['year_level'] ?? '?' }} - Section {{ $generationSummary['filters']['section'] ?? '?' }}
+                            </h3>
+                        </div>
+                        <button wire:click="closeGenerationSummary" class="rounded-xl px-3 py-2 text-xl font-black text-slate-500 transition hover:bg-white/70 hover:text-slate-900 dark:hover:bg-slate-800 dark:hover:text-white">&times;</button>
                     </div>
                 </div>
 
-                <div class="max-h-[52vh] overflow-y-auto p-5 custom-scrollbar">
-                    <div class="grid gap-5 lg:grid-cols-2">
+                <div class="shrink-0 grid gap-3 border-b border-white/60 p-5 text-center dark:border-slate-700/70 sm:grid-cols-3 sm:p-6">
+                    <div class="rounded-2xl border border-emerald-200 bg-emerald-50/85 p-4 shadow-sm dark:border-emerald-900/60 dark:bg-emerald-950/30">
+                        <p class="text-3xl font-black text-emerald-700 dark:text-emerald-300">{{ $generationSummary['scheduled'] }}</p>
+                        <p class="mt-1 text-[10px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-400">Total Scheduled</p>
+                    </div>
+                    <div class="rounded-2xl border border-red-200 bg-red-50/85 p-4 shadow-sm dark:border-red-900/60 dark:bg-red-950/30">
+                        <p class="text-3xl font-black text-red-700 dark:text-red-300">{{ $generationSummary['failed'] }}</p>
+                        <p class="mt-1 text-[10px] font-black uppercase tracking-widest text-red-700 dark:text-red-400">Total Failed</p>
+                    </div>
+                    <div class="rounded-2xl border border-amber-200 bg-amber-50/85 p-4 shadow-sm dark:border-amber-900/60 dark:bg-amber-950/30">
+                        <p class="text-3xl font-black text-amber-700 dark:text-amber-300">{{ $generationSummary['warnings'] }}</p>
+                        <p class="mt-1 text-[10px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-400">Total Warnings</p>
+                    </div>
+                </div>
+
+                <div class="min-h-0 flex-1 overflow-y-auto p-5 custom-scrollbar sm:p-6">
+                    <div class="grid gap-6 xl:grid-cols-2">
                         <section>
                             <h4 class="mb-3 text-xs font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">Successfully Scheduled</h4>
-                            <div class="space-y-2">
+                            <div class="space-y-3">
                                 @forelse($generationSummary['scheduled_items'] as $item)
-                                    <div class="rounded-lg border border-slate-200 p-3 text-xs dark:border-slate-700">
-                                        <p class="font-black text-slate-900 dark:text-white">{{ $item['subject_code'] }} <span class="text-slate-500">EDP: {{ $item['edp_code'] }}</span></p>
-                                        <p class="mt-1 font-bold text-slate-700 dark:text-slate-200">{{ $item['subject_name'] ?? 'No subject name' }}</p>
-                                        <p class="mt-1 font-bold text-slate-600 dark:text-slate-300">{{ $item['room'] }} - {{ $item['day'] }} - {{ $item['start_time'] }} to {{ $item['end_time'] }}</p>
-                                        <p class="mt-1 font-bold text-slate-500 dark:text-slate-400">Instructor: {{ $item['instructor'] ?? 'Unassigned' }}</p>
+                                    <div class="rounded-2xl border border-white/70 bg-white/75 p-4 text-xs shadow-sm backdrop-blur-xl dark:border-slate-700 dark:bg-slate-900/65">
+                                        <div class="flex items-start justify-between gap-3">
+                                            <div class="min-w-0">
+                                                <p class="break-words text-base font-black text-slate-950 dark:text-white">{{ $item['subject_code'] }}</p>
+                                                <p class="mt-0.5 break-words font-black uppercase tracking-wide text-slate-500">EDP: {{ $item['edp_code'] }}</p>
+                                            </div>
+                                            <span class="shrink-0 rounded-full bg-emerald-100 px-3 py-1 text-[9px] font-black uppercase text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">Ready</span>
+                                        </div>
+                                        <p class="mt-3 break-words text-sm font-black text-slate-800 dark:text-slate-100">{{ $item['subject_name'] ?? 'No subject name' }}</p>
+                                        <div class="mt-4 grid gap-2 font-bold text-slate-600 dark:text-slate-300 sm:grid-cols-2">
+                                            <p>{{ $item['day_pair'] ?? $item['day'] }}</p>
+                                            <p>{{ $item['start_time'] }} - {{ $item['end_time'] }}</p>
+                                            <p>Room: {{ $item['room'] }}</p>
+                                            <p>Instructor: {{ $item['instructor'] ?? 'Unassigned' }}</p>
+                                        </div>
                                     </div>
                                 @empty
-                                    <p class="text-xs font-bold text-slate-500">No schedules were created.</p>
+                                    <div class="rounded-2xl border border-white/70 bg-white/60 p-5 text-sm font-bold text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-400">
+                                        No schedules were created.
+                                    </div>
                                 @endforelse
                             </div>
                         </section>
 
                         <section>
                             <h4 class="mb-3 text-xs font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">Failed / Warnings</h4>
-                            <div class="space-y-2">
+                            <div class="space-y-3">
                                 @forelse($generationSummary['failed_items'] ?? [] as $item)
-                                    <div class="rounded-xl border border-red-200 bg-red-50/80 p-3 text-xs dark:border-red-900 dark:bg-red-950/20">
-                                        <p class="font-black text-red-700 dark:text-red-300">{{ $item['subject_code'] }} <span class="text-red-500">EDP: {{ $item['edp_code'] }}</span></p>
-                                        <p class="mt-1 font-bold text-slate-700 dark:text-slate-300">{{ $item['subject_name'] }}</p>
-                                        <p class="mt-1 font-bold text-red-700 dark:text-red-300">Reason: {{ $item['reason'] }}</p>
+                                    <div class="rounded-2xl border border-red-200 bg-red-50/85 p-4 text-xs shadow-sm dark:border-red-900/70 dark:bg-red-950/25">
+                                        <div class="space-y-1">
+                                            <p class="break-words text-sm font-black text-red-700 dark:text-red-300">{{ $item['subject_code'] }}</p>
+                                            <p class="break-words font-black uppercase tracking-wide text-red-500">EDP: {{ $item['edp_code'] }}</p>
+                                            <p class="break-words text-sm font-black text-slate-800 dark:text-slate-100">{{ $item['subject_name'] }}</p>
+                                            <p class="break-words font-bold text-red-700 dark:text-red-300">Reason: {{ $item['reason'] }}</p>
+                                        </div>
 
-                                        <div class="mt-3 grid grid-cols-3 gap-2">
-                                            <label class="space-y-1">
-                                                <span class="block text-[8px] font-black uppercase text-slate-500">Meetings</span>
-                                                <input type="number" min="1" max="6" step="1" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.meetings_per_week" class="w-full rounded border border-red-200 bg-white px-2 py-1 text-[10px] font-bold dark:border-red-900 dark:bg-slate-900">
+                                        <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                            <label class="space-y-1.5">
+                                                <span class="block text-[9px] font-black uppercase tracking-widest text-slate-500">Meetings Per Week</span>
+                                                <input type="number" min="1" max="6" step="1" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.meetings_per_week" class="w-full rounded-xl border border-red-200 bg-white/90 px-3 py-2 text-xs font-black text-slate-900 outline-none transition focus:border-red-400 focus:ring-4 focus:ring-red-100 dark:border-red-900 dark:bg-slate-900 dark:text-white dark:focus:ring-red-950">
                                             </label>
-                                            <label class="space-y-1">
-                                                <span class="block text-[8px] font-black uppercase text-slate-500">Hours</span>
-                                                <input type="number" min="0.5" max="8" step="0.5" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.duration_hours" class="w-full rounded border border-red-200 bg-white px-2 py-1 text-[10px] font-bold dark:border-red-900 dark:bg-slate-900">
+                                            <label class="space-y-1.5">
+                                                <span class="block text-[9px] font-black uppercase tracking-widest text-slate-500">Hours Per Meeting</span>
+                                                <input type="number" min="0.5" max="8" step="0.5" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.hours_per_meeting" class="w-full rounded-xl border border-red-200 bg-white/90 px-3 py-2 text-xs font-black text-slate-900 outline-none transition focus:border-red-400 focus:ring-4 focus:ring-red-100 dark:border-red-900 dark:bg-slate-900 dark:text-white dark:focus:ring-red-950">
                                             </label>
-                                            <label class="space-y-1">
-                                                <span class="block text-[8px] font-black uppercase text-slate-500">Room Type</span>
-                                                <select wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.preferred_room_type" class="w-full rounded border border-red-200 bg-white px-2 py-1 text-[10px] font-bold dark:border-red-900 dark:bg-slate-900">
-                                                    <option value="">Any</option>
-                                                    <option value="Lecture">Lecture</option>
-                                                    <option value="Lab">Lab</option>
-                                                    <option value="Laboratory">Laboratory</option>
-                                                </select>
+                                            <label class="space-y-1.5">
+                                                <span class="block text-[9px] font-black uppercase tracking-widest text-slate-500">Preferred Time</span>
+                                                <input type="time" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.preferred_start_time" class="w-full rounded-xl border border-red-200 bg-white/90 px-3 py-2 text-xs font-black text-slate-900 outline-none transition focus:border-red-400 focus:ring-4 focus:ring-red-100 dark:border-red-900 dark:bg-slate-900 dark:text-white dark:focus:ring-red-950">
+                                            </label>
+                                            <label class="space-y-1.5">
+                                                <span class="block text-[9px] font-black uppercase tracking-widest text-slate-500">Room Preference</span>
+                                                <input type="text" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.preferred_room_type" placeholder="Lab, Com Lab, HM" class="w-full rounded-xl border border-red-200 bg-white/90 px-3 py-2 text-xs font-black text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-red-400 focus:ring-4 focus:ring-red-100 dark:border-red-900 dark:bg-slate-900 dark:text-white dark:focus:ring-red-950">
                                             </label>
                                         </div>
 
-                                        <button wire:click="retryFailedSubject({{ $item['subject_id'] }})" wire:loading.attr="disabled" class="mt-3 w-full rounded-lg bg-red-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:bg-red-700 disabled:opacity-60">
-                                            Edit & Retry
+                                        <button wire:click="retryFailedSubject({{ $item['subject_id'] }})" wire:loading.attr="disabled" wire:target="retryFailedSubject" class="mt-4 w-full rounded-xl bg-red-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-red-600/20 transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60">
+                                            <span wire:loading.remove wire:target="retryFailedSubject">Edit & Retry</span>
+                                            <span wire:loading wire:target="retryFailedSubject">Retrying...</span>
                                         </button>
                                     </div>
                                 @empty
-                                    <p class="text-xs font-bold text-slate-500">No failed subjects.</p>
+                                    @if(empty($generationSummary['failure_reasons']))
+                                        <div class="rounded-2xl border border-white/70 bg-white/60 p-5 text-sm font-bold text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-400">
+                                            No failed subjects.
+                                        </div>
+                                    @endif
                                 @endforelse
 
+                                @if(empty($generationSummary['failed_items']) && !empty($generationSummary['failure_reasons']))
+                                    @foreach($generationSummary['failure_reasons'] as $reason)
+                                        <div class="rounded-2xl border border-red-200 bg-red-50/85 p-4 text-xs font-bold text-red-700 dark:border-red-900/70 dark:bg-red-950/25 dark:text-red-300">
+                                            {{ $reason }}
+                                        </div>
+                                    @endforeach
+                                @endif
+
                                 @foreach($generationSummary['fallback_warnings'] as $warning)
-                                    <div class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-bold text-amber-700 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-300">{{ $warning }}</div>
+                                    <div class="rounded-2xl border border-amber-200 bg-amber-50/90 p-4 text-xs font-bold text-amber-800 shadow-sm dark:border-amber-900/70 dark:bg-amber-950/25 dark:text-amber-300">
+                                        {{ $warning }}
+                                    </div>
                                 @endforeach
                             </div>
                         </section>
                     </div>
                 </div>
 
-                <div class="flex justify-end gap-3 border-t border-slate-200 p-5 dark:border-slate-700">
-                    <button wire:click="closeGenerationSummary" class="rounded-lg bg-slate-100 px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+                <div class="sticky bottom-0 z-10 flex shrink-0 flex-col gap-3 border-t border-white/60 bg-white/85 p-5 backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-900/90 sm:flex-row sm:items-center sm:justify-between">
+                    <button wire:click="closeGenerationSummary" wire:loading.attr="disabled" wire:target="confirmGeneratedSchedules,saveGeneratedSchedules" class="rounded-xl bg-slate-100 px-5 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-200 disabled:opacity-60 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
                         Cancel
                     </button>
-                    <button wire:click="confirmGeneratedSchedules" wire:loading.attr="disabled" wire:target="confirmGeneratedSchedules" class="rounded-lg bg-emerald-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white hover:bg-emerald-700 disabled:opacity-60">
-                        Yes / Save Generated Schedule
+                    <button
+                        wire:click="confirmGeneratedSchedules"
+                        wire:loading.attr="disabled"
+                        wire:target="confirmGeneratedSchedules"
+                        @disabled(empty($pendingGeneratedSchedules))
+                        class="rounded-xl bg-slate-950 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-slate-950/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950 dark:hover:bg-indigo-100">
+                        <span wire:loading.remove wire:target="confirmGeneratedSchedules">Save Generated Schedule</span>
+                        <span wire:loading wire:target="confirmGeneratedSchedules">Preparing Save...</span>
                     </button>
                 </div>
             </div>
@@ -494,5 +580,26 @@
 
     [x-cloak] {
         display: none !important;
+    }
+
+    .ai-progress-bar {
+        animation: ai-progress-slide 1.6s ease-in-out infinite;
+        width: 45%;
+    }
+
+    @keyframes ai-progress-slide {
+        0% {
+            transform: translateX(-110%);
+        }
+
+        50% {
+            transform: translateX(70%);
+            width: 60%;
+        }
+
+        100% {
+            transform: translateX(230%);
+            width: 45%;
+        }
     }
 </style>

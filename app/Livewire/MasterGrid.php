@@ -14,6 +14,7 @@ use App\Services\Scheduling\AutoGenerateScheduler;
 use App\Services\ScheduleConflictService;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Livewire\WithPagination;
 
@@ -44,6 +45,11 @@ class MasterGrid extends Component
     public $semesterName = 'First Semester 2026-2027';
     public ?array $generationSummary = null;
     public bool $showGenerateModal = false;
+    public bool $showGeneratingModal = false;
+    public bool $showSummaryModal = false;
+    public bool $showSavingModal = false;
+    public int $generationProcessId = 0;
+    public int $saveProcessId = 0;
     public array $pendingGeneratedSchedules = [];
     public array $failedRetryInputs = [];
     public $generateDepartment = null;
@@ -160,6 +166,13 @@ class MasterGrid extends Component
         
         $role = $user->role ?? 'guest';
         return in_array($role, ['admin', 'registrar', 'associate_dean']);
+    }
+
+    public function canAutoGenerateSchedules(): bool
+    {
+        $role = auth()->user()?->role ?? 'guest';
+
+        return in_array($role, ['admin', 'registrar'], true);
     }
 
     public function getUserDepartment(): ?string
@@ -411,11 +424,23 @@ class MasterGrid extends Component
 
     public function openGenerateModal(): void
     {
+        if (!$this->canAutoGenerateSchedules()) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Permission Denied',
+                'detail' => 'Only Admin and Registrar accounts can use AI auto generation.'
+            ]);
+            return;
+        }
+
         $this->generateDepartment = $this->selectedDept;
         $this->generateMajor = $this->selectedMajor;
         $this->generateYearLevel = $this->selectedYear;
         $this->generateSection = $this->selectedSection;
         $this->showGenerateModal = true;
+        $this->showGeneratingModal = false;
+        $this->showSummaryModal = false;
+        $this->showSavingModal = false;
         $this->generationSummary = null;
         $this->pendingGeneratedSchedules = [];
         $this->failedRetryInputs = [];
@@ -423,30 +448,33 @@ class MasterGrid extends Component
 
     public function closeGenerateModal(): void
     {
+        if ($this->showGeneratingModal || $this->showSavingModal) {
+            return;
+        }
+
         $this->showGenerateModal = false;
     }
 
     public function startGeneration(): void
     {
-        if (!$this->hasFullAccess()) {
+        if (!$this->canAutoGenerateSchedules()) {
             $this->dispatch('toast', [
                 'type' => 'error',
                 'message' => 'Permission Denied',
-                'detail' => 'Only scheduling officers can auto-generate partial schedules.'
+                'detail' => 'Only Admin and Registrar accounts can use AI auto generation.'
             ]);
             return;
         }
 
         $this->loadSettings();
-
-        $missingFilters = app(AutoGenerateScheduler::class)->missingRequiredFilters([
-            'department' => $this->generateDepartment,
-            'major' => $this->generateMajor,
-            'year_level' => $this->generateYearLevel,
-            'section' => $this->generateSection,
-        ]);
+        $filters = $this->currentGenerationFilters();
+        $missingFilters = app(AutoGenerateScheduler::class)->missingRequiredFilters($filters);
 
         if ($missingFilters) {
+            $this->showGenerateModal = true;
+            $this->showGeneratingModal = false;
+            $this->showSummaryModal = false;
+            $this->showSavingModal = false;
             $this->dispatch('toast', [
                 'type' => 'warning',
                 'message' => 'Select scheduling filters first.',
@@ -455,12 +483,50 @@ class MasterGrid extends Component
             return;
         }
 
-        $result = app(AutoGenerateScheduler::class)->generatePartialSchedules([
-            'department' => $this->generateDepartment,
-            'major' => $this->generateMajor,
-            'year_level' => $this->generateYearLevel,
-            'section' => $this->generateSection,
-        ], auth()->id());
+        $this->generationSummary = null;
+        $this->pendingGeneratedSchedules = [];
+        $this->failedRetryInputs = [];
+        $this->showGenerateModal = false;
+        $this->showSummaryModal = false;
+        $this->showSavingModal = false;
+        $this->showGeneratingModal = true;
+        $this->generationProcessId++;
+    }
+
+    public function runGeneration(): void
+    {
+        if (!$this->showGeneratingModal) {
+            return;
+        }
+
+        if (!$this->canAutoGenerateSchedules()) {
+            $this->showGeneratingModal = false;
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Permission Denied',
+                'detail' => 'Only Admin and Registrar accounts can use AI auto generation.'
+            ]);
+            return;
+        }
+
+        $filters = $this->currentGenerationFilters();
+
+        try {
+            $result = app(AutoGenerateScheduler::class)->generatePartialSchedules(
+                $filters,
+                auth()->id(),
+                false
+            );
+        } catch (\Throwable $e) {
+            $this->showGeneratingModal = false;
+            $this->showGenerateModal = true;
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Generation failed.',
+                'detail' => $e->getMessage(),
+            ]);
+            return;
+        }
 
         $scheduled = (int) $result['scheduled'];
         $failedCount = (int) $result['failed'];
@@ -477,20 +543,16 @@ class MasterGrid extends Component
             $detailParts[] = "{$warnings} fallback/general room warning(s) were allowed.";
         }
 
-        $this->pendingGeneratedSchedules = $result['scheduled_items'] ?? [];
         $this->showGenerationSummary($result);
-        $this->showGenerateModal = false;
 
         $hasNoCompatibleRoom = collect($result['failure_reasons'] ?? [])
             ->contains(fn (string $reason) => str_contains(strtolower($reason), 'no compatible room'));
 
         $this->dispatch('toast', [
             'type' => $scheduled > 0 ? 'success' : ($hasNoCompatibleRoom ? 'error' : 'warning'),
-            'message' => "{$scheduled} schedule slot(s) prepared.",
-            'detail' => $detailParts ? implode(' ', $detailParts) : 'Review the summary, then save the generated schedules.'
+            'message' => "{$scheduled} schedule slot(s) generated for review.",
+            'detail' => $detailParts ? implode(' ', $detailParts) : 'Review the summary, edit failed subjects if needed, then save the generated schedule.'
         ]);
-
-        $this->dispatch('refreshGrid');
     }
 
     public function autoGeneratePartialSchedule(): void
@@ -500,6 +562,10 @@ class MasterGrid extends Component
 
     public function confirmGeneratedSchedules(): void
     {
+        if ($this->showSavingModal) {
+            return;
+        }
+
         if (empty($this->pendingGeneratedSchedules)) {
             $this->dispatch('toast', [
                 'type' => 'warning',
@@ -509,10 +575,45 @@ class MasterGrid extends Component
             return;
         }
 
-        $result = app(AutoGenerateScheduler::class)->persistGeneratedSchedules(
-            $this->pendingGeneratedSchedules,
-            auth()->id()
-        );
+        $this->showGenerateModal = false;
+        $this->showGeneratingModal = false;
+        $this->showSummaryModal = false;
+        $this->showSavingModal = true;
+        $this->saveProcessId++;
+    }
+
+    public function saveGeneratedSchedules(): void
+    {
+        if (!$this->showSavingModal) {
+            return;
+        }
+
+        if (empty($this->pendingGeneratedSchedules)) {
+            $this->showSavingModal = false;
+            $this->showSummaryModal = (bool) $this->generationSummary;
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'No generated schedules to save.',
+                'detail' => 'Run AI generation first.'
+            ]);
+            return;
+        }
+
+        try {
+            $result = DB::transaction(fn () => app(AutoGenerateScheduler::class)->persistGeneratedSchedules(
+                $this->pendingGeneratedSchedules,
+                auth()->id()
+            ));
+        } catch (\Throwable $e) {
+            $this->showSavingModal = false;
+            $this->showSummaryModal = (bool) $this->generationSummary;
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Save failed.',
+                'detail' => $e->getMessage(),
+            ]);
+            return;
+        }
 
         $saved = (int) ($result['saved'] ?? 0);
         $failed = (int) ($result['failed'] ?? 0);
@@ -528,13 +629,27 @@ class MasterGrid extends Component
             $this->notifyScheduleStakeholders($filters, $saved, $failed);
         }
 
+        $this->showSavingModal = false;
+
+        if ($saved <= 0) {
+            $this->showSummaryModal = (bool) $this->generationSummary;
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Generated schedules were not saved.',
+                'detail' => collect($result['failure_reasons'] ?? [])->first() ?? 'No valid generated schedules could be persisted.'
+            ]);
+            return;
+        }
+
+        $this->showSummaryModal = false;
         $this->pendingGeneratedSchedules = [];
         $this->generationSummary = null;
+        $this->failedRetryInputs = [];
 
         $this->dispatch('toast', [
-            'type' => $saved > 0 ? 'success' : 'error',
-            'message' => "{$saved} schedules generated successfully.",
-            'detail' => $failed > 0 ? "{$failed} generated schedules could not be saved due to new conflicts." : 'Saved as partial schedules.'
+            'type' => $failed > 0 ? 'warning' : 'success',
+            'message' => 'Schedule successfully generated and saved.',
+            'detail' => $failed > 0 ? "{$failed} generated schedule slot(s) could not be saved due to new conflicts." : "{$saved} schedule slot(s) saved to the database."
         ]);
 
         $this->dispatch('refreshGrid');
@@ -542,45 +657,60 @@ class MasterGrid extends Component
 
     public function showGenerationSummary(array $result): void
     {
+        $this->pendingGeneratedSchedules = array_values($result['scheduled_items'] ?? []);
         $this->generationSummary = [
             'scheduled' => (int) ($result['scheduled'] ?? 0),
             'failed' => (int) ($result['failed'] ?? 0),
             'warnings' => (int) ($result['warnings'] ?? 0),
-            'filters' => $result['filters'] ?? [
-                'department' => $this->selectedDept,
-                'major' => $this->selectedMajor,
-                'year_level' => $this->selectedYear,
-                'section' => $this->selectedSection,
-            ],
-            'scheduled_items' => array_slice($result['scheduled_items'] ?? [], 0, 50),
+            'filters' => $result['filters'] ?? $this->currentGenerationFilters(),
+            'scheduled_items' => array_slice($this->summarizeScheduledItemsForDisplay($result['scheduled_items'] ?? []), 0, 50),
             'failure_reasons' => array_slice($result['failure_reasons'] ?? [], 0, 50),
             'failed_items' => array_slice($result['failed_items'] ?? [], 0, 50),
             'fallback_warnings' => array_slice($result['fallback_warnings'] ?? [], 0, 20),
         ];
 
         $this->failedRetryInputs = collect($this->generationSummary['failed_items'])
-            ->mapWithKeys(fn (array $item) => [
-                $item['subject_id'] => [
-                    'meetings_per_week' => $item['meetings_per_week'] ?? 1,
-                    'duration_hours' => $item['duration_hours'] ?? 1,
-                    'preferred_room_type' => $item['preferred_room_type'] ?? '',
-                ],
-            ])
+            ->mapWithKeys(function (array $item) {
+                $meetings = max(1, (int) ($item['meetings_per_week'] ?? 1));
+                $durationHours = (float) ($item['duration_hours'] ?? 1);
+
+                return [
+                    $item['subject_id'] => [
+                        'meetings_per_week' => $meetings,
+                        'hours_per_meeting' => round($durationHours / $meetings, 2),
+                        'duration_hours' => $durationHours,
+                        'preferred_room_type' => $item['preferred_room_type'] ?? '',
+                        'preferred_start_time' => $item['preferred_start_time'] ?? '',
+                    ],
+                ];
+            })
             ->all();
 
-        $this->dispatch('show-generation-summary');
+        $this->showGenerateModal = false;
+        $this->showGeneratingModal = false;
+        $this->showSavingModal = false;
+        $this->showSummaryModal = true;
     }
 
     public function retryFailedSubject(int $subjectId): void
     {
-        if (!$this->generationSummary) {
+        if (!$this->generationSummary || $this->showGeneratingModal || $this->showSavingModal) {
             return;
         }
+
+        $overrides = $this->failedRetryInputs[$subjectId] ?? [];
+        $meetings = max(1, (int) ($overrides['meetings_per_week'] ?? 1));
+
+        if (isset($overrides['hours_per_meeting']) && is_numeric($overrides['hours_per_meeting'])) {
+            $overrides['duration_hours'] = max(0.5, (float) $overrides['hours_per_meeting']) * $meetings;
+        }
+
+        $overrides['meetings_per_week'] = $meetings;
 
         $retry = app(AutoGenerateScheduler::class)->previewSubjectSchedule(
             $subjectId,
             $this->generationSummary['filters'] ?? [],
-            $this->failedRetryInputs[$subjectId] ?? [],
+            $overrides,
             $this->pendingGeneratedSchedules,
             auth()->id()
         );
@@ -596,10 +726,18 @@ class MasterGrid extends Component
 
         $firstScheduled = $retry['scheduled_items'][0] ?? null;
         $subjectCode = $firstScheduled['subject_code'] ?? null;
+        $retryItems = array_values($retry['scheduled_items'] ?? []);
 
-        $this->pendingGeneratedSchedules = array_values(array_merge($this->pendingGeneratedSchedules, $retry['scheduled_items'] ?? []));
-        $this->generationSummary['scheduled'] += (int) ($retry['scheduled'] ?? 0);
-        $this->generationSummary['scheduled_items'] = array_values(array_merge($this->generationSummary['scheduled_items'], $retry['scheduled_items'] ?? []));
+        $this->pendingGeneratedSchedules = array_values(array_merge(
+            $this->pendingGeneratedSchedules,
+            $retryItems
+        ));
+        $this->generationSummary['scheduled'] = count($this->pendingGeneratedSchedules);
+        $this->generationSummary['scheduled_items'] = array_values(array_merge(
+            $this->generationSummary['scheduled_items'],
+            $this->summarizeScheduledItemsForDisplay($retryItems)
+        ));
+        $this->generationSummary['scheduled_items'] = array_slice($this->generationSummary['scheduled_items'], 0, 50);
         $this->generationSummary['failed_items'] = array_values(array_filter(
             $this->generationSummary['failed_items'],
             fn (array $item) => (int) $item['subject_id'] !== $subjectId
@@ -609,21 +747,70 @@ class MasterGrid extends Component
             fn (string $reason) => !$subjectCode || !str_starts_with($reason, "{$subjectCode}:")
         ));
         $this->generationSummary['failed'] = count($this->generationSummary['failed_items']);
+        $this->generationSummary['warnings'] += (int) ($retry['warnings'] ?? 0);
+        $this->generationSummary['fallback_warnings'] = array_slice(array_values(array_merge(
+            $this->generationSummary['fallback_warnings'] ?? [],
+            $retry['fallback_warnings'] ?? []
+        )), 0, 20);
 
         unset($this->failedRetryInputs[$subjectId]);
 
         $this->dispatch('toast', [
             'type' => 'success',
-            'message' => 'Subject retry scheduled.',
-            'detail' => 'Review the updated summary before saving.'
+            'message' => 'Subject retry generated.',
+            'detail' => 'The retry was added to the pending schedule. Review it before saving.'
         ]);
     }
 
     public function closeGenerationSummary(): void
     {
+        if ($this->showGeneratingModal || $this->showSavingModal) {
+            return;
+        }
+
+        $this->showSummaryModal = false;
         $this->generationSummary = null;
         $this->pendingGeneratedSchedules = [];
         $this->failedRetryInputs = [];
+    }
+
+    private function currentGenerationFilters(): array
+    {
+        return [
+            'department' => $this->generateDepartment,
+            'major' => $this->generateMajor,
+            'year_level' => $this->generateYearLevel,
+            'section' => $this->generateSection,
+        ];
+    }
+
+    private function summarizeScheduledItemsForDisplay(array $items): array
+    {
+        return collect($items)
+            ->groupBy(function (array $item) {
+                return implode('|', [
+                    $item['pairing_key'] ?? 'single',
+                    $item['subject_id'] ?? $item['subject_code'] ?? '',
+                    $item['room_id'] ?? $item['room'] ?? '',
+                    $item['raw_start_time'] ?? $item['start_time'] ?? '',
+                    $item['raw_end_time'] ?? $item['end_time'] ?? '',
+                ]);
+            })
+            ->map(function ($group) {
+                $first = $group->first();
+                $days = $group->pluck('day')
+                    ->filter()
+                    ->unique()
+                    ->sortBy(fn (string $day) => array_search($day, $this->days, true))
+                    ->values()
+                    ->all();
+
+                $first['day_pair'] = implode(' / ', $days);
+
+                return $first;
+            })
+            ->values()
+            ->all();
     }
 
     private function findFirstValidPlacement(Subject $subject, $rooms, int $meetingIndex): ?array
@@ -739,6 +926,10 @@ class MasterGrid extends Component
 
     private function createPartialSchedule(Subject $subject, Room $room, string $day, string $startTime, string $endTime): Schedule
     {
+        if ($day === 'Sunday') {
+            throw new \InvalidArgumentException('Sunday schedules are not allowed.');
+        }
+
         return Schedule::create([
             'subject_id' => $subject->id,
             'room_id' => $room->id,
@@ -968,6 +1159,15 @@ class MasterGrid extends Component
      */
     public function assignSubject($subjectId, $day, $startTime)
     {
+        if ($day === 'Sunday') {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Sunday Blocked',
+                'detail' => 'Schedules can only be created from Monday to Saturday.'
+            ]);
+            return;
+        }
+
         if (!$this->selectedRoomId) {
             $this->dispatch('toast', [
                 'type' => 'warning',
@@ -1044,15 +1244,13 @@ class MasterGrid extends Component
             return;
         }
 
-        if (!app(ScheduleConflictService::class)->respectsSectionSession($subject->section, $startTime, $endTime)) {
+        $outsidePreferredSectionRange = !app(ScheduleConflictService::class)->respectsSectionSession($subject->section, $startTime, $endTime);
+        if ($outsidePreferredSectionRange) {
             $this->dispatch('toast', [
-                'type' => 'error',
-                'message' => 'Section Session Rule Blocked',
-                'detail' => $subject->section === 'A'
-                    ? 'Section A can only be scheduled from day start until 12:00 PM.'
-                    : 'Section B can only be scheduled from 1:00 PM until day end.'
+                'type' => 'warning',
+                'message' => 'Outside Preferred Range',
+                'detail' => 'This schedule is outside the preferred section time range.'
             ]);
-            return;
         }
 
         // ===== COMPREHENSIVE CONFLICT VALIDATION =====
@@ -1077,8 +1275,24 @@ class MasterGrid extends Component
             ]);
         }
 
+        if (!app(AutoGenerateScheduler::class)->isRoomCompatible($room, $subject, allowMinorLabFallback: true)) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Room Not Compatible',
+                'detail' => "{$room->room_name} is not compatible with {$subject->subject_code}'s room specialization requirements."
+            ]);
+            return;
+        }
+
         try {
-            $this->createPartialSchedule($subject, $room, $day, $startTime, $endTime);
+            $schedule = $this->createPartialSchedule($subject, $room, $day, $startTime, $endTime);
+            $this->syncToBlockSchedule([[
+                'subject_id' => $schedule->subject_id,
+                'room_id' => $schedule->room_id,
+                'day' => $schedule->day,
+                'raw_start_time' => $schedule->start_time,
+                'raw_end_time' => $schedule->end_time,
+            ]]);
 
             $remainingHours = $this->getRemainingHoursDecimal($subjectId);
             $remainingMeetings = $this->getRemainingMeetings($subject) - 1;
@@ -1345,6 +1559,7 @@ class MasterGrid extends Component
             'brickDurationMinutes' => self::BRICK_DURATION_MINUTES,
             'brickHeightPx'        => self::BRICK_HEIGHT_PX,
             'hasFullAccess'        => $this->hasFullAccess(),
+            'canAutoGenerate'      => $this->canAutoGenerateSchedules(),
             'departmentMajors'     => self::DEPARTMENT_MAJORS,
             'departmentColors'     => self::DEPARTMENT_COLORS,
             'selectedRoomId'       => $this->selectedRoomId,

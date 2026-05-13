@@ -95,7 +95,7 @@ class ManageRooms extends Component
         }
 
         // Invalid Headers (Warning Toast) - Check for required columns
-        $required = ['room_name', 'capacity'];
+        $required = ['room_name', 'capacity', 'specialization', 'floor'];
         $roomTypeCol = null;
         
         // Support both 'type' and 'room_type' column names
@@ -135,10 +135,14 @@ class ManageRooms extends Component
         // Preview Generation...
         $this->importPreview = [];
         foreach (array_slice($data, 1) as $row) {
-            if (empty($row) || empty(trim($row[0]))) continue;
+            if (empty($row) || collect($row)->every(fn ($value) => trim((string) $value) === '')) continue;
             
             $roomName = trim($row[$roomNameIdx] ?? '');
-            $roomType = strtoupper(trim($row[$roomTypeIdx] ?? 'LECTURE'));
+            $rawRoomType = trim($row[$roomTypeIdx] ?? '');
+            $roomType = strtoupper($rawRoomType);
+            $capacity = trim($row[$capacityIdx] ?? '');
+            $specialization = $specializationIdx !== false ? trim($row[$specializationIdx] ?? '') : '';
+            $floor = $floorIdx !== false ? trim($row[$floorIdx] ?? '') : '';
             
             // Normalize room type values
             if ($roomType === 'LECTURE' || strtoupper($roomType) === 'LECTURE') {
@@ -147,13 +151,38 @@ class ManageRooms extends Component
                 $roomType = 'LAB';
             }
 
+            $validationErrors = [];
+
+            if ($roomName === '') {
+                $validationErrors[] = 'Missing room name';
+            }
+
+            if ($rawRoomType === '' || !in_array($roomType, ['LECTURE', 'LAB'], true)) {
+                $validationErrors[] = 'Invalid room type';
+            }
+
+            if ($specialization === '') {
+                $validationErrors[] = 'Missing specialization';
+            }
+
+            if (!is_numeric($capacity) || (int) $capacity <= 0) {
+                $validationErrors[] = 'Invalid capacity';
+            }
+
+            $status = Room::where('room_name', $roomName)->exists() ? 'DUPLICATE' : 'READY';
+
+            if ($validationErrors) {
+                $status = 'INVALID';
+            }
+
             $this->importPreview[] = [
                 'room_name' => $roomName,
-                'capacity'  => trim($row[$capacityIdx] ?? ''),
+                'capacity'  => $capacity,
                 'type'      => $roomType,
-                'specialization' => $specializationIdx !== false ? trim($row[$specializationIdx] ?? '') : '',
-                'floor'     => $floorIdx !== false ? trim($row[$floorIdx] ?? '') : '',
-                'status'    => Room::where('room_name', $roomName)->exists() ? 'DUPLICATE' : 'READY',
+                'specialization' => $specialization,
+                'floor'     => $floor,
+                'status'    => $status,
+                'errors'    => implode(', ', $validationErrors),
             ];
         }
 
@@ -169,6 +198,14 @@ class ManageRooms extends Component
 
     public function processImport()
     {
+        if (collect($this->importPreview)->contains(fn ($data) => $data['status'] === 'INVALID')) {
+            return $this->dispatch('toast', [
+                'type'    => 'error',
+                'message' => 'Import blocked',
+                'detail'  => 'Fix invalid room rows before importing.'
+            ]);
+        }
+
         $count = 0;
         foreach ($this->importPreview as $data) {
             if ($data['status'] === 'READY') {

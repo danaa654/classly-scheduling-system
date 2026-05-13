@@ -106,7 +106,7 @@
                         "
                     >
                         <span class="text-[11px] font-black text-slate-600 dark:text-slate-300 uppercase tracking-widest">
-                            ðŸ½ï¸ Institutional Lunch Break
+                            LUNCH BREAK
                         </span>
                     </div>
                 @endif
@@ -148,6 +148,7 @@
                         // 4. Day Index for Horizontal placement
                         $dayFull = $schedule->day;
                         $dayIndex = array_search($dayFull, ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
+                        if ($dayIndex === false) continue;
                         
                         // 5. Column positioning math
                         $oneDayColumn = "((100% - 6rem) / 6)";
@@ -312,67 +313,52 @@
         </div>
     </div>
 
-    {{-- SCHEDULE DETAIL POPOVER (COMPACT) --}}
+    {{-- SCHEDULE DETAIL POPOVER --}}
     <div 
         id="schedulePopover" 
-        class="schedule-popover hidden fixed z-[9999] w-[26rem] max-h-[min(32rem,calc(100vh-2rem))] overflow-y-auto bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-200 dark:border-slate-700 p-4 backdrop-blur-sm pointer-events-auto opacity-0 scale-95 transition-all duration-150"
+        class="schedule-popover hidden fixed z-[9999] w-[26rem] max-h-[min(32rem,calc(100vh-2rem))] overflow-y-auto rounded-2xl border border-white/60 bg-white/90 p-4 shadow-2xl backdrop-blur-xl pointer-events-auto opacity-0 scale-95 transition-all duration-150 dark:border-slate-700/80 dark:bg-slate-900/95"
         style="max-width: calc(100vw - 16px);"
     >
-        <div class="space-y-2">
-            {{-- HEADER --}}
-            <div class="flex items-start justify-between gap-2 pb-2 border-b border-slate-200 dark:border-slate-700">
+        <div class="space-y-3">
+            <div class="flex items-start justify-between gap-3 border-b border-slate-200 pb-3 dark:border-slate-700">
                 <div class="flex-1 min-w-0">
-                    <div class="text-[13px] font-black uppercase text-slate-900 dark:text-white line-clamp-1" id="popCode"></div>
-                    <div class="text-[9px] font-semibold text-slate-600 dark:text-slate-300 mt-0.5 line-clamp-1" id="popDesc"></div>
+                    <div class="text-sm font-black uppercase text-slate-900 dark:text-white line-clamp-1" id="popCode"></div>
+                    <div class="mt-1 text-[11px] font-semibold leading-snug text-slate-600 dark:text-slate-300 line-clamp-2" id="popDesc"></div>
                 </div>
-                <span class="text-[7px] font-bold px-2 py-1 rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 whitespace-nowrap flex-shrink-0" id="popType"></span>
+                <span class="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[9px] font-black uppercase text-slate-700 dark:bg-slate-700 dark:text-slate-200" id="popType"></span>
             </div>
 
-            {{-- INFO GRID (COMPACT) --}}
-            <div class="grid grid-cols-2 gap-3 text-[10px]">
-                <div>
-                    <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">EDP</span>
-                    <span class="font-black text-slate-900 dark:text-slate-100 block truncate text-[10px]" id="popEdp">â€”</span>
+            <div class="grid grid-cols-2 gap-2 text-[10px]">
+                <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
+                    <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">EDP</span>
+                    <span class="mt-1 block truncate font-black text-slate-900 dark:text-slate-100" id="popEdp">-</span>
                 </div>
-                <div>
-                    <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Section</span>
-                    <span class="font-black text-slate-900 dark:text-slate-100 block text-[10px]" id="popSection">â€”</span>
+                <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
+                    <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">Section</span>
+                    <span class="mt-1 block font-black text-slate-900 dark:text-slate-100" id="popSection">-</span>
                 </div>
-                <div>
-                    <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Type</span>
-                    <span class="font-black text-slate-900 dark:text-slate-100 block text-[10px]" id="popType2">â€”</span>
+                <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
+                    <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">Type</span>
+                    <span class="mt-1 block font-black text-slate-900 dark:text-slate-100" id="popType2">-</span>
                 </div>
-                <div>
-                    <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Status</span>
-                    <span class="font-black text-slate-900 dark:text-slate-100 block text-[10px] uppercase" id="popStatus">â€”</span>
-                </div>
-                <div>
-                    <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Department</span>
-                    <span class="font-black text-slate-900 dark:text-slate-100 block text-[10px]" id="popDepartment">â€”</span>
-                </div>
-                <div>
-                    <span class="text-slate-500 dark:text-slate-400 font-bold block text-[7px] mb-0.5">Major</span>
-                    <span class="font-black text-slate-900 dark:text-slate-100 block text-[10px]" id="popMajor">â€”</span>
+                <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
+                    <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">Day</span>
+                    <span class="mt-1 block font-black text-slate-900 dark:text-slate-100" id="popDay">-</span>
                 </div>
             </div>
 
-            {{-- SCHEDULE INFO (COMPACT) --}}
-            <div class="bg-slate-50 dark:bg-slate-950/50 rounded-lg p-3 space-y-2 text-[10px]">
-                <div class="flex justify-between font-bold">
-                    <span class="text-slate-600 dark:text-slate-400">Time:</span>
-                    <span class="text-slate-900 dark:text-slate-100" id="popTime">â€”</span>
+            <div class="space-y-2 rounded-xl bg-slate-50 p-3 text-[11px] dark:bg-slate-950/50">
+                <div class="flex items-start justify-between gap-3 font-bold">
+                    <span class="shrink-0 text-slate-500 dark:text-slate-400">Time</span>
+                    <span class="text-right text-slate-900 dark:text-slate-100" id="popTime">-</span>
                 </div>
-                <div class="flex justify-between font-bold">
-                    <span class="text-slate-600 dark:text-slate-400">Day:</span>
-                    <span class="text-slate-900 dark:text-slate-100" id="popDay">â€”</span>
+                <div class="flex items-start justify-between gap-3 font-bold">
+                    <span class="shrink-0 text-slate-500 dark:text-slate-400">Instructor</span>
+                    <span class="min-w-0 text-right text-slate-900 dark:text-slate-100" id="popInstructor">-</span>
                 </div>
-                <div class="flex justify-between font-bold">
-                    <span class="text-slate-600 dark:text-slate-400">Instructor:</span>
-                    <span class="text-slate-900 dark:text-slate-100 truncate ml-1" id="popInstructor">â€”</span>
-                </div>
-                <div class="flex justify-between font-bold">
-                    <span class="text-slate-600 dark:text-slate-400">Room:</span>
-                    <span class="text-slate-900 dark:text-slate-100 truncate ml-1" id="popRoom">â€”</span>
+                <div class="flex items-start justify-between gap-3 font-bold">
+                    <span class="shrink-0 text-slate-500 dark:text-slate-400">Room</span>
+                    <span class="min-w-0 text-right text-slate-900 dark:text-slate-100" id="popRoom">-</span>
                 </div>
             </div>
         </div>
@@ -390,19 +376,21 @@
                 const popover = document.getElementById('schedulePopover');
                 if (!popover) return;
 
-                document.getElementById('popCode').textContent = data.code || 'N/A';
-                document.getElementById('popDesc').textContent = data.description || 'No description';
-                document.getElementById('popEdp').textContent = data.edp || 'N/A';
-                document.getElementById('popSection').textContent = `S${data.section || 'N/A'}`;
-                document.getElementById('popInstructor').textContent = data.instructor || 'N/A';
-                document.getElementById('popRoom').textContent = data.room || 'N/A';
-                document.getElementById('popTime').textContent = data.time || 'N/A';
-                document.getElementById('popDay').textContent = data.day || 'N/A';
-                document.getElementById('popType').textContent = data.type || 'N/A';
-                document.getElementById('popType2').textContent = data.type || 'N/A';
-                document.getElementById('popDepartment').textContent = data.department || 'N/A';
-                document.getElementById('popMajor').textContent = data.major || 'N/A';
-                document.getElementById('popStatus').textContent = data.status || 'N/A';
+                const setText = (id, value) => {
+                    const element = document.getElementById(id);
+                    if (element) element.textContent = value || 'N/A';
+                };
+
+                setText('popCode', data.code);
+                setText('popDesc', data.description || 'No description');
+                setText('popEdp', data.edp);
+                setText('popSection', `S${data.section || 'N/A'}`);
+                setText('popInstructor', data.instructor);
+                setText('popRoom', data.room);
+                setText('popTime', data.time);
+                setText('popDay', data.day);
+                setText('popType', data.type);
+                setText('popType2', data.type);
 
                 popover.style.display = 'block';
                 popover.style.opacity = '0';

@@ -79,7 +79,7 @@ class Room extends Model
      */
     public function scopeLectureRooms($query)
     {
-        return $query->where('type', 'Lecture');
+        return $query->whereIn('type', ['Lecture', 'LECTURE']);
     }
 
     /**
@@ -87,7 +87,7 @@ class Room extends Model
      */
     public function scopeLabRooms($query)
     {
-        return $query->where('type', 'Laboratory');
+        return $query->whereIn('type', ['Laboratory', 'LAB', 'Lab']);
     }
 
     // ============================================================

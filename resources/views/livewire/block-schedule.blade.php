@@ -74,32 +74,7 @@
 
             {{-- THE UNIFIED SCHEDULE TABLE --}}
             <div class="overflow-hidden">
-                @php
-                    // Flatten all schedules into a single array, sorted by day and time
-                    $flattenedSchedules = [];
-                    foreach($schedules as $day => $daySchedules) {
-                        foreach($daySchedules as $sched) {
-                            $flattenedSchedules[] = $sched;
-                        }
-                    }
-                    
-                    // Sort by day order and then by start time
-                    $dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-                    usort($flattenedSchedules, function($a, $b) use ($dayOrder) {
-                        $dayA = array_search($a->day, $dayOrder);
-                        $dayB = array_search($b->day, $dayOrder);
-                        
-                        if ($dayA !== $dayB) {
-                            return $dayA - $dayB;
-                        }
-                        
-                        $timeA = strtotime($a->start_time);
-                        $timeB = strtotime($b->start_time);
-                        return $timeA - $timeB;
-                    });
-                @endphp
-
-                @forelse($flattenedSchedules as $sched)
+                @forelse($scheduleRows as $sched)
                     @if($loop->first)
                         {{-- Table Header --}}
                         <div class="overflow-x-auto rounded-none border-none shadow-none">
@@ -111,7 +86,7 @@
                                         <th class="px-6 py-4 text-left border-r border-slate-700 dark:border-slate-600 w-32">Subject Code</th>
                                         <th class="px-6 py-4 text-left border-r border-slate-700 dark:border-slate-600 flex-1">Description</th>
                                         <th class="px-6 py-4 text-center border-r border-slate-700 dark:border-slate-600 w-16">Units</th>
-                                        <th class="px-6 py-4 text-center border-r border-slate-700 dark:border-slate-600 w-20">Day</th>
+                                        <th class="px-6 py-4 text-center border-r border-slate-700 dark:border-slate-600 w-32">Day</th>
                                         <th class="px-6 py-4 text-center border-r border-slate-700 dark:border-slate-600 w-24">Room</th>
                                         <th class="px-6 py-4 text-center w-36">Faculty</th>
                                     </tr>
@@ -154,14 +129,14 @@
                         {{-- Day --}}
                         <td class="px-6 py-4 text-center font-black text-slate-700 dark:text-slate-300">
                             <span class="bg-slate-100/50 dark:bg-slate-800/50 px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-tight inline-block">
-                                {{ \Carbon\Carbon::parse('2000-01-01 00:00:00')->addDay(array_search($sched->day, ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']))->format('l') }}
+                                {{ $sched->day_display }}
                             </span>
                         </td>
 
                         {{-- Room --}}
                         <td class="px-6 py-4 text-center font-black text-blue-600 dark:text-blue-400">
                             <span class="bg-blue-100/50 dark:bg-blue-900/30 px-3 py-1.5 rounded-lg text-xs font-black uppercase tracking-tight inline-block">
-                                {{ $sched->room->room_name }}
+                                {{ $sched->room?->room_name ?? 'No Room' }}
                             </span>
                         </td>
 

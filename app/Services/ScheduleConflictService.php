@@ -275,21 +275,31 @@ class ScheduleConflictService
             return true;
         }
 
-        $haystack = strtoupper(trim("{$subject->type} {$subject->subject_code} {$subject->description}"));
+        $haystack = strtoupper(trim(implode(' ', [
+            (string) $subject->type,
+            (string) ($subject->subject_type ?? ''),
+            (string) $subject->subject_code,
+            (string) $subject->description,
+            (string) ($subject->specialization ?? ''),
+        ])));
 
         return str_contains($haystack, 'LAB')
             || str_contains($haystack, 'LABORATORY')
-            || str_contains($haystack, 'COMPUTER LAB');
+            || str_contains($haystack, 'COMPUTER LAB')
+            || str_contains($haystack, 'PROGRAMMING')
+            || str_contains($haystack, 'NETWORKING')
+            || str_contains($haystack, 'DATABASE')
+            || str_contains($haystack, 'SYSTEMS');
     }
 
     private function roomIsLab(Room $room): bool
     {
-        $roomType = strtoupper((string) $room->type);
-        $specialization = strtoupper((string) $room->specialization);
+        $haystack = strtoupper(trim("{$room->type} {$room->room_name} {$room->specialization}"));
 
-        return str_contains($roomType, 'LAB')
-            || str_contains($roomType, 'LABORATORY')
-            || str_contains($specialization, 'LAB');
+        return str_contains($haystack, 'LAB')
+            || str_contains($haystack, 'LABORATORY')
+            || str_contains($haystack, 'COM LAB')
+            || str_contains($haystack, 'COMPUTER');
     }
 
     private function normalizeTime(string $time): string

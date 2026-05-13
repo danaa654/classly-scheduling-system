@@ -20,6 +20,8 @@ class Subject extends Model
         'units',
         'duration_hours',
         'type',
+        'subject_type',
+        'specialization',
         'meetings_per_week',
         'faculty_id',
     ];

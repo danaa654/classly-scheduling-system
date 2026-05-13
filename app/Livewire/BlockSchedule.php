@@ -67,7 +67,7 @@ class BlockSchedule extends Component
         // =====================================================
         // Filter by department AND year_level
         // =====================================================
-        $schedules = $allSchedules->filter(function ($schedule) {
+        $filteredSchedules = $allSchedules->filter(function ($schedule) {
             // Skip if no subject relationship exists
             if (!$schedule->subject) {
                 return false;
@@ -78,13 +78,54 @@ class BlockSchedule extends Component
                 $schedule->subject->department === $this->selectedDepartment
                 || $schedule->subject->major === $this->selectedDepartment
             ) && (int)$schedule->subject->year_level === (int)$this->selectedYear;
-        })
-        ->groupBy('day'); // Group by day for display
+        })->values();
+
+        $dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        $scheduleRows = $filteredSchedules
+            ->groupBy(function ($schedule) {
+                return $schedule->pairing_key ?: implode('|', [
+                    $schedule->subject_id,
+                    $schedule->room_id,
+                    $schedule->start_time,
+                    $schedule->end_time,
+                ]);
+            })
+            ->map(function ($group) use ($dayOrder) {
+                $first = $group->first();
+                $days = $group->pluck('day')
+                    ->filter()
+                    ->unique()
+                    ->sortBy(fn (string $day) => array_search($day, $dayOrder, true))
+                    ->values()
+                    ->all();
+
+                return (object) [
+                    'subject' => $first->subject,
+                    'room' => $first->room,
+                    'faculty' => $first->faculty,
+                    'start_time' => $first->start_time,
+                    'end_time' => $first->end_time,
+                    'days' => $days,
+                    'day_display' => implode(' / ', $days),
+                    'sort_day' => $days[0] ?? $first->day,
+                ];
+            })
+            ->sort(function ($a, $b) use ($dayOrder) {
+                $dayCompare = array_search($a->sort_day, $dayOrder, true) <=> array_search($b->sort_day, $dayOrder, true);
+
+                return $dayCompare !== 0
+                    ? $dayCompare
+                    : strcmp((string) $a->start_time, (string) $b->start_time);
+            })
+            ->values();
+
+        $schedules = $filteredSchedules->groupBy('day');
 
         $departmentName = $this->getDepartmentName($this->selectedDepartment);
 
         return view('livewire.block-schedule', [
             'schedules' => $schedules,
+            'scheduleRows' => $scheduleRows,
             'departmentName' => $departmentName,
         ]);
     }

@@ -198,21 +198,23 @@ class ManageSubjects extends Component
             return;
         }
 
-        // Strict header validation
-        $expected = ['edp_code', 'subject_code', 'section', 'description', 'major', 'year_level', 'units', 'department', 'duration_hours', 'type', 'meetings_per_week'];
-        
-        if ($normalizedHeader !== $expected) {
+        $required = ['edp_code', 'subject_code', 'section', 'description', 'major', 'year_level', 'units', 'department', 'duration_hours', 'meetings_per_week'];
+        $missing = array_diff($required, $normalizedHeader);
+        $hasSubjectType = in_array('type', $normalizedHeader, true) || in_array('subject_type', $normalizedHeader, true);
+
+        if ($missing || !$hasSubjectType) {
             $this->abortImport('Invalid Subject Template');
             return;
         }
 
         // Preview data
-        $this->previewData = collect(array_slice($data, 0, 10))->map(function ($row) {
-            $edp = strtoupper(trim($row[0] ?? ''));
+        $indexes = array_flip($normalizedHeader);
+        $this->previewData = collect(array_slice($data, 0, 10))->map(function ($row) use ($indexes) {
+            $edp = strtoupper(trim($row[$indexes['edp_code']] ?? ''));
             $exists = Subject::where('edp_code', $edp)->exists();
             return [
                 'edp_code' => $edp,
-                'subject' => $row[1] ?? '',
+                'subject' => $row[$indexes['subject_code']] ?? '',
                 'exists' => $exists
             ];
         })->toArray();
@@ -238,6 +240,7 @@ class ManageSubjects extends Component
         $path = $this->importFile->getRealPath();
         $file = fopen($path, 'r');
         $header = true;
+        $indexes = [];
         $count = 0;
         $detectedDept = null; 
         $actor = auth()->user();
@@ -247,13 +250,21 @@ class ManageSubjects extends Component
         $isPowerUser = in_array($userRole, $powerRoles);
 
         while (($row = fgetcsv($file, 1000, ",")) !== FALSE) {
-            if ($header) { $header = false; continue; }
-            if (empty($row[0])) continue;
+            if ($header) {
+                $indexes = array_flip(array_map(fn ($h) => strtolower(trim($h)), $row));
+                $header = false;
+                continue;
+            }
 
-            $rowDept       = strtoupper(trim($row[7] ?? ''));
-            $rowSection    = strtoupper(trim($row[2] ?? 'A'));
-            $rowMajor      = strtoupper(trim($row[4] ?? ''));
-            $rowYearLevel  = (int)($row[5] ?? 1);
+            $value = fn (string $key, $default = '') => trim((string) ($row[$indexes[$key] ?? -1] ?? $default));
+            $typeColumn = array_key_exists('subject_type', $indexes) ? 'subject_type' : 'type';
+
+            if ($value('edp_code') === '') continue;
+
+            $rowDept       = strtoupper($value('department'));
+            $rowSection    = strtoupper($value('section', 'A'));
+            $rowMajor      = strtoupper($value('major'));
+            $rowYearLevel  = (int) $value('year_level', 1);
             
             // Authorization check
             if (!$this->validateDepartmentAccess($rowDept)) {
@@ -264,14 +275,14 @@ class ManageSubjects extends Component
                 $detectedDept = $rowDept;
             }
 
-            $rawDuration = trim($row[8] ?? '3');
-            $rawType     = trim($row[9] ?? 'Major');
-            $rawMeetings = (int)($row[10] ?? 1);
-            $rawUnits    = (int)$row[6];
+            $rawDuration = $value('duration_hours', '3');
+            $rawType     = $value($typeColumn, 'Major');
+            $rawMeetings = (int) $value('meetings_per_week', 1);
+            $rawUnits    = (int) $value('units', 3);
             $clampedUnits = max(3, min(5, $rawUnits));
 
-            $edpCode = strtoupper(trim($row[0]));
-            $section = strtoupper(trim($row[2] ?? 'A'));
+            $edpCode = strtoupper($value('edp_code'));
+            $section = strtoupper($value('section', 'A'));
 
             // Check if subject already exists
             $exists = Subject::where('edp_code', $edpCode)
@@ -284,15 +295,14 @@ class ManageSubjects extends Component
             }
 
             // Normalize type
-            $normalizedType = in_array(ucfirst(strtolower($rawType)), ['Major', 'Minor']) 
-                ? ucfirst(strtolower($rawType)) 
-                : 'Major';
+            $normalizedType = str_contains(strtolower($rawType), 'minor') ? 'Minor' : 'Major';
+            $specialization = strtoupper($value('specialization', $rowMajor));
 
             Subject::create([
                 'edp_code'          => $edpCode,
-                'subject_code'      => strtoupper(trim($row[1])),
+                'subject_code'      => strtoupper($value('subject_code')),
                 'section'           => $section,
-                'description'       => trim($row[3]),
+                'description'       => $value('description'),
                 'major'             => $rowMajor,
                 'year_level'        => $rowYearLevel,
                 'units'             => $clampedUnits,
@@ -300,6 +310,8 @@ class ManageSubjects extends Component
                 'duration_hours'    => (float) filter_var($rawDuration, FILTER_SANITIZE_NUMBER_FLOAT, FILTER_FLAG_ALLOW_FRACTION) ?: 3,
                 'meetings_per_week' => $rawMeetings,
                 'type'              => $normalizedType,
+                'subject_type'      => $rawType,
+                'specialization'    => $specialization,
             ]);
             $count++;
         }
@@ -524,6 +536,8 @@ class ManageSubjects extends Component
                 'year_level'        => (int)$this->year_level,
                 'units'             => (int)$this->units,
                 'type'              => $normalizedType,
+                'subject_type'      => $normalizedType,
+                'specialization'    => $majorUpper,
                 'duration_hours'    => (float)$this->duration_hours,
                 'meetings_per_week' => (int)$this->meetings_per_week,
                 'department'        => $deptUpper,
@@ -703,6 +717,8 @@ class ManageSubjects extends Component
                     'units'             => $original->units,
                     'department'        => $original->department,
                     'type'              => $original->type ?? 'Major',
+                    'subject_type'      => $original->subject_type,
+                    'specialization'    => $original->specialization,
                     'duration_hours'    => $original->duration_hours,
                     'meetings_per_week' => $original->meetings_per_week ?? 1,
                 ]);

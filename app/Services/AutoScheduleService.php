@@ -17,6 +17,29 @@ class AutoScheduleService
     private const SLOT_MINUTES = 30;
     private const LUNCH_START = '12:00:00';
     private const LUNCH_END = '13:00:00';
+    private const GENERAL_ROOM_SPECIALIZATIONS = [
+        'GENERAL',
+        'GEN',
+        'LECTURE',
+        'CLASSROOM',
+        'MINOR',
+        'ALL',
+        'COMMON',
+    ];
+    private const SPECIALIZATION_GROUPS = [
+        'IT' => ['IT', 'ACT', 'CCS'],
+        'ACT' => ['ACT', 'IT', 'CCS'],
+        'CCS' => ['CCS', 'IT', 'ACT'],
+        'HM' => ['HM', 'TM', 'SHTM'],
+        'TM' => ['TM', 'HM', 'SHTM'],
+        'SHTM' => ['SHTM', 'HM', 'TM'],
+        'FB' => ['FB', 'LD', 'QD', 'COC'],
+        'LD' => ['LD', 'FB', 'QD', 'COC'],
+        'QD' => ['QD', 'FB', 'LD', 'COC'],
+        'COC' => ['COC', 'FB', 'LD', 'QD'],
+        'ED' => ['ED', 'CTE'],
+        'CTE' => ['CTE', 'ED'],
+    ];
     private const DAY_PAIRINGS = [
         1 => [
             ['Monday'],
@@ -54,10 +77,12 @@ class AutoScheduleService
         $rooms = Room::query()
             ->select('id', 'room_name', 'type', 'capacity', 'specialization', 'floor')
             ->available()
-            ->get();
+            ->get()
+            ->filter(fn (Room $room) => $this->roomRegistryRowIsValid($room))
+            ->values();
 
         if ($rooms->isEmpty()) {
-            return $this->emptyResult('no compatible room');
+            return $this->emptyResult('no valid room registry rows available');
         }
 
         $existingSchedules = Schedule::query()
@@ -75,6 +100,7 @@ class AutoScheduleService
         $subjects = $this->subjectQuery($filters)
             ->withCount('schedules')
             ->get()
+            ->sortByDesc(fn (Subject $subject) => $this->subjectDifficultyScore($subject))
             ->groupBy(fn (Subject $subject) => $this->groupKey($subject));
 
         $result = [
@@ -113,6 +139,7 @@ class AutoScheduleService
                 }
 
                 $pairingKey = $linkedPattern['pairing_key'];
+                $dayPair = collect($linkedPattern['placements'])->pluck('day')->implode(' / ');
 
                 foreach ($linkedPattern['placements'] as $placement) {
                     $scheduleData = [
@@ -145,6 +172,7 @@ class AutoScheduleService
                         'subject_name' => $subject->description,
                         'edp_code' => $subject->edp_code,
                         'room' => $placement['room']->room_name,
+                        'day_pair' => $dayPair,
                         'day' => $placement['day'],
                         'start_time' => Carbon::parse($placement['start'])->format('h:i A'),
                         'end_time' => Carbon::parse($placement['end'])->format('h:i A'),
@@ -223,6 +251,12 @@ class AutoScheduleService
 
                 if (!$subject || !$room || !$day || !$start || !$end) {
                     $result['failure_reasons'][] = ($item['subject_code'] ?? 'Unknown subject') . ': invalid generated schedule data';
+                    $groupFailed = true;
+                    break;
+                }
+
+                if ($day === 'Sunday' || !in_array($day, self::DAYS, true)) {
+                    $result['failure_reasons'][] = "{$subject->subject_code}: Sunday schedules are not allowed";
                     $groupFailed = true;
                     break;
                 }
@@ -318,34 +352,40 @@ class AutoScheduleService
         }
 
         $score = 0;
-        $subjectMajor = strtoupper((string) $subject->major);
-        $subjectDepartment = strtoupper((string) $subject->department);
+        $subjectSpecializations = $this->subjectSpecializations($subject);
         $subjectType = strtoupper((string) $subject->type);
-        $roomType = strtoupper((string) $room->type);
+        $requiresLab = $this->subjectRequiresLab($subject);
+        $isLabRoom = $this->roomIsLab($room);
         $specializations = $this->roomSpecializations($room);
-        $roomName = strtoupper((string) $room->room_name);
-        $exactSpecialization = in_array($subjectMajor, $specializations, true);
 
-        if ($exactSpecialization) {
-            $score += 80;
+        if ($this->hasExactSpecializationMatch($subjectSpecializations, $specializations)) {
+            $score += 120;
+        } elseif ($this->hasCompatibleSpecializationMatch($subjectSpecializations, $specializations)) {
+            $score += 85;
+        } elseif ($this->isGeneralRoom($room)) {
+            $score += 35;
         }
 
         if ($this->roomTypeMatches($room, $subject)) {
-            $score += 30;
+            $score += 40;
         }
 
-        if ($subjectDepartment && (in_array($subjectDepartment, $specializations, true) || str_contains($roomName, $subjectDepartment))) {
-            $score += 20;
+        if ($requiresLab && $isLabRoom) {
+            $score += 45;
         }
 
         if ($this->capacityFits($room, $subject)) {
             $score += 10;
         }
 
+        if ($subjectType === 'MAJOR') {
+            $score += 20;
+        }
+
         if ($subjectType === 'MINOR') {
-            if ($this->isGeneralRoom($room) && !str_contains($roomType, 'LAB')) {
+            if ($this->isGeneralRoom($room) && !$isLabRoom) {
                 $score += 70;
-            } elseif (!str_contains($roomType, 'LAB')) {
+            } elseif (!$isLabRoom) {
                 $score += 40;
             }
         }
@@ -358,7 +398,9 @@ class AutoScheduleService
         $rooms ??= Room::query()
             ->select('id', 'room_name', 'type', 'capacity', 'specialization', 'floor')
             ->available()
-            ->get();
+            ->get()
+            ->filter(fn (Room $room) => $this->roomRegistryRowIsValid($room))
+            ->values();
 
         return $this->compatibleRooms($rooms, $subject);
     }
@@ -370,29 +412,40 @@ class AutoScheduleService
         }
 
         $subjectType = strtoupper((string) $subject->type);
-        $subjectMajor = $this->subjectSpecialization($subject);
-        $roomType = strtoupper((string) $room->type);
-        $isLab = str_contains($roomType, 'LAB') || str_contains($roomType, 'LABORATORY');
+        $subjectSpecializations = $this->subjectSpecializations($subject);
+        $isLab = $this->roomIsLab($room);
         $requiresLab = $this->subjectRequiresLab($subject);
         $specializations = $this->roomSpecializations($room);
+        $hasExactMatch = $this->hasExactSpecializationMatch($subjectSpecializations, $specializations);
+        $hasCompatibleMatch = $this->hasCompatibleSpecializationMatch($subjectSpecializations, $specializations);
+        $hasSpecializationMatch = $hasExactMatch || $hasCompatibleMatch;
+        $isGeneral = $this->isGeneralRoom($room);
 
         if ($requiresLab && !$isLab) {
             return false;
         }
 
-        if ($subjectType === 'MAJOR') {
-            return $subjectMajor !== '' && in_array($subjectMajor, $specializations, true);
-        }
-
         if ($requiresLab) {
-            return $isLab && ($this->isGeneralRoom($room) || in_array($subjectMajor, $specializations, true));
+            if ($this->roomConflictsWithSubjectDomain($room, $subjectSpecializations)) {
+                return false;
+            }
+
+            return $hasSpecializationMatch || $this->isAcceptableGeneralLab($room, $subjectSpecializations);
         }
 
-        if (!$allowMinorLabFallback && $isLab && !$this->isGeneralRoom($room)) {
+        if ($subjectType === 'MAJOR') {
+            if ($isLab && !$isGeneral) {
+                return $hasSpecializationMatch;
+            }
+
+            return $hasSpecializationMatch || $isGeneral || !$isLab;
+        }
+
+        if ($isLab && !$isGeneral) {
             return false;
         }
 
-        return $this->isGeneralRoom($room) || !$isLab || $allowMinorLabFallback;
+        return $isGeneral || !$isLab || $allowMinorLabFallback;
     }
 
     public function hasRoomConflict(Collection $schedules, int $roomId, string $day, string $start, string $end): bool
@@ -439,7 +492,7 @@ class AutoScheduleService
     private function subjectQuery(array $filters)
     {
         return Subject::query()
-            ->select('id', 'edp_code', 'subject_code', 'description', 'section', 'major', 'year_level', 'department', 'units', 'duration_hours', 'type', 'meetings_per_week')
+            ->select('id', 'edp_code', 'subject_code', 'description', 'section', 'major', 'year_level', 'department', 'units', 'duration_hours', 'type', 'subject_type', 'specialization', 'meetings_per_week')
             ->where('meetings_per_week', '>', 0)
             ->when(!empty($filters['department']), fn ($query) => $query->where('department', strtoupper($filters['department'])))
             ->when(!empty($filters['major']), fn ($query) => $query->where('major', strtoupper($filters['major'])))
@@ -459,7 +512,7 @@ class AutoScheduleService
         set_time_limit(300);
 
         $subject = Subject::query()
-            ->select('id', 'edp_code', 'subject_code', 'description', 'section', 'major', 'year_level', 'department', 'units', 'duration_hours', 'type', 'meetings_per_week')
+            ->select('id', 'edp_code', 'subject_code', 'description', 'section', 'major', 'year_level', 'department', 'units', 'duration_hours', 'type', 'subject_type', 'specialization', 'meetings_per_week')
             ->find($subjectId);
 
         if (!$subject) {
@@ -478,9 +531,18 @@ class AutoScheduleService
             ->select('id', 'room_name', 'type', 'capacity', 'specialization', 'floor')
             ->available()
             ->when(!empty($overrides['preferred_room_type']), function ($query) use ($overrides) {
-                $query->where('type', $overrides['preferred_room_type']);
+                $preference = trim((string) $overrides['preferred_room_type']);
+                $normalizedType = strtoupper($preference);
+
+                $query->where(function ($roomQuery) use ($preference, $normalizedType) {
+                    $roomQuery->where('type', $normalizedType)
+                        ->orWhere('room_name', 'like', "%{$preference}%")
+                        ->orWhere('specialization', 'like', "%{$preference}%");
+                });
             })
-            ->get();
+            ->get()
+            ->filter(fn (Room $room) => $this->roomRegistryRowIsValid($room))
+            ->values();
 
         $existingSchedules = Schedule::query()
             ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
@@ -530,7 +592,12 @@ class AutoScheduleService
             ],
         ];
 
-        $linkedPattern = $this->generateLinkedMeetingPattern($subject, $rooms, $existingSchedules, Setting::getDayBounds(), (int) $subject->meetings_per_week);
+        $preferredStart = $this->normalizePreferredStart($overrides['preferred_start_time'] ?? null);
+        $linkedPattern = $preferredStart
+            ? $this->findPatternAtPreferredStart($subject, $rooms, $existingSchedules, Setting::getDayBounds(), (int) $subject->meetings_per_week, $preferredStart)
+            : null;
+
+        $linkedPattern ??= $this->generateLinkedMeetingPattern($subject, $rooms, $existingSchedules, Setting::getDayBounds(), (int) $subject->meetings_per_week);
 
         if (!$linkedPattern) {
             $reason = $this->compatibleRooms($rooms, $subject)->isEmpty()
@@ -545,6 +612,7 @@ class AutoScheduleService
 
         foreach ($linkedPattern['placements'] as $placement) {
             $pairingKey = $linkedPattern['pairing_key'];
+            $dayPair = collect($linkedPattern['placements'])->pluck('day')->implode(' / ');
 
             $schedule = new Schedule([
                 'subject_id' => $subject->id,
@@ -568,6 +636,7 @@ class AutoScheduleService
                 'subject_name' => $subject->description,
                 'edp_code' => $subject->edp_code,
                 'room' => $placement['room']->room_name,
+                'day_pair' => $dayPair,
                 'day' => $placement['day'],
                 'start_time' => Carbon::parse($placement['start'])->format('h:i A'),
                 'end_time' => Carbon::parse($placement['end'])->format('h:i A'),
@@ -580,6 +649,11 @@ class AutoScheduleService
                 'meetings_per_week' => $subject->meetings_per_week,
                 'pairing_key' => $pairingKey,
             ];
+
+            if ($placement['fallback']) {
+                $result['warnings']++;
+                $result['fallback_warnings'][] = "{$subject->subject_code} used fallback room {$placement['room']->room_name}.";
+            }
         }
 
         $result['failed'] = count($result['failed_items']);
@@ -765,6 +839,10 @@ class AutoScheduleService
         $placements = [];
 
         foreach ($days as $day) {
+            if ($day === 'Sunday') {
+                continue;
+            }
+
             if (!$this->roomAvailable($existingSchedules, $room->id, $day, $start, $end)) {
                 return null;
             }
@@ -781,6 +859,10 @@ class AutoScheduleService
                 'score' => $score,
                 'fallback' => $fallback,
             ];
+        }
+
+        if (count($placements) !== count($days)) {
+            return null;
         }
 
         return $placements;
@@ -996,38 +1078,31 @@ class AutoScheduleService
 
     private function roomTypeMatches(Room $room, Subject $subject): bool
     {
-        $roomType = strtoupper((string) $room->type);
-        $roomType = $roomType === 'LABORATORY' ? 'LAB' : $roomType;
-        $subjectText = strtoupper(trim("{$subject->type} {$subject->subject_code} {$subject->description}"));
-        $requiresLab = str_contains($subjectText, 'LAB') || str_contains($subjectText, 'LABORATORY');
-
-        if ($requiresLab) {
-            return str_contains($roomType, 'LAB');
-        }
-
-        return !str_contains($roomType, 'LAB');
+        return $this->subjectRequiresLab($subject) === $this->roomIsLab($room);
     }
 
     private function subjectRequiresLab(Subject $subject): bool
     {
-        $haystack = strtoupper(trim("{$subject->subject_code} {$subject->description}"));
+        $haystack = strtoupper(trim(implode(' ', [
+            (string) $subject->type,
+            (string) ($subject->subject_type ?? ''),
+            (string) $subject->subject_code,
+            (string) $subject->description,
+            (string) ($subject->specialization ?? ''),
+        ])));
 
         return str_contains($haystack, 'LAB')
             || str_contains($haystack, 'LABORATORY')
-            || str_contains($haystack, 'COMPUTER');
+            || str_contains($haystack, 'COMPUTER LAB')
+            || str_contains($haystack, 'PROGRAMMING')
+            || str_contains($haystack, 'NETWORKING')
+            || str_contains($haystack, 'DATABASE')
+            || str_contains($haystack, 'SYSTEMS');
     }
 
     private function subjectSpecialization(Subject $subject): string
     {
-        $major = strtoupper(trim((string) $subject->major));
-
-        if ($major !== '') {
-            return $major;
-        }
-
-        $edpPrefix = strtoupper(strtok((string) $subject->edp_code, '-'));
-
-        return $edpPrefix ?: strtoupper((string) $subject->department);
+        return $this->subjectSpecializations($subject)[0] ?? '';
     }
 
     private function roomSpecializations(Room $room): array
@@ -1041,6 +1116,52 @@ class AutoScheduleService
             ->all();
     }
 
+    private function subjectSpecializations(Subject $subject): array
+    {
+        $values = array_merge(
+            $this->splitSpecialization((string) ($subject->specialization ?? '')),
+            [
+                strtoupper(trim((string) $subject->major)),
+                strtoupper(trim((string) strtok((string) $subject->edp_code, '-'))),
+                strtoupper(trim((string) $subject->department)),
+            ]
+        );
+
+        return collect($values)
+            ->map(fn (string $value) => trim($value))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function splitSpecialization(string $specialization): array
+    {
+        return collect(preg_split('/[,|\/;]+/', strtoupper($specialization)) ?: [])
+            ->map(fn (string $value) => trim($value))
+            ->filter()
+            ->values()
+            ->all();
+    }
+
+    private function hasExactSpecializationMatch(array $subjectSpecializations, array $roomSpecializations): bool
+    {
+        return !empty(array_intersect($subjectSpecializations, $roomSpecializations));
+    }
+
+    private function hasCompatibleSpecializationMatch(array $subjectSpecializations, array $roomSpecializations): bool
+    {
+        foreach ($subjectSpecializations as $subjectSpecialization) {
+            $compatible = self::SPECIALIZATION_GROUPS[$subjectSpecialization] ?? [$subjectSpecialization];
+
+            if (array_intersect($compatible, $roomSpecializations)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function isGeneralRoom(Room $room): bool
     {
         $specializations = $this->roomSpecializations($room);
@@ -1049,14 +1170,78 @@ class AutoScheduleService
             return true;
         }
 
-        return (bool) collect($specializations)->first(fn (string $value) => in_array($value, [
-            'GENERAL',
-            'GEN',
-            'LECTURE',
-            'CLASSROOM',
-            'MINOR',
-            'ALL',
-        ], true));
+        return (bool) collect($specializations)->first(fn (string $value) => in_array($value, self::GENERAL_ROOM_SPECIALIZATIONS, true));
+    }
+
+    private function roomIsLab(Room $room): bool
+    {
+        $haystack = strtoupper(trim("{$room->type} {$room->room_name} {$room->specialization}"));
+
+        return str_contains($haystack, 'LAB')
+            || str_contains($haystack, 'LABORATORY')
+            || str_contains($haystack, 'COM LAB')
+            || str_contains($haystack, 'COMPUTER');
+    }
+
+    private function isAcceptableGeneralLab(Room $room, array $subjectSpecializations): bool
+    {
+        if (!$this->roomIsLab($room) || $this->roomConflictsWithSubjectDomain($room, $subjectSpecializations)) {
+            return false;
+        }
+
+        $roomName = strtoupper((string) $room->room_name);
+
+        if (array_intersect($subjectSpecializations, ['IT', 'ACT', 'CCS'])) {
+            return str_contains($roomName, 'COM')
+                || str_contains($roomName, 'COMPUTER')
+                || str_contains($roomName, 'LAB');
+        }
+
+        return $this->isGeneralRoom($room);
+    }
+
+    private function roomConflictsWithSubjectDomain(Room $room, array $subjectSpecializations): bool
+    {
+        $roomText = strtoupper(trim("{$room->room_name} {$room->type} {$room->specialization}"));
+
+        $domainConflicts = [
+            'technology' => ['KITCHEN', 'HOSPITALITY', 'HM', 'SHTM', 'BALLISTICS', 'FORENSIC', 'FORENSICS', 'QD', 'LD', 'FB'],
+            'hospitality' => ['COMPUTER', 'COM LAB', 'IT', 'ACT', 'BALLISTICS', 'FORENSIC', 'FORENSICS', 'QD', 'LD', 'FB'],
+            'criminology' => ['KITCHEN', 'HOSPITALITY', 'HM', 'SHTM', 'COMPUTER', 'COM LAB', 'IT', 'ACT'],
+        ];
+
+        if (array_intersect($subjectSpecializations, ['IT', 'ACT', 'CCS'])) {
+            return $this->containsAny($roomText, $domainConflicts['technology']);
+        }
+
+        if (array_intersect($subjectSpecializations, ['HM', 'TM', 'SHTM'])) {
+            return $this->containsAny($roomText, $domainConflicts['hospitality']);
+        }
+
+        if (array_intersect($subjectSpecializations, ['FB', 'LD', 'QD', 'COC'])) {
+            return $this->containsAny($roomText, $domainConflicts['criminology']);
+        }
+
+        return false;
+    }
+
+    private function containsAny(string $haystack, array $needles): bool
+    {
+        foreach ($needles as $needle) {
+            if (strlen($needle) <= 3 && preg_match('/(^|[^A-Z0-9])' . preg_quote($needle, '/') . '([^A-Z0-9]|$)/', $haystack)) {
+                return true;
+            }
+
+            if (strlen($needle) <= 3) {
+                continue;
+            }
+
+            if (str_contains($haystack, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function roomLoad(?Collection $schedules, int $roomId): int
@@ -1075,6 +1260,15 @@ class AutoScheduleService
         return !$expectedSize || !$room->capacity || (int) $room->capacity >= (int) $expectedSize;
     }
 
+    private function roomRegistryRowIsValid(Room $room): bool
+    {
+        return trim((string) $room->room_name) !== ''
+            && trim((string) $room->type) !== ''
+            && trim((string) $room->specialization) !== ''
+            && is_numeric($room->capacity)
+            && (int) $room->capacity > 0;
+    }
+
     private function groupKey(Subject $subject): string
     {
         return implode('|', [
@@ -1083,6 +1277,93 @@ class AutoScheduleService
             (int) $subject->year_level,
             strtoupper((string) $subject->section),
         ]);
+    }
+
+    private function subjectDifficultyScore(Subject $subject): int
+    {
+        $score = 0;
+
+        if ($this->subjectRequiresLab($subject)) {
+            $score += 1000;
+        }
+
+        if (strtoupper((string) $subject->type) === 'MAJOR') {
+            $score += 350;
+        }
+
+        $score += (int) ($subject->units ?? 0) * 40;
+        $score += (int) ($subject->meetings_per_week ?? 1) * 25;
+        $score += (int) round(((float) ($subject->duration_hours ?? 0)) * 20);
+
+        $expectedSize = $subject->student_count ?? $subject->enrollment ?? $subject->class_size ?? null;
+        if ($expectedSize) {
+            $score += min(250, (int) $expectedSize);
+        }
+
+        return $score;
+    }
+
+    private function normalizePreferredStart(?string $value): ?string
+    {
+        if (blank($value)) {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($value)->format('H:i:s');
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function findPatternAtPreferredStart(
+        Subject $subject,
+        Collection $rooms,
+        Collection $existingSchedules,
+        array $bounds,
+        int $meetingsNeeded,
+        string $preferredStart
+    ): ?array {
+        $minutes = $this->minutesPerMeeting($subject);
+        $slotStart = Carbon::parse($preferredStart);
+        $slotEnd = $slotStart->copy()->addMinutes($minutes);
+        $start = $slotStart->format('H:i:s');
+        $end = $slotEnd->format('H:i:s');
+        $boundsStart = Carbon::parse($bounds['start']);
+        $boundsEnd = Carbon::parse($bounds['end']);
+
+        if ($slotStart->lt($boundsStart) || $slotEnd->gt($boundsEnd)) {
+            return null;
+        }
+
+        if ($this->conflicts->overlapsLunchBreak($start, $end)
+            || !$this->conflicts->respectsSectionSession($subject->section, $start, $end)) {
+            return null;
+        }
+
+        foreach ($this->compatibleRooms($rooms, $subject, $existingSchedules) as $candidate) {
+            foreach ($this->meetingDayPatterns($meetingsNeeded) as $days) {
+                $placements = $this->buildPlacementsForDays(
+                    $existingSchedules,
+                    $subject,
+                    $candidate['room'],
+                    $days,
+                    $start,
+                    $end,
+                    $candidate['score'],
+                    $candidate['fallback']
+                );
+
+                if ($placements) {
+                    return [
+                        'pairing_key' => $this->makePairingKey($subject),
+                        'placements' => $placements,
+                    ];
+                }
+            }
+        }
+
+        return null;
     }
 
     private function recordFailure(array &$result, Subject|string $subject, string $reason): void
@@ -1099,6 +1380,7 @@ class AutoScheduleService
                 'duration_hours' => $subject->duration_hours,
                 'meetings_per_week' => $subject->meetings_per_week,
                 'preferred_room_type' => '',
+                'preferred_start_time' => '',
                 'reason' => $reason,
             ];
         }
