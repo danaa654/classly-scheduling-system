@@ -188,7 +188,12 @@
                             'light' => 'bg-slate-400/85 text-slate-950', 'dark' => 'dark:bg-slate-600/80 dark:text-slate-50', 'border' => 'border-l-slate-600'
                         ];
 
-                        $instructor = $schedule->faculty?->full_name ?? 'Unassigned';
+                        $instructor = $this->cleanScheduleText($schedule->faculty?->full_name ?? 'Unassigned');
+                        $subjectCode = $this->cleanScheduleText($subject->subject_code ?? 'N/A');
+                        $subjectDescription = $this->cleanScheduleText($subject->description ?? 'No subject name');
+                        $subjectType = $this->cleanScheduleText($subject->type ?? 'N/A');
+                        $roomName = $this->cleanScheduleText($schedule->room?->room_name ?? $selectedRoomName ?? 'No room');
+                        $canDeleteSchedule = $this->canDeleteSchedule($schedule->id);
                         $startTimeDisplay = $startTime->format('g:i A');
                         $endTimeDisplay = $endTime->format('g:i A');
                     @endphp
@@ -213,37 +218,56 @@
                         "
                         wire:key="schedule-{{ $schedule->id }}"
                         @mouseenter="showSchedulePopover($event, $el, {
-                            code: @js($subject->subject_code),
-                            description: @js($subject->description ?? ''),
-                            edp: @js($subject->edp_code ?? 'N/A'),
+                            scheduleId: @js($schedule->id),
+                            canDelete: @js($canDeleteSchedule),
+                            code: @js($subjectCode),
+                            description: @js($subjectDescription),
+                            edp: @js($this->cleanScheduleText($subject->edp_code ?? 'N/A')),
                             section: @js($schedule->section ?? 'N/A'),
                             instructor: @js($instructor),
-                            room: @js($schedule->room?->room_name ?? $selectedRoomName ?? 'N/A'),
-                            type: @js($subject->type ?? 'N/A'),
-                            department: @js($subject->department ?? 'N/A'),
-                            major: @js($subject->major ?? 'N/A'),
+                            room: @js($roomName),
+                            type: @js($subjectType),
+                            department: @js($this->cleanScheduleText($subject->department ?? 'N/A')),
+                            major: @js($this->cleanScheduleText($subject->major ?? 'N/A')),
                             status: @js($schedule->status ?? 'partial'),
                             time: @js($startTimeDisplay . ' - ' . $endTimeDisplay),
                             day: @js($dayFull)
                         })"
-                        @mouseleave="hideSchedulePopover()"
+                        @focusin="showSchedulePopover($event, $el, {
+                            scheduleId: @js($schedule->id),
+                            canDelete: @js($canDeleteSchedule),
+                            code: @js($subjectCode),
+                            description: @js($subjectDescription),
+                            edp: @js($this->cleanScheduleText($subject->edp_code ?? 'N/A')),
+                            section: @js($schedule->section ?? 'N/A'),
+                            instructor: @js($instructor),
+                            room: @js($roomName),
+                            type: @js($subjectType),
+                            department: @js($this->cleanScheduleText($subject->department ?? 'N/A')),
+                            major: @js($this->cleanScheduleText($subject->major ?? 'N/A')),
+                            status: @js($schedule->status ?? 'partial'),
+                            time: @js($startTimeDisplay . ' - ' . $endTimeDisplay),
+                            day: @js($dayFull)
+                        })"
+                        @mouseleave="schedulePopoverLeave()"
+                        tabindex="0"
                     >
                         {{-- SCHEDULE CARD CONTENT --}}
                         <div class="flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden bg-white/25 px-2 py-1.5 text-center leading-tight pointer-events-none dark:bg-black/15">
                             <div class="w-full truncate text-[7px] font-black uppercase text-current opacity-80 sm:text-[8px]">
-                                {{ $subject->type ?? 'N/A' }} Â· S{{ $schedule->section ?? 'N/A' }}
+                                {{ $subjectType }} | S{{ $schedule->section ?? 'N/A' }}
                             </div>
                             
                             <div class="w-full truncate text-[11px] font-black uppercase text-current sm:text-[12px]">
-                                {{ $subject->subject_code }}
+                                {{ $subjectCode }}
                             </div>
 
                             <div class="w-full truncate text-[7px] font-bold opacity-80">
-                                EDP: {{ $subject->edp_code ?? 'N/A' }}
+                                EDP: {{ $this->cleanScheduleText($subject->edp_code ?? 'N/A') }}
                             </div>
 
                             <div class="w-full truncate text-[8px] font-bold opacity-90">
-                                {{ $subject->description ?? 'No subject name' }}
+                                {{ $subjectDescription }}
                             </div>
 
                             <div class="w-full truncate text-[8px] font-bold opacity-90 sm:text-[9px]">
@@ -251,7 +275,7 @@
                             </div>
 
                             <div class="w-full truncate text-[7px] font-bold opacity-80">
-                                {{ $schedule->room?->room_name ?? $selectedRoomName ?? 'No room' }} Â· {{ $instructor }}
+                                {{ $roomName }} | {{ $instructor }}
                             </div>
                         </div>
 
@@ -271,6 +295,7 @@
                         <button 
                             wire:click.stop="removeAssignment({{ $schedule->id }})"
                             wire:confirm="Remove this schedule?"
+                            @disabled(!$canDeleteSchedule)
                             class="absolute bottom-0.5 right-0.5 opacity-0 group-hover/card:opacity-100 bg-red-500/80 hover:bg-red-600 text-white rounded p-0.5 transition-all shadow-sm flex-shrink-0"
                         >
                             <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24">
@@ -316,8 +341,10 @@
     {{-- SCHEDULE DETAIL POPOVER --}}
     <div 
         id="schedulePopover" 
-        class="schedule-popover hidden fixed z-[9999] w-[26rem] max-h-[min(32rem,calc(100vh-2rem))] overflow-y-auto rounded-2xl border border-white/60 bg-white/90 p-4 shadow-2xl backdrop-blur-xl pointer-events-auto opacity-0 scale-95 transition-all duration-150 dark:border-slate-700/80 dark:bg-slate-900/95"
+        class="schedule-popover hidden fixed z-[9999] w-[26rem] max-h-[min(32rem,calc(100vh-2rem))] overflow-y-auto rounded-2xl border border-white/60 bg-white/85 p-4 shadow-2xl shadow-slate-950/20 backdrop-blur-2xl pointer-events-auto opacity-0 scale-95 transition-all duration-150 dark:border-slate-700/80 dark:bg-slate-900/90"
         style="max-width: calc(100vw - 16px);"
+        @mouseenter="keepSchedulePopover()"
+        @mouseleave="schedulePopoverLeave()"
     >
         <div class="space-y-3">
             <div class="flex items-start justify-between gap-3 border-b border-slate-200 pb-3 dark:border-slate-700">
@@ -361,6 +388,23 @@
                     <span class="min-w-0 text-right text-slate-900 dark:text-slate-100" id="popRoom">-</span>
                 </div>
             </div>
+
+            <div class="flex gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+                <button
+                    type="button"
+                    @click="$wire.requestScheduleEdit(activeScheduleId); hideSchedulePopover(true)"
+                    :disabled="!activeCanDelete"
+                    class="flex-1 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-45 dark:border-indigo-900/70 dark:bg-indigo-950/30 dark:text-indigo-300">
+                    Edit
+                </button>
+                <button
+                    type="button"
+                    @click="if (confirm('Remove this schedule?')) { $wire.removeAssignment(activeScheduleId); hideSchedulePopover(true) }"
+                    :disabled="!activeCanDelete"
+                    class="flex-1 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-45 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-300">
+                    Remove
+                </button>
+            </div>
         </div>
     </div>
 </div>
@@ -368,13 +412,21 @@
 <script>
     function scheduleGridApp() {
         return {
+            activeScheduleId: null,
+            activeCanDelete: false,
+            popoverHideTimer: null,
+
             initializeGrid() {
-                console.log('âœ… Schedule grid initialized');
+                console.log('Schedule grid initialized');
             },
 
             showSchedulePopover(event, anchor, data) {
                 const popover = document.getElementById('schedulePopover');
                 if (!popover) return;
+
+                this.keepSchedulePopover();
+                this.activeScheduleId = data.scheduleId || null;
+                this.activeCanDelete = Boolean(data.canDelete);
 
                 const setText = (id, value) => {
                     const element = document.getElementById(id);
@@ -394,46 +446,83 @@
 
                 popover.style.display = 'block';
                 popover.style.opacity = '0';
-                popover.style.transform = 'scale(0.96)';
+                popover.style.transform = 'translateY(4px) scale(0.96)';
                 popover.style.left = '0px';
                 popover.style.top = '0px';
 
                 requestAnimationFrame(() => {
                     const anchorRect = anchor.getBoundingClientRect();
                     const popoverRect = popover.getBoundingClientRect();
-                    const gap = 12;
-                    const margin = 8;
-                    const popoverWidth = Math.min(popoverRect.width || 320, window.innerWidth - (margin * 2));
-                    const popoverHeight = popoverRect.height || 220;
+                    const gap = 14;
+                    const margin = 12;
+                    const viewportWidth = window.innerWidth;
+                    const viewportHeight = window.innerHeight;
+                    const popoverWidth = Math.min(popoverRect.width || 320, viewportWidth - (margin * 2));
+                    const popoverHeight = Math.min(popoverRect.height || 240, viewportHeight - (margin * 2));
 
-                    let x = anchorRect.right + gap;
-                    let y = anchorRect.top + (anchorRect.height / 2) - (popoverHeight / 2);
+                    const candidates = [
+                        {
+                            x: anchorRect.right + gap,
+                            y: anchorRect.top + (anchorRect.height / 2) - (popoverHeight / 2),
+                        },
+                        {
+                            x: anchorRect.left - popoverWidth - gap,
+                            y: anchorRect.top + (anchorRect.height / 2) - (popoverHeight / 2),
+                        },
+                        {
+                            x: anchorRect.left + (anchorRect.width / 2) - (popoverWidth / 2),
+                            y: anchorRect.bottom + gap,
+                        },
+                        {
+                            x: anchorRect.left + (anchorRect.width / 2) - (popoverWidth / 2),
+                            y: anchorRect.top - popoverHeight - gap,
+                        },
+                    ];
 
-                    if (window.innerWidth < 640) {
-                        x = (window.innerWidth - popoverWidth) / 2;
+                    const fits = ({ x, y }) => (
+                        x >= margin
+                        && y >= margin
+                        && x + popoverWidth <= viewportWidth - margin
+                        && y + popoverHeight <= viewportHeight - margin
+                    );
+
+                    let { x, y } = candidates.find(fits) || candidates[0];
+
+                    if (viewportWidth < 640) {
+                        x = (viewportWidth - popoverWidth) / 2;
                         y = anchorRect.bottom + gap;
-                    } else if (x + popoverWidth + margin > window.innerWidth) {
-                        x = anchorRect.left - popoverWidth - gap;
                     }
 
-                    x = Math.max(margin, Math.min(x, window.innerWidth - popoverWidth - margin));
-                    y = Math.max(margin, Math.min(y, window.innerHeight - popoverHeight - margin));
+                    x = Math.max(margin, Math.min(x, viewportWidth - popoverWidth - margin));
+                    y = Math.max(margin, Math.min(y, viewportHeight - popoverHeight - margin));
 
                     popover.style.left = x + 'px';
                     popover.style.top = y + 'px';
                     popover.style.maxWidth = popoverWidth + 'px';
                     popover.style.opacity = '1';
-                    popover.style.transform = 'scale(1)';
+                    popover.style.transform = 'translateY(0) scale(1)';
                 });
             },
 
-            hideSchedulePopover() {
+            keepSchedulePopover() {
+                if (this.popoverHideTimer) {
+                    clearTimeout(this.popoverHideTimer);
+                    this.popoverHideTimer = null;
+                }
+            },
+
+            schedulePopoverLeave() {
+                this.keepSchedulePopover();
+                this.popoverHideTimer = setTimeout(() => this.hideSchedulePopover(), 140);
+            },
+
+            hideSchedulePopover(force = false) {
                 const popover = document.getElementById('schedulePopover');
                 if (popover) {
                     popover.style.opacity = '0';
-                    popover.style.transform = 'scale(0.96)';
+                    popover.style.transform = 'translateY(4px) scale(0.96)';
                     setTimeout(() => {
-                        if (popover.style.opacity === '0') {
+                        if (force || popover.style.opacity === '0') {
                             popover.style.display = 'none';
                         }
                     }, 120);

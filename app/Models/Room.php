@@ -32,6 +32,40 @@ class Room extends Model
         return $this->hasMany(Schedule::class);
     }
 
+    protected function roomName(): Attribute
+    {
+        return Attribute::make(get: fn ($value) => self::cleanText($value));
+    }
+
+    protected function type(): Attribute
+    {
+        return Attribute::make(get: fn ($value) => self::cleanText($value));
+    }
+
+    protected function specialization(): Attribute
+    {
+        return Attribute::make(get: fn ($value) => self::cleanText($value));
+    }
+
+    protected function floor(): Attribute
+    {
+        return Attribute::make(get: fn ($value) => self::cleanText($value));
+    }
+
+    private static function cleanText($value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        $text = html_entity_decode((string) $value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = str_replace(["\u{00C2}", "\u{00A0}", "\xC2\xA0"], ' ', $text);
+        $text = preg_replace('/[\x{200B}-\x{200D}\x{FEFF}]/u', '', $text) ?? $text;
+        $text = preg_replace('/[ \t]+/', ' ', $text) ?? $text;
+
+        return trim($text);
+    }
+
     // ============================================================
     // SCOPES - Filtering & Querying
     // ============================================================

@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use Livewire\Component;
 use Livewire\Attributes\Url;
+use App\Models\Faculty;
 use App\Models\Subject;
 use App\Models\Room;
 use App\Models\Schedule;
@@ -48,10 +49,18 @@ class MasterGrid extends Component
     public bool $showGeneratingModal = false;
     public bool $showSummaryModal = false;
     public bool $showSavingModal = false;
+    public bool $showRetryingModal = false;
+    public bool $showEditScheduleModal = false;
     public int $generationProcessId = 0;
     public int $saveProcessId = 0;
+    public int $retryProcessId = 0;
+    public ?int $retrySubjectId = null;
     public array $pendingGeneratedSchedules = [];
     public array $failedRetryInputs = [];
+    public array $generatedScheduleEditInputs = [];
+    public array $compatibleRoomsForEdit = [];
+    public array $compatibleFacultyForEdit = [];
+    public ?string $editingGeneratedScheduleKey = null;
     public $generateDepartment = null;
     public $generateMajor = null;
     public $generateYearLevel = null;
@@ -175,6 +184,11 @@ class MasterGrid extends Component
         return in_array($role, ['admin', 'registrar'], true);
     }
 
+    public function canModifyGeneratedSchedules(): bool
+    {
+        return $this->canAutoGenerateSchedules();
+    }
+
     public function getUserDepartment(): ?string
     {
         $user = auth()->user();
@@ -183,24 +197,7 @@ class MasterGrid extends Component
 
     public function canDeleteSchedule($scheduleId): bool
     {
-        if ($this->hasFullAccess()) {
-            return true;
-        }
-
-        $schedule = Schedule::find($scheduleId);
-        if (!$schedule || !$schedule->subject) {
-            return false;
-        }
-
-        $user = auth()->user();
-        $userRole = $user->role ?? 'guest';
-        $userDept = $user->department ?? null;
-
-        if (in_array($userRole, ['dean', 'oic'])) {
-            return $schedule->subject->department === $userDept;
-        }
-
-        return false;
+        return $this->canAutoGenerateSchedules() && Schedule::whereKey($scheduleId)->exists();
     }
 
     public function getDepartmentColor($department): string
@@ -218,6 +215,16 @@ class MasterGrid extends Component
         $start = Carbon::parse($startTime)->format(self::TIME_FORMAT_12H);
         $end = Carbon::parse($endTime)->format(self::TIME_FORMAT_12H);
         return "{$start} - {$end}";
+    }
+
+    public function cleanScheduleText($value): string
+    {
+        $text = html_entity_decode((string) $value, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+        $text = str_replace(["\u{00C2}", "\u{00A0}", "\xC2\xA0"], ' ', $text);
+        $text = preg_replace('/[\x{200B}-\x{200D}\x{FEFF}]/u', '', $text) ?? $text;
+        $text = preg_replace('/[ \t]+/', ' ', $text) ?? $text;
+
+        return trim($text);
     }
 
     public function calculateMinutesPerMeeting($subject): float
@@ -323,7 +330,18 @@ class MasterGrid extends Component
         $checks = [
             $service->checkRoomConflict($room->id, $day, $startTime, $endTime, $ignoreScheduleId),
             $service->checkSectionConflict($subject, $day, $startTime, $endTime, $ignoreScheduleId),
+            $service->checkFacultyConflict($subject, $day, $startTime, $endTime, $ignoreScheduleId),
         ];
+
+        if ($subject->faculty_id) {
+            $faculty = $subject->relationLoaded('faculty')
+                ? $subject->faculty
+                : Faculty::select('id', 'full_name', 'availability')->find($subject->faculty_id);
+
+            if ($faculty) {
+                $checks[] = $service->checkFacultyAvailability($faculty, $day, $startTime, $endTime);
+            }
+        }
 
         foreach ($checks as $check) {
             if (($check['status'] ?? true) === false) {
@@ -374,10 +392,50 @@ class MasterGrid extends Component
             ->map(fn (array $candidate) => [
                 'room_id' => $candidate['room']->id,
                 'room_name' => $candidate['room']->room_name,
+                'type' => $candidate['room']->type,
+                'capacity' => $candidate['room']->capacity,
                 'score' => $candidate['score'],
             ])
             ->values()
             ->all();
+    }
+
+    private function findCompatibleFacultyForSubject(Subject $subject): array
+    {
+        $department = $this->facultyDepartmentForSubject($subject);
+
+        return Faculty::query()
+            ->approved()
+            ->select('id', 'full_name', 'department')
+            ->when($department !== '', fn ($query) => $query->where('department', $department))
+            ->orderBy('full_name')
+            ->get()
+            ->map(fn (Faculty $faculty) => [
+                'id' => $faculty->id,
+                'full_name' => $this->cleanScheduleText($faculty->full_name),
+                'department' => $this->cleanScheduleText($faculty->department),
+            ])
+            ->values()
+            ->all();
+    }
+
+    private function facultyDepartmentForSubject(Subject $subject): string
+    {
+        $department = strtoupper(trim((string) $subject->department));
+
+        if (in_array($department, ['CCS', 'COC', 'SHTM', 'CTE'], true)) {
+            return $department;
+        }
+
+        $major = strtoupper(trim((string) $subject->major));
+
+        return match ($major) {
+            'IT', 'ACT' => 'CCS',
+            'FB', 'LD', 'QD' => 'COC',
+            'HM', 'TM' => 'SHTM',
+            'ED' => 'CTE',
+            default => $department,
+        };
     }
 
     public function findAvailableTimeSlot(int $subjectId): ?array
@@ -441,14 +499,21 @@ class MasterGrid extends Component
         $this->showGeneratingModal = false;
         $this->showSummaryModal = false;
         $this->showSavingModal = false;
+        $this->showRetryingModal = false;
+        $this->showEditScheduleModal = false;
+        $this->retrySubjectId = null;
+        $this->editingGeneratedScheduleKey = null;
         $this->generationSummary = null;
         $this->pendingGeneratedSchedules = [];
         $this->failedRetryInputs = [];
+        $this->generatedScheduleEditInputs = [];
+        $this->compatibleRoomsForEdit = [];
+        $this->compatibleFacultyForEdit = [];
     }
 
     public function closeGenerateModal(): void
     {
-        if ($this->showGeneratingModal || $this->showSavingModal) {
+        if ($this->showGeneratingModal || $this->showSavingModal || $this->showRetryingModal) {
             return;
         }
 
@@ -475,6 +540,7 @@ class MasterGrid extends Component
             $this->showGeneratingModal = false;
             $this->showSummaryModal = false;
             $this->showSavingModal = false;
+            $this->showRetryingModal = false;
             $this->dispatch('toast', [
                 'type' => 'warning',
                 'message' => 'Select scheduling filters first.',
@@ -489,6 +555,8 @@ class MasterGrid extends Component
         $this->showGenerateModal = false;
         $this->showSummaryModal = false;
         $this->showSavingModal = false;
+        $this->showRetryingModal = false;
+        $this->showEditScheduleModal = false;
         $this->showGeneratingModal = true;
         $this->generationProcessId++;
     }
@@ -562,6 +630,15 @@ class MasterGrid extends Component
 
     public function confirmGeneratedSchedules(): void
     {
+        if (!$this->canModifyGeneratedSchedules()) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Permission Denied',
+                'detail' => 'Only Admin and Registrar accounts can save generated schedules.'
+            ]);
+            return;
+        }
+
         if ($this->showSavingModal) {
             return;
         }
@@ -578,12 +655,25 @@ class MasterGrid extends Component
         $this->showGenerateModal = false;
         $this->showGeneratingModal = false;
         $this->showSummaryModal = false;
+        $this->showRetryingModal = false;
+        $this->showEditScheduleModal = false;
         $this->showSavingModal = true;
         $this->saveProcessId++;
     }
 
     public function saveGeneratedSchedules(): void
     {
+        if (!$this->canModifyGeneratedSchedules()) {
+            $this->showSavingModal = false;
+            $this->showSummaryModal = (bool) $this->generationSummary;
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Permission Denied',
+                'detail' => 'Only Admin and Registrar accounts can save generated schedules.'
+            ]);
+            return;
+        }
+
         if (!$this->showSavingModal) {
             return;
         }
@@ -671,16 +761,11 @@ class MasterGrid extends Component
 
         $this->failedRetryInputs = collect($this->generationSummary['failed_items'])
             ->mapWithKeys(function (array $item) {
-                $meetings = max(1, (int) ($item['meetings_per_week'] ?? 1));
-                $durationHours = (float) ($item['duration_hours'] ?? 1);
+                $meetings = max(1, min(6, (int) ($item['meetings_per_week'] ?? 1)));
 
                 return [
                     $item['subject_id'] => [
                         'meetings_per_week' => $meetings,
-                        'hours_per_meeting' => round($durationHours / $meetings, 2),
-                        'duration_hours' => $durationHours,
-                        'preferred_room_type' => $item['preferred_room_type'] ?? '',
-                        'preferred_start_time' => $item['preferred_start_time'] ?? '',
                     ],
                 ];
             })
@@ -689,33 +774,90 @@ class MasterGrid extends Component
         $this->showGenerateModal = false;
         $this->showGeneratingModal = false;
         $this->showSavingModal = false;
+        $this->showRetryingModal = false;
         $this->showSummaryModal = true;
     }
 
     public function retryFailedSubject(int $subjectId): void
     {
-        if (!$this->generationSummary || $this->showGeneratingModal || $this->showSavingModal) {
+        if (!$this->canModifyGeneratedSchedules()) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Permission Denied',
+                'detail' => 'Only Admin and Registrar accounts can retry generated schedules.'
+            ]);
             return;
         }
 
-        $overrides = $this->failedRetryInputs[$subjectId] ?? [];
-        $meetings = max(1, (int) ($overrides['meetings_per_week'] ?? 1));
-
-        if (isset($overrides['hours_per_meeting']) && is_numeric($overrides['hours_per_meeting'])) {
-            $overrides['duration_hours'] = max(0.5, (float) $overrides['hours_per_meeting']) * $meetings;
+        if (!$this->generationSummary || $this->showGeneratingModal || $this->showSavingModal || $this->showRetryingModal) {
+            return;
         }
 
-        $overrides['meetings_per_week'] = $meetings;
+        $inputs = $this->failedRetryInputs[$subjectId] ?? [];
 
-        $retry = app(AutoGenerateScheduler::class)->previewSubjectSchedule(
-            $subjectId,
-            $this->generationSummary['filters'] ?? [],
-            $overrides,
-            $this->pendingGeneratedSchedules,
-            auth()->id()
-        );
+        if (!filled($inputs['meetings_per_week'] ?? null) || !is_numeric($inputs['meetings_per_week'] ?? null)) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Retry details incomplete.',
+                'detail' => 'Meetings Per Week is required. The scheduler will automatically choose the best room, days, and time.'
+            ]);
+            return;
+        }
+
+        $this->retrySubjectId = $subjectId;
+        $this->showSummaryModal = false;
+        $this->showEditScheduleModal = false;
+        $this->showRetryingModal = true;
+        $this->retryProcessId++;
+    }
+
+    public function runFailedSubjectRetry(): void
+    {
+        if (!$this->showRetryingModal || !$this->retrySubjectId || !$this->generationSummary) {
+            return;
+        }
+
+        if (!$this->canModifyGeneratedSchedules()) {
+            $this->showRetryingModal = false;
+            $this->showSummaryModal = (bool) $this->generationSummary;
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Permission Denied',
+                'detail' => 'Only Admin and Registrar accounts can retry generated schedules.'
+            ]);
+            return;
+        }
+
+        $subjectId = $this->retrySubjectId;
+        $overrides = $this->failedRetryInputs[$subjectId] ?? [];
+        $meetings = max(1, min(6, (int) ($overrides['meetings_per_week'] ?? 1)));
+
+        $overrides = ['meetings_per_week' => $meetings];
+
+        try {
+            $retry = app(AutoGenerateScheduler::class)->previewSubjectSchedule(
+                $subjectId,
+                $this->generationSummary['filters'] ?? [],
+                $overrides,
+                $this->pendingGeneratedSchedules,
+                auth()->id()
+            );
+        } catch (\Throwable $e) {
+            $this->showRetryingModal = false;
+            $this->showSummaryModal = true;
+            $this->retrySubjectId = null;
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Retry failed.',
+                'detail' => $e->getMessage()
+            ]);
+            return;
+        }
 
         if (($retry['scheduled'] ?? 0) <= 0) {
+            $this->showRetryingModal = false;
+            $this->showSummaryModal = true;
+            $this->retrySubjectId = null;
             $this->dispatch('toast', [
                 'type' => 'warning',
                 'message' => 'Retry failed.',
@@ -755,6 +897,10 @@ class MasterGrid extends Component
 
         unset($this->failedRetryInputs[$subjectId]);
 
+        $this->showRetryingModal = false;
+        $this->showSummaryModal = true;
+        $this->retrySubjectId = null;
+
         $this->dispatch('toast', [
             'type' => 'success',
             'message' => 'Subject retry generated.',
@@ -762,12 +908,231 @@ class MasterGrid extends Component
         ]);
     }
 
-    public function closeGenerationSummary(): void
+    public function editGeneratedScheduleGroup(string $summaryKey): void
     {
-        if ($this->showGeneratingModal || $this->showSavingModal) {
+        if (!$this->canModifyGeneratedSchedules()) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Permission Denied',
+                'detail' => 'Only Admin and Registrar accounts can edit generated schedules.'
+            ]);
             return;
         }
 
+        $items = $this->pendingGeneratedGroup($summaryKey);
+        $first = $items[0] ?? null;
+
+        if (!$first) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Generated schedule not found.',
+                'detail' => 'The temporary schedule may have already been removed.'
+            ]);
+            return;
+        }
+
+        $subject = Subject::query()
+            ->with('faculty:id,full_name')
+            ->find($first['subject_id'] ?? null);
+
+        if (!$subject) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Subject not found.',
+                'detail' => 'The selected generated schedule cannot be edited.'
+            ]);
+            return;
+        }
+
+        $days = collect($items)
+            ->pluck('day')
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+
+        $start = $first['raw_start_time'] ?? $first['start_time'] ?? null;
+
+        $this->editingGeneratedScheduleKey = $summaryKey;
+        $this->compatibleRoomsForEdit = $this->findCompatibleRooms((int) $subject->id);
+        $this->compatibleFacultyForEdit = $this->findCompatibleFacultyForSubject($subject);
+        $selectedFacultyId = (string) ($first['faculty_id'] ?? $subject->faculty_id ?? '');
+        $validFacultyIds = collect($this->compatibleFacultyForEdit)
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id)
+            ->all();
+
+        if ($selectedFacultyId !== '' && !in_array($selectedFacultyId, $validFacultyIds, true)) {
+            $selectedFacultyId = '';
+        }
+
+        $meetingsPerWeek = max(1, min(6, (int) ($first['meetings_per_week'] ?? (count($days) ?: ($subject->meetings_per_week ?? 1)))));
+
+        $this->generatedScheduleEditInputs = [
+            'summary_key' => $summaryKey,
+            'subject_id' => (int) $subject->id,
+            'subject_code' => $subject->subject_code,
+            'subject_name' => $subject->description,
+            'faculty_department' => $this->facultyDepartmentForSubject($subject) ?: 'Department',
+            'room_id' => (string) ($first['room_id'] ?? ''),
+            'days' => $days,
+            'start_time' => $start ? Carbon::parse($start)->format('H:i') : '',
+            'meetings_per_week' => $meetingsPerWeek,
+            'faculty_id' => $selectedFacultyId,
+        ];
+
+        $this->showEditScheduleModal = true;
+    }
+
+    public function closeGeneratedScheduleEdit(): void
+    {
+        $this->showEditScheduleModal = false;
+        $this->editingGeneratedScheduleKey = null;
+        $this->generatedScheduleEditInputs = [];
+        $this->compatibleRoomsForEdit = [];
+        $this->compatibleFacultyForEdit = [];
+    }
+
+    public function saveGeneratedScheduleEdit(): void
+    {
+        if (!$this->canModifyGeneratedSchedules()) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Permission Denied',
+                'detail' => 'Only Admin and Registrar accounts can edit generated schedules.'
+            ]);
+            return;
+        }
+
+        $summaryKey = (string) ($this->generatedScheduleEditInputs['summary_key'] ?? $this->editingGeneratedScheduleKey);
+
+        if ($summaryKey === '' || empty($this->pendingGeneratedGroup($summaryKey))) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Generated schedule not found.',
+                'detail' => 'The temporary schedule may have already been removed.'
+            ]);
+            return;
+        }
+
+        $inputs = $this->generatedScheduleEditInputs;
+        $inputs['days'] = $this->normalizePreferredDays($inputs['days'] ?? []);
+        $inputs['meetings_per_week'] = max(1, min(6, (int) ($inputs['meetings_per_week'] ?? count($inputs['days']))));
+
+        if (empty($inputs['room_id']) || empty($inputs['start_time']) || empty($inputs['days'])) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Complete the schedule edit.',
+                'detail' => 'Choose a compatible room, at least one day, and a start time.'
+            ]);
+            return;
+        }
+
+        if (count($inputs['days']) !== (int) $inputs['meetings_per_week']) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Meeting days do not match.',
+                'detail' => 'Select the same number of days as the Meetings Per Week value.'
+            ]);
+            return;
+        }
+
+        try {
+            $result = app(AutoGenerateScheduler::class)->previewManualScheduleEdit(
+                (int) $inputs['subject_id'],
+                $this->generationSummary['filters'] ?? [],
+                $inputs,
+                $this->pendingGeneratedSchedulesExceptGroup($summaryKey),
+                auth()->id()
+            );
+        } catch (\Throwable $e) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Edit failed.',
+                'detail' => $e->getMessage()
+            ]);
+            return;
+        }
+
+        if (($result['scheduled'] ?? 0) <= 0) {
+            if (!empty($result['conflict']) && is_array($result['conflict'])) {
+                $this->dispatch('toast', [
+                    'type' => $result['conflict']['toast_type'] ?? 'error',
+                    'message' => $result['conflict']['title'] ?? 'Schedule Conflict Detected',
+                    'detail' => $result['conflict']['message'] ?? 'The temporary edit conflicts with another schedule.'
+                ]);
+
+                $this->dispatch('show-conflict-modal', conflictData: $result['conflict']);
+                return;
+            }
+
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Edit could not be applied.',
+                'detail' => collect($result['failure_reasons'] ?? [])->first() ?? 'No valid schedule could be built from the selected edits.'
+            ]);
+            return;
+        }
+
+        $this->pendingGeneratedSchedules = array_values(array_merge(
+            $this->pendingGeneratedSchedulesExceptGroup($summaryKey),
+            $result['scheduled_items'] ?? []
+        ));
+
+        $this->mergeGenerationWarnings($result);
+        $this->refreshGenerationScheduledSummary();
+        $this->closeGeneratedScheduleEdit();
+
+        $this->dispatch('toast', [
+            'type' => 'success',
+            'message' => 'Generated schedule updated.',
+            'detail' => 'The edit is temporary until you save the generated schedule.'
+        ]);
+    }
+
+    public function removeGeneratedScheduleGroup(string $summaryKey): void
+    {
+        if (!$this->canModifyGeneratedSchedules()) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Permission Denied',
+                'detail' => 'Only Admin and Registrar accounts can remove generated schedules.'
+            ]);
+            return;
+        }
+
+        $removedCount = count($this->pendingGeneratedGroup($summaryKey));
+
+        if ($removedCount <= 0) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Generated schedule not found.',
+                'detail' => 'The temporary schedule may have already been removed.'
+            ]);
+            return;
+        }
+
+        $this->pendingGeneratedSchedules = $this->pendingGeneratedSchedulesExceptGroup($summaryKey);
+        $this->refreshGenerationScheduledSummary();
+
+        if ($this->editingGeneratedScheduleKey === $summaryKey) {
+            $this->closeGeneratedScheduleEdit();
+        }
+
+        $this->dispatch('toast', [
+            'type' => 'info',
+            'message' => 'Generated schedule removed.',
+            'detail' => "{$removedCount} temporary meeting slot(s) removed before saving."
+        ]);
+    }
+
+    public function closeGenerationSummary(): void
+    {
+        if ($this->showGeneratingModal || $this->showSavingModal || $this->showRetryingModal) {
+            return;
+        }
+
+        $this->closeGeneratedScheduleEdit();
         $this->showSummaryModal = false;
         $this->generationSummary = null;
         $this->pendingGeneratedSchedules = [];
@@ -784,18 +1149,83 @@ class MasterGrid extends Component
         ];
     }
 
+    private function normalizePreferredDays(array|string|null $days): array
+    {
+        if (is_string($days)) {
+            $days = preg_split('/[,|\/]+/', $days) ?: [];
+        }
+
+        return collect($days ?? [])
+            ->map(fn ($day) => ucfirst(strtolower(trim((string) $day))))
+            ->filter(fn (string $day) => in_array($day, $this->days, true))
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function scheduledItemGroupKey(array $item): string
+    {
+        return implode('|', [
+            $item['pairing_key'] ?? 'single',
+            $item['subject_id'] ?? $item['subject_code'] ?? '',
+            $item['room_id'] ?? $item['room'] ?? '',
+            $item['raw_start_time'] ?? $item['start_time'] ?? '',
+            $item['raw_end_time'] ?? $item['end_time'] ?? '',
+        ]);
+    }
+
+    private function scheduledItemSummaryKey(array $item): string
+    {
+        return md5($this->scheduledItemGroupKey($item));
+    }
+
+    private function pendingGeneratedGroup(string $summaryKey): array
+    {
+        return collect($this->pendingGeneratedSchedules)
+            ->filter(fn (array $item) => $this->scheduledItemSummaryKey($item) === $summaryKey)
+            ->values()
+            ->all();
+    }
+
+    private function pendingGeneratedSchedulesExceptGroup(string $summaryKey): array
+    {
+        return collect($this->pendingGeneratedSchedules)
+            ->reject(fn (array $item) => $this->scheduledItemSummaryKey($item) === $summaryKey)
+            ->values()
+            ->all();
+    }
+
+    private function refreshGenerationScheduledSummary(): void
+    {
+        if (!$this->generationSummary) {
+            return;
+        }
+
+        $this->generationSummary['scheduled'] = count($this->pendingGeneratedSchedules);
+        $this->generationSummary['scheduled_items'] = array_slice(
+            $this->summarizeScheduledItemsForDisplay($this->pendingGeneratedSchedules),
+            0,
+            50
+        );
+    }
+
+    private function mergeGenerationWarnings(array $result): void
+    {
+        if (!$this->generationSummary) {
+            return;
+        }
+
+        $this->generationSummary['warnings'] += (int) ($result['warnings'] ?? 0);
+        $this->generationSummary['fallback_warnings'] = array_slice(array_values(array_merge(
+            $this->generationSummary['fallback_warnings'] ?? [],
+            $result['fallback_warnings'] ?? []
+        )), 0, 20);
+    }
+
     private function summarizeScheduledItemsForDisplay(array $items): array
     {
         return collect($items)
-            ->groupBy(function (array $item) {
-                return implode('|', [
-                    $item['pairing_key'] ?? 'single',
-                    $item['subject_id'] ?? $item['subject_code'] ?? '',
-                    $item['room_id'] ?? $item['room'] ?? '',
-                    $item['raw_start_time'] ?? $item['start_time'] ?? '',
-                    $item['raw_end_time'] ?? $item['end_time'] ?? '',
-                ]);
-            })
+            ->groupBy(fn (array $item) => $this->scheduledItemGroupKey($item))
             ->map(function ($group) {
                 $first = $group->first();
                 $days = $group->pluck('day')
@@ -806,6 +1236,14 @@ class MasterGrid extends Component
                     ->all();
 
                 $first['day_pair'] = implode(' / ', $days);
+                $first['meeting_days'] = $days;
+                $first['summary_key'] = $this->scheduledItemSummaryKey($first);
+
+                foreach (['subject_code', 'subject_name', 'edp_code', 'room', 'instructor', 'start_time', 'end_time'] as $key) {
+                    if (array_key_exists($key, $first)) {
+                        $first[$key] = $this->cleanScheduleText($first[$key]);
+                    }
+                }
 
                 return $first;
             })
@@ -946,7 +1384,7 @@ class MasterGrid extends Component
             'pairing_key' => "manual-{$subject->id}-" . now()->format('YmdHisv'),
             'status' => Schedule::STATUS_PARTIAL,
         ]);
-    }
+    }   
 
     public function generateLinkedMeetingPattern(int $subjectId): ?array
     {
@@ -1320,7 +1758,7 @@ class MasterGrid extends Component
             $this->dispatch('toast', [
                 'type' => 'error',
                 'message' => '❌ Permission Denied',
-                'detail' => 'You don\'t have permission to delete this schedule. Only your department\'s schedules can be deleted.'
+                'detail' => 'Only Admin and Registrar accounts can remove schedules.'
             ]);
             return;
         }
@@ -1346,6 +1784,35 @@ class MasterGrid extends Component
                 'detail' => 'Failed to remove schedule: ' . $e->getMessage()
             ]);
         }
+    }
+
+    public function requestScheduleEdit($scheduleId): void
+    {
+        if (!$this->canAutoGenerateSchedules()) {
+            $this->dispatch('toast', [
+                'type' => 'info',
+                'message' => 'View Only',
+                'detail' => 'Request schedule changes from an Admin or Registrar.'
+            ]);
+            return;
+        }
+
+        $schedule = Schedule::with('subject:id,subject_code')->find($scheduleId);
+
+        if (!$schedule) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Schedule not found.',
+                'detail' => 'The selected schedule may have already been removed.'
+            ]);
+            return;
+        }
+
+        $this->dispatch('toast', [
+            'type' => 'info',
+            'message' => 'Edit generated drafts before saving.',
+            'detail' => "{$schedule->subject?->subject_code} is already saved. To change it with validation, remove it and place the subject again."
+        ]);
     }
 
     public function getFilteredSubjects()
@@ -1545,9 +2012,15 @@ class MasterGrid extends Component
 
         $lunchSlots = $this->getLunchBreakSlots();
         $availableFloors = $this->getAvailableFloors();
+        $facultyOptions = Faculty::query()
+            ->approved()
+            ->select('id', 'full_name', 'department')
+            ->orderBy('full_name')
+            ->get();
 
         return view('livewire.master-grid', [
             'days'                 => ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'],
+            'generationDays'       => $this->days,
             'displaySlots'         => $this->generateDisplaySlots(),
             'lunchSlots'           => $lunchSlots,
             'schedules'            => $schedules,
@@ -1560,8 +2033,10 @@ class MasterGrid extends Component
             'brickHeightPx'        => self::BRICK_HEIGHT_PX,
             'hasFullAccess'        => $this->hasFullAccess(),
             'canAutoGenerate'      => $this->canAutoGenerateSchedules(),
+            'canModifyGenerated'   => $this->canModifyGeneratedSchedules(),
             'departmentMajors'     => self::DEPARTMENT_MAJORS,
             'departmentColors'     => self::DEPARTMENT_COLORS,
+            'facultyOptions'       => $facultyOptions,
             'selectedRoomId'       => $this->selectedRoomId,
             'selectedRoomName'     => $this->selectedRoomName,
             'selectedRoomType'     => $this->selectedRoomType,

@@ -163,6 +163,42 @@
         </div>
     @endif
 
+    @if($showRetryingModal)
+        <div
+            wire:key="retrying-modal-{{ $retryProcessId }}"
+            wire:init="runFailedSubjectRetry"
+            class="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-xl"
+            style="font-family: Inter, Montserrat, ui-sans-serif, system-ui, sans-serif;">
+            <div
+                x-data="{
+                    step: 0,
+                    messages: [
+                        'Rechecking compatible rooms',
+                        'Preserving successful generated subjects',
+                        'Searching clean paired meeting slots',
+                        'Rebuilding the temporary schedule preview'
+                    ]
+                }"
+                x-init="setInterval(() => step = (step + 1) % messages.length, 1600)"
+                class="w-full max-w-md rounded-3xl border border-white/50 bg-slate-950/85 p-8 text-center shadow-2xl backdrop-blur-xl">
+                <div class="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10 shadow-inner">
+                    <div class="h-10 w-10 animate-spin rounded-full border-4 border-red-500/20 border-t-red-400"></div>
+                </div>
+                <p class="mt-5 text-xs font-black uppercase tracking-[0.28em] text-red-300">Recalculating Schedule...</p>
+                <h3 class="mt-2 text-xl font-black uppercase text-white">AI Optimization Retry</h3>
+                <p class="mt-3 text-sm font-semibold leading-6 text-slate-300">
+                    The scheduler is retrying only this failed subject while preserving the generated schedule preview.
+                </p>
+                <p class="mt-4 h-5 text-[11px] font-black uppercase tracking-widest text-slate-400" x-text="messages[step]">
+                    Rechecking compatible rooms
+                </p>
+                <div class="mt-5 h-2 overflow-hidden rounded-full bg-slate-800">
+                    <div class="ai-progress-bar h-full rounded-full bg-red-500"></div>
+                </div>
+            </div>
+        </div>
+    @endif
+
     @if($showGenerateModal)
         <div
             class="fixed inset-0 z-[9997] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-xl"
@@ -285,6 +321,24 @@
                                             <p>Room: {{ $item['room'] }}</p>
                                             <p>Instructor: {{ $item['instructor'] ?? 'Unassigned' }}</p>
                                         </div>
+                                        @if($canModifyGenerated ?? false)
+                                            <div class="mt-4 flex flex-col gap-2 border-t border-white/60 pt-3 dark:border-slate-700/70 sm:flex-row">
+                                                <button
+                                                    wire:click="editGeneratedScheduleGroup('{{ $item['summary_key'] }}')"
+                                                    wire:loading.attr="disabled"
+                                                    wire:target="editGeneratedScheduleGroup,removeGeneratedScheduleGroup"
+                                                    class="flex-1 rounded-xl border border-indigo-300 bg-indigo-50/80 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-indigo-700 transition hover:bg-indigo-100 disabled:opacity-60 dark:border-indigo-900/70 dark:bg-indigo-950/30 dark:text-indigo-300">
+                                                    Edit
+                                                </button>
+                                                <button
+                                                    wire:click="removeGeneratedScheduleGroup('{{ $item['summary_key'] }}')"
+                                                    wire:loading.attr="disabled"
+                                                    wire:target="editGeneratedScheduleGroup,removeGeneratedScheduleGroup"
+                                                    class="flex-1 rounded-xl border border-red-300 bg-red-50/80 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 transition hover:bg-red-100 disabled:opacity-60 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-300">
+                                                    Remove
+                                                </button>
+                                            </div>
+                                        @endif
                                     </div>
                                 @empty
                                     <div class="rounded-2xl border border-white/70 bg-white/60 p-5 text-sm font-bold text-slate-500 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-400">
@@ -298,37 +352,39 @@
                             <h4 class="mb-3 text-xs font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">Failed / Warnings</h4>
                             <div class="space-y-3">
                                 @forelse($generationSummary['failed_items'] ?? [] as $item)
-                                    <div class="rounded-2xl border border-red-200 bg-red-50/85 p-4 text-xs shadow-sm dark:border-red-900/70 dark:bg-red-950/25">
+                                    <div class="rounded-2xl border border-red-400/40 bg-slate-950/80 p-4 text-xs shadow-2xl shadow-red-950/20 backdrop-blur-xl">
                                         <div class="space-y-1">
-                                            <p class="break-words text-sm font-black text-red-700 dark:text-red-300">{{ $item['subject_code'] }}</p>
-                                            <p class="break-words font-black uppercase tracking-wide text-red-500">EDP: {{ $item['edp_code'] }}</p>
-                                            <p class="break-words text-sm font-black text-slate-800 dark:text-slate-100">{{ $item['subject_name'] }}</p>
-                                            <p class="break-words font-bold text-red-700 dark:text-red-300">Reason: {{ $item['reason'] }}</p>
+                                            <p class="break-words text-sm font-black text-red-300">{{ $item['subject_code'] }}</p>
+                                            <p class="break-words font-black uppercase tracking-wide text-red-400">EDP: {{ $item['edp_code'] }}</p>
+                                            <p class="break-words text-base font-black text-white">{{ $item['subject_name'] }}</p>
+                                            <p class="break-words font-bold text-red-200">Reason: {{ $item['reason'] }}</p>
                                         </div>
+                                        <p class="mt-4 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
+                                            Duration comes from Manage Subjects. The AI will choose the best room, paired days, and time automatically.
+                                        </p>
 
-                                        <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                        <div class="mt-4 grid grid-cols-1 gap-3">
                                             <label class="space-y-1.5">
                                                 <span class="block text-[9px] font-black uppercase tracking-widest text-slate-500">Meetings Per Week</span>
-                                                <input type="number" min="1" max="6" step="1" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.meetings_per_week" class="w-full rounded-xl border border-red-200 bg-white/90 px-3 py-2 text-xs font-black text-slate-900 outline-none transition focus:border-red-400 focus:ring-4 focus:ring-red-100 dark:border-red-900 dark:bg-slate-900 dark:text-white dark:focus:ring-red-950">
-                                            </label>
-                                            <label class="space-y-1.5">
-                                                <span class="block text-[9px] font-black uppercase tracking-widest text-slate-500">Hours Per Meeting</span>
-                                                <input type="number" min="0.5" max="8" step="0.5" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.hours_per_meeting" class="w-full rounded-xl border border-red-200 bg-white/90 px-3 py-2 text-xs font-black text-slate-900 outline-none transition focus:border-red-400 focus:ring-4 focus:ring-red-100 dark:border-red-900 dark:bg-slate-900 dark:text-white dark:focus:ring-red-950">
-                                            </label>
-                                            <label class="space-y-1.5">
-                                                <span class="block text-[9px] font-black uppercase tracking-widest text-slate-500">Preferred Time</span>
-                                                <input type="time" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.preferred_start_time" class="w-full rounded-xl border border-red-200 bg-white/90 px-3 py-2 text-xs font-black text-slate-900 outline-none transition focus:border-red-400 focus:ring-4 focus:ring-red-100 dark:border-red-900 dark:bg-slate-900 dark:text-white dark:focus:ring-red-950">
-                                            </label>
-                                            <label class="space-y-1.5">
-                                                <span class="block text-[9px] font-black uppercase tracking-widest text-slate-500">Room Preference</span>
-                                                <input type="text" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.preferred_room_type" placeholder="Lab, Com Lab, HM" class="w-full rounded-xl border border-red-200 bg-white/90 px-3 py-2 text-xs font-black text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-red-400 focus:ring-4 focus:ring-red-100 dark:border-red-900 dark:bg-slate-900 dark:text-white dark:focus:ring-red-950">
+                                                <input type="number" min="1" max="6" step="1" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.meetings_per_week" class="w-full rounded-xl border border-red-500/50 bg-slate-900/90 px-3 py-3 text-sm font-black text-white outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-500/10">
+                                                <p class="text-[10px] font-bold text-slate-500">
+                                                    The scheduler will automatically find the room, start time, and clean paired days.
+                                                </p>
                                             </label>
                                         </div>
 
-                                        <button wire:click="retryFailedSubject({{ $item['subject_id'] }})" wire:loading.attr="disabled" wire:target="retryFailedSubject" class="mt-4 w-full rounded-xl bg-red-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-red-600/20 transition hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-60">
-                                            <span wire:loading.remove wire:target="retryFailedSubject">Edit & Retry</span>
-                                            <span wire:loading wire:target="retryFailedSubject">Retrying...</span>
-                                        </button>
+                                        @if($canModifyGenerated ?? false)
+                                            <div class="sticky bottom-0 -mx-4 -mb-4 mt-4 border-t border-red-500/20 bg-slate-950/95 p-4 backdrop-blur-xl">
+                                                <button wire:click="retryFailedSubject({{ $item['subject_id'] }})" wire:loading.attr="disabled" wire:target="retryFailedSubject" class="w-full rounded-xl bg-red-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60">
+                                                    <span wire:loading.remove wire:target="retryFailedSubject">Edit & Retry</span>
+                                                    <span wire:loading wire:target="retryFailedSubject">Retrying...</span>
+                                                </button>
+                                            </div>
+                                        @else
+                                            <div class="mt-4 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-slate-500">
+                                                View only. Request changes from an Admin or Registrar.
+                                            </div>
+                                        @endif
                                     </div>
                                 @empty
                                     @if(empty($generationSummary['failure_reasons']))
@@ -360,14 +416,110 @@
                     <button wire:click="closeGenerationSummary" wire:loading.attr="disabled" wire:target="confirmGeneratedSchedules,saveGeneratedSchedules" class="rounded-xl bg-slate-100 px-5 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-200 disabled:opacity-60 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
                         Cancel
                     </button>
-                    <button
-                        wire:click="confirmGeneratedSchedules"
-                        wire:loading.attr="disabled"
-                        wire:target="confirmGeneratedSchedules"
-                        @disabled(empty($pendingGeneratedSchedules))
-                        class="rounded-xl bg-slate-950 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-slate-950/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950 dark:hover:bg-indigo-100">
-                        <span wire:loading.remove wire:target="confirmGeneratedSchedules">Save Generated Schedule</span>
-                        <span wire:loading wire:target="confirmGeneratedSchedules">Preparing Save...</span>
+                    @if($canModifyGenerated ?? false)
+                        <button
+                            wire:click="confirmGeneratedSchedules"
+                            wire:loading.attr="disabled"
+                            wire:target="confirmGeneratedSchedules"
+                            @disabled(empty($pendingGeneratedSchedules))
+                            class="rounded-xl bg-slate-950 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-slate-950/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950 dark:hover:bg-indigo-100">
+                            <span wire:loading.remove wire:target="confirmGeneratedSchedules">Save Generated Schedule</span>
+                            <span wire:loading wire:target="confirmGeneratedSchedules">Preparing Save...</span>
+                        </button>
+                    @else
+                        <div class="rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-xs font-black uppercase tracking-widest text-slate-400">
+                            View Only
+                        </div>
+                    @endif
+                </div>
+            </div>
+        </div>
+    @endif
+
+    @if($showEditScheduleModal)
+        <div
+            class="fixed inset-0 z-[10000] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-xl"
+            style="font-family: Inter, Montserrat, ui-sans-serif, system-ui, sans-serif;"
+            @click.self="$wire.closeGeneratedScheduleEdit()">
+            <div class="flex max-h-[90vh] w-full max-w-3xl flex-col overflow-hidden rounded-3xl border border-white/15 bg-slate-950/90 shadow-2xl backdrop-blur-xl">
+                <div class="shrink-0 border-b border-white/10 p-6">
+                    <p class="text-xs font-black uppercase tracking-[0.26em] text-indigo-300">Temporary Generated Edit</p>
+                    <h3 class="mt-2 break-words text-2xl font-black uppercase text-white">
+                        {{ $generatedScheduleEditInputs['subject_code'] ?? 'Subject' }}
+                    </h3>
+                    <p class="mt-1 break-words text-sm font-bold text-slate-400">
+                        {{ $generatedScheduleEditInputs['subject_name'] ?? 'Edit generated schedule before saving.' }}
+                    </p>
+                </div>
+
+                <div class="min-h-0 flex-1 overflow-y-auto p-6 custom-scrollbar">
+                    <div class="grid gap-5 sm:grid-cols-2">
+                        <label class="space-y-2">
+                            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-500">Compatible Room</span>
+                            <select wire:model.live="generatedScheduleEditInputs.room_id" class="w-full rounded-xl border border-indigo-500/40 bg-slate-900/90 px-4 py-3 text-sm font-black text-white outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-500/10">
+                                <option value="">Select compatible room</option>
+                                @foreach($compatibleRoomsForEdit as $roomOption)
+                                    <option value="{{ $roomOption['room_id'] }}">
+                                        {{ $roomOption['room_name'] }} - {{ $roomOption['type'] ?? 'Room' }} @if(!empty($roomOption['capacity']))({{ $roomOption['capacity'] }})@endif
+                                    </option>
+                                @endforeach
+                            </select>
+                            <p class="text-[10px] font-bold text-slate-500">Only rooms compatible with this subject are shown.</p>
+                        </label>
+
+                        <label class="space-y-2">
+                            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-500">Start Time</span>
+                            <input type="time" wire:model.live="generatedScheduleEditInputs.start_time" class="w-full rounded-xl border border-indigo-500/40 bg-slate-900/90 px-4 py-3 text-sm font-black text-white outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-500/10">
+                            <p class="text-[10px] font-bold text-slate-500">The same time is applied to every paired meeting.</p>
+                        </label>
+
+                        <label class="space-y-2">
+                            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-500">Meetings Per Week</span>
+                            <input type="number" min="1" max="6" step="1" wire:model.live="generatedScheduleEditInputs.meetings_per_week" class="w-full rounded-xl border border-indigo-500/40 bg-slate-900/90 px-4 py-3 text-sm font-black text-white outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-500/10">
+                            <p class="text-[10px] font-bold text-slate-500">Duration stays based on the subject record.</p>
+                        </label>
+
+                        <label class="space-y-2">
+                            <span class="block text-[10px] font-black uppercase tracking-widest text-slate-500">Instructor</span>
+                            <select wire:model.live="generatedScheduleEditInputs.faculty_id" class="w-full rounded-xl border border-indigo-500/40 bg-slate-900/90 px-4 py-3 text-sm font-black text-white outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-500/10">
+                                <option value="">Unassigned</option>
+                                @foreach($compatibleFacultyForEdit ?? [] as $faculty)
+                                    <option value="{{ $faculty['id'] }}">{{ $faculty['full_name'] }} - {{ $faculty['department'] }}</option>
+                                @endforeach
+                            </select>
+                            <p class="text-[10px] font-bold text-slate-500">
+                                Showing {{ $generatedScheduleEditInputs['faculty_department'] ?? 'matching department' }} faculty for this subject.
+                            </p>
+                        </label>
+                    </div>
+
+                    <div class="mt-5 space-y-2">
+                        <span class="block text-[10px] font-black uppercase tracking-widest text-slate-500">Meeting Days</span>
+                        <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                            @foreach($generationDays ?? ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as $dayOption)
+                                <label class="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-[11px] font-black uppercase tracking-widest text-slate-300">
+                                    <input
+                                        type="checkbox"
+                                        value="{{ $dayOption }}"
+                                        wire:model.live="generatedScheduleEditInputs.days"
+                                        class="rounded border-slate-600 bg-slate-900 text-indigo-500 focus:ring-indigo-500">
+                                    {{ $dayOption }}
+                                </label>
+                            @endforeach
+                        </div>
+                        <p class="text-[10px] font-bold text-slate-500">
+                            Select the same number of days as Meetings Per Week. Paired meetings keep the same room and time.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="sticky bottom-0 z-10 flex shrink-0 flex-col gap-3 border-t border-white/10 bg-slate-950/95 p-5 backdrop-blur-xl sm:flex-row sm:justify-between">
+                    <button wire:click="closeGeneratedScheduleEdit" wire:loading.attr="disabled" wire:target="saveGeneratedScheduleEdit" class="rounded-xl bg-white/10 px-5 py-3 text-xs font-black uppercase tracking-widest text-slate-200 transition hover:bg-white/15 disabled:opacity-60">
+                        Cancel
+                    </button>
+                    <button wire:click="saveGeneratedScheduleEdit" wire:loading.attr="disabled" wire:target="saveGeneratedScheduleEdit" class="rounded-xl bg-indigo-500 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-60">
+                        <span wire:loading.remove wire:target="saveGeneratedScheduleEdit">Apply Temporary Edit</span>
+                        <span wire:loading wire:target="saveGeneratedScheduleEdit">Checking Conflicts...</span>
                     </button>
                 </div>
             </div>
@@ -384,7 +536,7 @@
         x-transition:leave="transition ease-in duration-200"
         x-transition:leave-start="opacity-100"
         x-transition:leave-end="opacity-0"
-        class="fixed inset-0 bg-black/60 backdrop-blur-md z-[9999] flex items-center justify-center p-4"
+        class="fixed inset-0 bg-black/60 backdrop-blur-md z-[10050] flex items-center justify-center p-4"
         @click.self="showConflictModal = false"
     >
         
