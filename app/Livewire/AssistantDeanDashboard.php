@@ -6,34 +6,250 @@ use Livewire\Component;
 use App\Models\Subject;
 use App\Models\Faculty;
 use App\Models\Room;
+use App\Models\Schedule;
 use App\Models\User;
-use App\Traits\HandlesNotifications;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class AssistantDeanDashboard extends Component
 {
-    use HandlesNotifications;
-    
+    public $facultyCoordination  = [];
+    public $scheduleReview       = [];
+    public $curriculumValidation = [];
+    public $subjectDistribution  = [];
+    public $aiRecommendations    = [];
+    public $globalStats          = [];
+
+    public function mount(): void
+    {
+        $this->loadGlobalStats();
+        $this->loadFacultyCoordination();
+        $this->loadScheduleReview();
+        $this->loadCurriculumValidation();
+        $this->loadSubjectDistribution();
+        $this->loadAiRecommendations();
+    }
+
+    private function loadGlobalStats(): void
+    {
+        $totalSubjects    = Subject::count();
+        $scheduledSubjects = Subject::whereHas('schedules')->count();
+        $totalSchedules   = Schedule::count();
+        $finalizedCount   = Schedule::where('status', 'finalized')->count();
+
+        $this->globalStats = [
+            'total_faculty'       => Faculty::where('status', 'approved')->count(),
+            'total_subjects'      => $totalSubjects,
+            'minor_subjects'      => Subject::where('type', 'Minor')->count(),
+            'major_subjects'      => Subject::where('type', 'Major')->count(),
+            'total_rooms'         => Room::count(),
+            'total_users'         => User::count(),
+            'total_schedules'     => $totalSchedules,
+            'finalized_schedules' => $finalizedCount,
+            'completion_pct'      => $totalSubjects > 0
+                ? round(($scheduledSubjects / $totalSubjects) * 100, 1)
+                : 0,
+            'departments'         => ['CCS', 'CTE', 'COC', 'SHTM'],
+        ];
+    }
+
+    private function loadFacultyCoordination(): void
+    {
+        $faculty = Faculty::where('status', 'approved')
+            ->withCount('schedules')
+            ->get();
+
+        $overloaded  = $faculty->filter(fn ($f) => $f->schedules_count > ($f->max_units ?? 6))->count();
+        $underloaded = $faculty->filter(fn ($f) => $f->schedules_count === 0)->count();
+        $normal      = $faculty->count() - $overloaded - $underloaded;
+
+        $deptBreakdown = Faculty::where('status', 'approved')
+            ->select('department', DB::raw('count(*) as total'))
+            ->groupBy('department')
+            ->get()
+            ->mapWithKeys(fn ($item) => [$item->department => $item->total])
+            ->toArray();
+
+        $this->facultyCoordination = [
+            'total'          => $faculty->count(),
+            'overloaded'     => $overloaded,
+            'underloaded'    => $underloaded,
+            'normal'         => $normal,
+            'dept_breakdown' => $deptBreakdown,
+            'top_loaded'     => Faculty::where('status', 'approved')
+                ->withCount('schedules')
+                ->orderByDesc('schedules_count')
+                ->limit(5)
+                ->get()
+                ->map(fn ($f) => [
+                    'name'       => $f->full_name,
+                    'department' => $f->department,
+                    'load'       => $f->schedules_count,
+                    'max'        => $f->max_units ?? 6,
+                    'status'     => $f->schedules_count > ($f->max_units ?? 6) ? 'overloaded'
+                                  : ($f->schedules_count === 0 ? 'unassigned' : 'normal'),
+                ])->toArray(),
+        ];
+    }
+
+    private function loadScheduleReview(): void
+    {
+        // Schedules that are still in draft/partial (need review)
+        $this->scheduleReview = Schedule::whereIn('status', ['draft', 'partial'])
+            ->with(['subject', 'room', 'faculty'])
+            ->limit(8)
+            ->get()
+            ->map(fn ($s) => [
+                'id'          => $s->id,
+                'subject'     => optional($s->subject)->subject_code ?? '—',
+                'department'  => optional($s->subject)->department ?? '—',
+                'room'        => optional($s->room)->room_name ?? '—',
+                'faculty'     => optional($s->faculty)->full_name ?? 'Unassigned',
+                'day'         => $s->day,
+                'time'        => Carbon::parse($s->start_time)->format('h:i A') . ' – ' . Carbon::parse($s->end_time)->format('h:i A'),
+                'status'      => $s->status,
+                'flag'        => is_null($s->faculty_id) ? 'No Faculty' : 'Incomplete',
+            ])->toArray();
+    }
+
+    private function loadCurriculumValidation(): void
+    {
+        // Subjects with no schedule at all
+        $missing = Subject::doesntHave('schedules')
+            ->select('id', 'subject_code', 'description', 'department', 'year_level', 'type')
+            ->limit(8)
+            ->get()
+            ->map(fn ($s) => [
+                'subject_code' => $s->subject_code,
+                'description'  => $s->description,
+                'department'   => $s->department,
+                'year_level'   => $s->year_level,
+                'type'         => $s->type,
+                'issue'        => 'No schedule assigned',
+            ])->toArray();
+
+        // Schedules with no faculty assigned
+        $noFaculty = Schedule::whereNull('faculty_id')
+            ->with('subject')
+            ->limit(5)
+            ->get()
+            ->map(fn ($s) => [
+                'subject_code' => optional($s->subject)->subject_code ?? '—',
+                'department'   => optional($s->subject)->department ?? '—',
+                'year_level'   => optional($s->subject)->year_level ?? '—',
+                'type'         => optional($s->subject)->type ?? '—',
+                'issue'        => 'No faculty assigned',
+            ])->toArray();
+
+        $this->curriculumValidation = array_merge($missing, $noFaculty);
+    }
+
+    private function loadSubjectDistribution(): void
+    {
+        $deptData = Subject::select('department', 'type', DB::raw('count(*) as total'))
+            ->groupBy('department', 'type')
+            ->get();
+
+        $departments = $deptData->pluck('department')->unique()->values()->toArray();
+        $breakdown   = [];
+
+        foreach ($departments as $dept) {
+            $major = $deptData->where('department', $dept)->where('type', 'Major')->first();
+            $minor = $deptData->where('department', $dept)->where('type', 'Minor')->first();
+
+            $breakdown[$dept] = [
+                'major' => $major ? $major->total : 0,
+                'minor' => $minor ? $minor->total : 0,
+                'total' => ($major ? $major->total : 0) + ($minor ? $minor->total : 0),
+            ];
+        }
+
+        $this->subjectDistribution = [
+            'by_department' => $breakdown,
+            'total_major'   => Subject::where('type', 'Major')->count(),
+            'total_minor'   => Subject::where('type', 'Minor')->count(),
+        ];
+    }
+
+    private function loadAiRecommendations(): void
+    {
+        $recommendations = [];
+
+        // Check for overloaded faculty
+        $overloaded = Faculty::where('status', 'approved')
+            ->withCount('schedules')
+            ->having('schedules_count', '>', 6)
+            ->count();
+
+        if ($overloaded > 0) {
+            $recommendations[] = [
+                'type'    => 'warning',
+                'icon'    => '⚠️',
+                'title'   => 'Faculty Overload Detected',
+                'detail'  => "{$overloaded} faculty member(s) exceed max teaching load.",
+                'action'  => 'Review Faculty Loading',
+            ];
+        }
+
+        // Unscheduled subjects
+        $unscheduled = Subject::doesntHave('schedules')->count();
+        if ($unscheduled > 0) {
+            $recommendations[] = [
+                'type'    => 'info',
+                'icon'    => '📋',
+                'title'   => 'Unscheduled Subjects',
+                'detail'  => "{$unscheduled} subject(s) have no schedule assigned.",
+                'action'  => 'Run Auto-Scheduler',
+            ];
+        }
+
+        // Room conflicts
+        $conflictCount = DB::table('schedules as s1')
+            ->join('schedules as s2', function ($join) {
+                $join->on('s1.room_id', '=', 's2.room_id')
+                     ->on('s1.day', '=', 's2.day')
+                     ->where('s1.id', '<', DB::raw('s2.id'))
+                     ->whereRaw('s1.start_time < s2.end_time')
+                     ->whereRaw('s1.end_time > s2.start_time');
+            })->count();
+
+        if ($conflictCount > 0) {
+            $recommendations[] = [
+                'type'    => 'critical',
+                'icon'    => '🔴',
+                'title'   => 'Room Scheduling Conflicts',
+                'detail'  => "{$conflictCount} overlap(s) found across rooms.",
+                'action'  => 'Resolve Conflicts',
+            ];
+        }
+
+        // Rooms running empty
+        $emptyRooms = Room::doesntHave('schedules')->count();
+        if ($emptyRooms > 0) {
+            $recommendations[] = [
+                'type'    => 'info',
+                'icon'    => '🏫',
+                'title'   => 'Idle Rooms',
+                'detail'  => "{$emptyRooms} room(s) have no scheduled classes.",
+                'action'  => 'Optimize Room Allocation',
+            ];
+        }
+
+        if (empty($recommendations)) {
+            $recommendations[] = [
+                'type'   => 'success',
+                'icon'   => '✅',
+                'title'  => 'System Optimal',
+                'detail' => 'No scheduling issues detected.',
+                'action' => null,
+            ];
+        }
+
+        $this->aiRecommendations = $recommendations;
+    }
+
     public function render()
     {
-        // For the Associate Dean, we want a global overview of the entire institution.
-        return view('livewire.assistant-dean-dashboard', [
-            
-            // Accessing ALL faculty across every department
-            'facultyMembers' => Faculty::with('user')->latest()->get(), 
-            
-            // Global Statistics (Across all Departments)
-            'minorSubjectsCount' => Subject::where('type', 'Minor')->count(),
-            'totalRooms' => Room::count(),
-            'totalFacultyCount' => Faculty::count(),
-            'totalUsers' => User::count(), // Added to show total system accounts
-            
-            // Departmental Overview (Used for UI chips or filtering)
-            'departments' => ['CCS', 'CTE', 'COC', 'SHTM'],
-            
-            // Calendar & Date Helpers
-            'daysInMonth' => now()->daysInMonth,
-            'todayDay' => now()->day,
-            'currentMonthName' => now()->format('F Y'),
-        ]);
+        return view('livewire.assistant-dean-dashboard')->layout('layouts.app');
     }
 }

@@ -54,7 +54,7 @@
             </div>
         </header>
         {{-- Main Scrollable Container --}}
-        <div class="flex-1 overflow-y-auto p-4 lg:p-5">
+        <div class="flex-1 overflow-y-auto p-4 lg:p-5 custom-main-scrollbar">
             <div class="grid grid-cols-12 gap-4 items-start max-w-7xl mx-auto">
                 
                 @php
@@ -220,82 +220,150 @@
                     </div>
                 </div>
                 {{-- RIGHT SIDE: Recent Activity --}}
-                <aside class="col-span-12 lg:col-span-3 sticky top-4">
-                    <div class="bg-white dark:bg-slate-900 rounded-3xl p-6 border border-slate-300 dark:border-slate-700 shadow-md h-[520px] flex flex-col">
-                        
-                        <h3 class="text-sm font-extrabold text-slate-900 dark:text-slate-100 mb-4 uppercase italic tracking-tight">
-                            Recent Activity
-                        </h3>
+<aside class="col-span-12 xl:col-span-4 2xl:col-span-3">
+    
+    <div class="sticky top-4">
+        
+        <div class="bg-white dark:bg-[#071024]/90 backdrop-blur-xl 
+                    rounded-[28px] border border-slate-200 dark:border-slate-800
+                    shadow-[0_10px_40px_rgba(0,0,0,0.25)]
+                    overflow-hidden">
 
-                        {{-- Scrollable Activity List --}}
-                        <div class="flex-1 overflow-y-auto pr-1 space-y-4 relative
-                            before:absolute before:inset-y-0 before:left-4 before:-translate-x-px 
-                            before:w-0.5 before:bg-gradient-to-b before:from-transparent 
-                            before:via-slate-300 dark:before:via-slate-600 before:to-transparent">
+            {{-- HEADER --}}
+            <div class="px-6 py-5 border-b border-slate-200 dark:border-slate-800
+                        flex items-center justify-between">
 
-                            @forelse($activities as $activity)
-                                @php
-                                    $rawDept = trim($activity->user->department ?? '');
-                                    $dept = !empty($rawDept) ? strtoupper($rawDept) : null;
-                                    $role = strtolower($activity->user->role ?? '');
+                <div>
+                    <h3 class="text-sm font-black uppercase tracking-wider
+                               text-slate-800 dark:text-white">
+                        Recent Activity
+                    </h3>
 
-                                    $colorClasses = match(true) {
-                                        $dept === 'CCS'  => 'border-yellow-600 bg-yellow-600',
-                                        $dept === 'CTE'  => 'border-blue-600 bg-blue-600',
-                                        $dept === 'COC'  => 'border-violet-600 bg-violet-600',
-                                        $dept === 'SHTM' => 'border-orange-600 bg-orange-600',
-                                        $role === 'registrar' => 'border-emerald-600 bg-emerald-600',
-                                        $role === 'admin'     => 'border-slate-900 bg-slate-900',
-                                        $role === 'associate_dean' => 'border-pink-600 bg-pink-600',
-                                        default => 'border-slate-400 bg-slate-400',
-                                    };
+                    <p class="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                        Live department actions & updates
+                    </p>
+                </div>
 
-                                    $textClasses = match(true) {
-                                        $dept === 'CCS'  => 'text-yellow-700 dark:text-yellow-400',
-                                        $dept === 'CTE'  => 'text-blue-700 dark:text-blue-400',
-                                        $dept === 'COC'  => 'text-violet-700 dark:text-violet-400',
-                                        $dept === 'SHTM' => 'text-orange-700 dark:text-orange-400',
-                                        $role === 'registrar' => 'text-emerald-700 dark:text-emerald-400',
-                                        $role === 'admin'     => 'text-slate-900 dark:text-slate-200',
-                                        $role === 'associate_dean' => 'text-pink-700 dark:text-pink-400',
-                                        default => 'text-slate-700 dark:text-slate-400',
-                                    };
-                                @endphp
+                <div class="h-3 w-3 rounded-full bg-emerald-500 animate-pulse"></div>
+            </div>
 
-                                <div class="relative flex items-start gap-3">
-                                    {{-- Dot --}}
-                                    <div class="relative flex items-center justify-center h-7 w-7 rounded-full bg-white dark:bg-slate-900 border-2 {{ explode(' ', $colorClasses)[0] }} shadow-sm z-10 shrink-0">
-                                        <div class="h-2 w-2 rounded-full {{ explode(' ', $colorClasses)[1] }}"></div>
-                                    </div>
-                                    {{-- Content --}}
-                                    <div class="flex-1">
-                                        <div class="flex items-center justify-between">
-                                            <p class="text-[11px] font-bold {{ $textClasses }} uppercase tracking-tight">
-                                                {{ $activity->user->name }}
-                                            </p>
-                                            <span class="text-[10px] text-slate-400 whitespace-nowrap ml-2">
-                                                {{ $activity->created_at->diffForHumans() }}
-                                            </span>
-                                        </div>
-                                        {{-- MAIN MESSAGE (fixed wrapping) --}}
-                                        <p class="text-[13px] font-semibold text-slate-800 dark:text-slate-200 leading-snug mt-0.5 break-words">
-                                            {{ $activity->action }} {{ $activity->module }}
-                                        </p>
-                                        {{-- DESCRIPTION (no truncate anymore) --}}
-                                        <p class="text-[11px] text-slate-500 dark:text-slate-400 leading-snug mt-1 break-words">
-                                            {{ $activity->description }}
-                                        </p>
-                                    </div>
+            {{-- ACTIVITY LIST --}}
+            <div class="h-[650px] overflow-y-auto px-5 py-5 space-y-5
+                        custom-scrollbar relative">
+
+                {{-- TIMELINE LINE --}}
+                <div class="absolute top-0 bottom-0 left-[29px] w-px
+                            bg-gradient-to-b from-transparent
+                            via-slate-700/70 to-transparent">
+                </div>
+
+                @forelse($activities as $activity)
+
+                    @php
+                        $rawDept = trim($activity->user->department ?? '');
+                        $dept = !empty($rawDept) ? strtoupper($rawDept) : null;
+                        $role = strtolower($activity->user->role ?? '');
+
+                        $dotColor = match(true) {
+                            $dept === 'CCS'  => 'bg-cyan-500',
+                            $dept === 'CTE'  => 'bg-blue-500',
+                            $dept === 'COC'  => 'bg-violet-500',
+                            $dept === 'SHTM' => 'bg-orange-500',
+                            $role === 'registrar' => 'bg-emerald-500',
+                            $role === 'admin' => 'bg-rose-500',
+                            $role === 'associate_dean' => 'bg-pink-500',
+                            default => 'bg-slate-500',
+                        };
+
+                        $badgeColor = match(true) {
+                            $dept === 'CCS'  => 'text-cyan-400 bg-cyan-500/10',
+                            $dept === 'CTE'  => 'text-blue-400 bg-blue-500/10',
+                            $dept === 'COC'  => 'text-violet-400 bg-violet-500/10',
+                            $dept === 'SHTM' => 'text-orange-400 bg-orange-500/10',
+                            $role === 'registrar' => 'text-emerald-400 bg-emerald-500/10',
+                            $role === 'admin' => 'text-rose-400 bg-rose-500/10',
+                            $role === 'associate_dean' => 'text-pink-400 bg-pink-500/10',
+                            default => 'text-slate-400 bg-slate-500/10',
+                        };
+                    @endphp
+
+                    <div class="relative flex gap-4 group">
+
+                        {{-- TIMELINE DOT --}}
+                        <div class="relative z-10 mt-1">
+                            <div class="h-5 w-5 rounded-full border-4 border-[#071024] {{ $dotColor }}
+                                        shadow-[0_0_15px_rgba(59,130,246,0.4)]">
+                            </div>
+                        </div>
+
+                        {{-- CARD --}}
+                        <div class="flex-1 rounded-2xl p-4
+                                    bg-slate-50 dark:bg-slate-900/60
+                                    border border-slate-200 dark:border-slate-800
+                                    hover:border-slate-700
+                                    transition-all duration-300">
+
+                            {{-- TOP --}}
+                            <div class="flex items-start justify-between gap-3">
+
+                                <div>
+                                    <span class="inline-flex items-center px-2.5 py-1 rounded-full
+                                                 text-[10px] font-black uppercase tracking-wider
+                                                 {{ $badgeColor }}">
+                                        {{ $activity->user->name }}
+                                    </span>
+
+                                    <h4 class="mt-3 text-sm font-bold
+                                               text-slate-800 dark:text-slate-100 leading-snug">
+                                        {{ $activity->action }} {{ $activity->module }}
+                                    </h4>
                                 </div>
 
-                            @empty
-                                <div class="text-center py-10 text-slate-500 uppercase font-extrabold text-xs italic tracking-widest">
-                                    No activity recorded yet
-                                </div>
-                            @endforelse
+                                <span class="text-[10px] whitespace-nowrap
+                                             text-slate-400 mt-1">
+                                    {{ $activity->created_at->diffForHumans() }}
+                                </span>
+                            </div>
+
+                            {{-- DESCRIPTION --}}
+                            <p class="mt-2 text-[12px] leading-relaxed
+                                      text-slate-500 dark:text-slate-400">
+                                {{ $activity->description }}
+                            </p>
                         </div>
                     </div>
-                </aside>
+
+                @empty
+
+                    <div class="h-full flex items-center justify-center">
+                        <div class="text-center">
+                            <div class="h-16 w-16 rounded-2xl bg-slate-100 dark:bg-slate-800
+                                        mx-auto mb-4 flex items-center justify-center">
+                                
+                                <svg xmlns="http://www.w3.org/2000/svg"
+                                     class="h-8 w-8 text-slate-400"
+                                     fill="none"
+                                     viewBox="0 0 24 24"
+                                     stroke="currentColor">
+                                    <path stroke-linecap="round"
+                                          stroke-linejoin="round"
+                                          stroke-width="2"
+                                          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                            </div>
+
+                            <p class="text-xs font-bold uppercase tracking-[0.2em]
+                                      text-slate-500">
+                                No Recent Activity
+                            </p>
+                        </div>
+                    </div>
+
+                @endforelse
+            </div>
+        </div>
+    </div>
+</aside>
             </div>
         </div>
     </main>
@@ -725,6 +793,31 @@
 </div>
 
 <style>
+    .custom-main-scrollbar::-webkit-scrollbar {
+    width: 10px;
+}
+
+.custom-main-scrollbar::-webkit-scrollbar-track {
+    background: #020617;
+}
+
+.custom-main-scrollbar::-webkit-scrollbar-thumb {
+    background: linear-gradient(
+        to bottom,
+        rgba(99,102,241,0.7),
+        rgba(59,130,246,0.7)
+    );
+    border-radius: 999px;
+    border: 2px solid #020617;
+}
+
+.custom-main-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(
+        to bottom,
+        rgba(129,140,248,0.9),
+        rgba(96,165,250,0.9)
+    );
+}
     .dark nav[role="navigation"] span[aria-current="page"] > span {
         background-color: #4f46e5 !important;
         border-color: #6366f1 !important;
