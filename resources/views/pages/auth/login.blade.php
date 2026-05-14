@@ -107,7 +107,11 @@
                         <input type="checkbox" name="remember" class="w-4 h-4 rounded border-slate-700 bg-slate-900 text-blue-600 focus:ring-blue-500">
                         <span class="ml-2 text-[10px] font-black uppercase tracking-widest opacity-40 group-hover:opacity-100 transition-opacity" :class="darkMode ? 'text-white' : 'text-slate-700'">Keep Session</span>
                     </label>
+                    <a href="{{ route('password.request') }}" class="text-[10px] font-black uppercase tracking-widest text-blue-500 hover:text-blue-400 transition-colors">
+                        Forgot Password?
+                    </a>
                 </div>
+                
 
                 <button type="submit" 
                     class="w-full py-5 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black uppercase text-xs tracking-[0.2em] transition-all shadow-xl shadow-blue-500/20 active:scale-95">

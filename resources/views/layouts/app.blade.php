@@ -16,6 +16,120 @@
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #334155; }
         [x-cloak] { display: none !important; }
+
+        /* Smooth sidebar */
+        #app-sidebar {
+            width: 4rem; /* 64px collapsed */
+            transition: width 400ms cubic-bezier(0.4, 0, 0.2, 1);
+            will-change: width;
+        }
+        #app-sidebar.sidebar-expanded {
+            width: 16rem; /* 256px expanded */
+        }
+
+        /* Sidebar label text: hidden when collapsed, shown when expanded */
+        .sidebar-label {
+            max-width: 0;
+            opacity: 0;
+            overflow: hidden;
+            white-space: nowrap;
+            transition: max-width 400ms cubic-bezier(0.4, 0, 0.2, 1),
+                        opacity 300ms ease 80ms;
+            display: inline-block;
+        }
+        #app-sidebar.sidebar-expanded .sidebar-label {
+            max-width: 200px;
+            opacity: 1;
+        }
+
+        /* Section header labels */
+        .sidebar-section-label {
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-height 400ms cubic-bezier(0.4, 0, 0.2, 1),
+                        opacity 300ms ease 80ms;
+        }
+        #app-sidebar.sidebar-expanded .sidebar-section-label {
+            max-height: 40px;
+            opacity: 1;
+        }
+
+        /* Divider shown only when collapsed */
+        .sidebar-divider-collapsed {
+            opacity: 1;
+            transition: opacity 200ms ease;
+        }
+        #app-sidebar.sidebar-expanded .sidebar-divider-collapsed {
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        /* Submenu toggle arrow */
+        .sidebar-chevron {
+            max-width: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-width 400ms cubic-bezier(0.4, 0, 0.2, 1),
+                        opacity 300ms ease 80ms;
+        }
+        #app-sidebar.sidebar-expanded .sidebar-chevron {
+            max-width: 40px;
+            opacity: 1;
+        }
+
+        /* Submenu container */
+        .sidebar-submenu {
+            max-height: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-height 350ms cubic-bezier(0.4, 0, 0.2, 1),
+                        opacity 250ms ease;
+        }
+        .sidebar-submenu.submenu-open {
+            max-height: 200px;
+            opacity: 1;
+        }
+
+        /* Icon margin: only when expanded */
+        .sidebar-icon {
+            transition: margin-right 400ms cubic-bezier(0.4, 0, 0.2, 1),
+                        width 400ms cubic-bezier(0.4, 0, 0.2, 1);
+            margin-right: 0;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+        #app-sidebar.sidebar-expanded .sidebar-icon {
+            margin-right: 0.75rem;
+            width: auto;
+        }
+
+        /* Bottom user info */
+        .sidebar-user-info {
+            max-width: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-width 400ms cubic-bezier(0.4, 0, 0.2, 1),
+                        opacity 300ms ease 80ms;
+        }
+        #app-sidebar.sidebar-expanded .sidebar-user-info {
+            max-width: 160px;
+            opacity: 1;
+        }
+        .sidebar-user-arrow {
+            max-width: 0;
+            opacity: 0;
+            overflow: hidden;
+            transition: max-width 350ms ease, opacity 250ms ease;
+        }
+        #app-sidebar.sidebar-expanded .sidebar-user-arrow {
+            max-width: 24px;
+            opacity: 0.4;
+        }
+        #app-sidebar.sidebar-expanded .sidebar-user-arrow:hover {
+            opacity: 1;
+        }
     </style>
 
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -48,7 +162,6 @@
 </head>
 <body 
     x-data="{ 
-        sidebarOpen: true, 
         darkMode: localStorage.getItem('theme') === 'dark',
         toggleTheme() {
             this.darkMode = !this.darkMode;
@@ -61,141 +174,142 @@
 
     <div class="relative flex h-screen overflow-hidden">
         
+        {{-- Sidebar: CSS-driven smooth hover expand/collapse --}}
         <aside 
-            class="bg-[#0f172a] text-white flex flex-col h-screen shrink-0 border-r border-slate-800 z-40 transition-all duration-300 ease-in-out relative"
-            :class="sidebarOpen ? 'w-64' : 'w-20'"
+            id="app-sidebar"
+            class="bg-[#0f172a] text-white flex flex-col h-screen shrink-0 border-r border-slate-800 z-40 relative"
+            onmouseenter="this.classList.add('sidebar-expanded')"
+            onmouseleave="this.classList.remove('sidebar-expanded'); this.querySelectorAll('.sidebar-submenu').forEach(function(m){ m.classList.remove('submenu-open'); }); this.querySelectorAll('.sidebar-chevron').forEach(function(c){ c.classList.remove('rotate-180'); });"
         >
-            <div class="px-6 h-20 flex items-center overflow-hidden shrink-0 border-b border-slate-800/50">
+            {{-- Logo --}}
+            <div class="px-3 h-16 flex items-center overflow-hidden shrink-0 border-b border-slate-800/50">
                 <div class="flex items-center gap-3">
                     <div class="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(37,99,235,0.4)]">
                         <span class="text-lg font-black text-white">C</span>
                     </div>
-                    <div x-show="sidebarOpen" x-transition.opacity class="flex flex-col whitespace-nowrap">
+                    <div class="sidebar-user-info flex flex-col">
                         <h1 class="text-lg font-black tracking-tighter text-white leading-none uppercase">Classly<span class="text-blue-500">.</span></h1>
                         <p class="text-[7px] text-slate-500 font-black uppercase tracking-[0.2em]">Academy OS</p>
                     </div>
                 </div>
             </div>
 
-            <nav class="flex-1 px-3 space-y-1.5 overflow-y-auto pt-6 custom-scrollbar">
-                <div x-show="sidebarOpen" class="px-3 pb-2">
+            {{-- Nav --}}
+            <nav class="flex-1 px-2 space-y-1.5 overflow-y-auto pt-4 custom-scrollbar">
+                <div class="sidebar-section-label px-3 pb-2">
                     <p class="text-[9px] font-black text-slate-600 uppercase tracking-widest">General Navigation</p>
                 </div>
 
                 <a href="{{ route('dashboard') }}" wire:navigate
                     class="relative flex items-center p-3 rounded-2xl transition-all duration-300 group {{ request()->routeIs('dashboard') ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
                     @if(request()->routeIs('dashboard')) <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> @endif
-                    <span class="text-xl flex shrink-0 justify-center transition-transform group-hover:scale-110" :class="sidebarOpen ? 'mr-3' : 'w-full'">📊</span>
-                    <span x-show="sidebarOpen" x-transition.opacity class="font-bold text-[14px] tracking-tight whitespace-nowrap">Dashboard</span>
+                    <span class="text-xl sidebar-icon transition-transform group-hover:scale-110">📊</span>
+                    <span class="sidebar-label font-bold text-[14px] tracking-tight">Dashboard</span>
                 </a>
 
                 @if(auth()->user()->role === 'admin')
                 <a href="/manage-users" wire:navigate 
                     class="relative flex items-center p-3 rounded-2xl transition-all duration-300 group {{ request()->is('manage-users*') ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
                     @if(request()->is('manage-users*')) <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> @endif
-                    <span class="text-xl flex shrink-0 justify-center transition-transform group-hover:scale-110" :class="sidebarOpen ? 'mr-3' : 'w-full'">👥</span>
-                    <span x-show="sidebarOpen" x-transition.opacity class="font-bold text-[14px] tracking-tight whitespace-nowrap">Manage Users</span>
+                    <span class="text-xl sidebar-icon transition-transform group-hover:scale-110">👥</span>
+                    <span class="sidebar-label font-bold text-[14px] tracking-tight">Manage Users</span>
                 </a>
                 @endif
 
                 <a href="/manage-rooms" wire:navigate 
                     class="relative flex items-center p-3 rounded-2xl transition-all duration-300 group {{ request()->is('manage-rooms*') ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
                     @if(request()->is('manage-rooms*')) <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> @endif
-                    <span class="text-xl flex shrink-0 justify-center transition-transform group-hover:scale-110" :class="sidebarOpen ? 'mr-3' : 'w-full'">🏫</span>
-                    <span x-show="sidebarOpen" x-transition.opacity class="font-bold text-[14px] tracking-tight whitespace-nowrap">Manage Rooms</span>
+                    <span class="text-xl sidebar-icon transition-transform group-hover:scale-110">🏫</span>
+                    <span class="sidebar-label font-bold text-[14px] tracking-tight">Manage Rooms</span>
                 </a>
 
                 <a href="/faculty" wire:navigate 
                     class="relative flex items-center p-3 rounded-2xl transition-all duration-300 group {{ request()->is('faculty') ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
                     @if(request()->is('faculty')) <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> @endif
-                    <span class="text-xl flex shrink-0 justify-center transition-transform group-hover:scale-110" :class="sidebarOpen ? 'mr-3' : 'w-full'">👨‍🏫</span>
-                    <span x-show="sidebarOpen" x-transition.opacity class="font-bold text-[14px] tracking-tight whitespace-nowrap">Faculty List</span>
+                    <span class="text-xl sidebar-icon transition-transform group-hover:scale-110">👨‍🏫</span>
+                    <span class="sidebar-label font-bold text-[14px] tracking-tight">Faculty List</span>
                 </a>
 
                 <a href="{{ route('subjects') }}" wire:navigate 
                     class="relative flex items-center p-3 rounded-2xl transition-all duration-300 group {{ request()->routeIs('subjects*') ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
                     @if(request()->routeIs('subjects*')) <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> @endif
-                    <span class="text-xl flex shrink-0 justify-center transition-transform group-hover:scale-110" :class="sidebarOpen ? 'mr-3' : 'w-full'">📚</span>
-                    <span x-show="sidebarOpen" x-transition.opacity class="font-bold text-[14px] tracking-tight whitespace-nowrap">Subjects</span>
+                    <span class="text-xl sidebar-icon transition-transform group-hover:scale-110">📚</span>
+                    <span class="sidebar-label font-bold text-[14px] tracking-tight">Subjects</span>
                 </a>
 
-                <div x-show="sidebarOpen" class="px-3 pb-2 pt-6">
+                <div class="sidebar-section-label px-3 pb-2 pt-6">
                     <p class="text-[9px] font-black text-slate-600 uppercase tracking-widest">Academic Tools</p>
                 </div>
+                <div class="sidebar-divider-collapsed border-t border-slate-800/40 my-2"></div>
 
-               {{-- 1. Update x-data: include 'faculty-load*' to match the URL in web.php --}}
-<div x-data="{ masterGridMenuOpen: {{ request()->is('master-grid*', 'block-schedule*', 'faculty-load*') ? 'true' : 'false' }} }">
-    
-    <div class="relative group">
-        <a href="{{ route('master-grid') }}" wire:navigate 
-           class="relative flex items-center p-3 rounded-2xl transition-all duration-300 
-           {{-- 2. Update this check to use 'faculty-load*' --}}
-           {{ request()->is('master-grid*', 'block-schedule*', 'faculty-load*') 
-              ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' 
-              : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
-            
-            @if(request()->is('master-grid*', 'block-schedule*', 'faculty-load*')) 
-                <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> 
-            @endif
-            
-            <span class="text-xl flex shrink-0 justify-center transition-transform group-hover:scale-110" :class="sidebarOpen ? 'mr-3' : 'w-full'">📅</span>
-            <span x-show="sidebarOpen" x-transition.opacity class="font-bold text-[14px] tracking-tight whitespace-nowrap">Master Grid</span>
-            
-            <span x-show="sidebarOpen" @click.prevent="masterGridMenuOpen = !masterGridMenuOpen" class="ml-auto cursor-pointer p-1 hover:bg-white/10 rounded-md transition-transform" :class="masterGridMenuOpen ? 'rotate-180' : ''">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-            </span>
-        </a>
-    </div>
+                <div data-mastergrid>
+                    
+                    <div class="relative group">
+                        <a href="{{ route('master-grid') }}" wire:navigate 
+                           class="relative flex items-center p-3 rounded-2xl transition-all duration-300 
+                           {{ request()->is('master-grid*', 'block-schedule*', 'faculty-load*') 
+                              ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' 
+                              : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
+                            
+                            @if(request()->is('master-grid*', 'block-schedule*', 'faculty-load*')) 
+                                <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> 
+                            @endif
+                            
+                            <span class="text-xl sidebar-icon transition-transform group-hover:scale-110">📅</span>
+                            <span class="sidebar-label font-bold text-[14px] tracking-tight">Master Grid</span>
+                            
+                            <span class="sidebar-chevron ml-auto cursor-pointer p-1 hover:bg-white/10 rounded-md" 
+                                  onclick="event.preventDefault(); this.closest('[data-mastergrid]').querySelector('.sidebar-submenu').classList.toggle('submenu-open'); this.classList.toggle('rotate-180')">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                            </span>
+                        </a>
+                    </div>
 
-            <div x-show="masterGridMenuOpen" 
-                x-transition:enter="transition ease-out duration-200"
-                x-transition:enter-start="opacity-0 -translate-y-2"
-                x-transition:enter-end="opacity-100 translate-y-0"
-                class="mt-2 ml-6 space-y-1 border-l-2 border-white/20 pl-4">
-                
-                <a href="{{ route('master-grid') }}" wire:navigate 
-                class="flex items-center p-2 rounded-xl text-[13px] transition-all {{ request()->routeIs('master-grid') ? 'text-white font-bold bg-white/10' : 'text-blue-100/60 hover:text-white hover:bg-white/5' }}">
-                    <span class="mr-2">🏠</span>
-                    <span x-show="sidebarOpen">Room View</span>
-                </a>
+                    <div class="sidebar-submenu mt-2 ml-6 space-y-1 border-l-2 border-white/20 pl-4 {{ request()->is('master-grid*', 'block-schedule*', 'faculty-load*') ? 'submenu-open' : '' }}">
+                        
+                        <a href="{{ route('master-grid') }}" wire:navigate 
+                        class="flex items-center p-2 rounded-xl text-[13px] transition-all {{ request()->routeIs('master-grid') ? 'text-white font-bold bg-white/10' : 'text-blue-100/60 hover:text-white hover:bg-white/5' }}">
+                            <span class="mr-2">🏠</span>
+                            <span>Room View</span>
+                        </a>
 
-                 <a href="{{ route('faculty-loading') }}" wire:navigate 
-                class="flex items-center p-2 rounded-xl text-[13px] transition-all {{ request()->routeIs('faculty-loading') ? 'text-white font-bold bg-white/10' : 'text-blue-100/60 hover:text-white hover:bg-white/5' }}">
-                    <span class="mr-2">✒️</span>
-                    <span x-show="sidebarOpen">Faculty Info</span>
-                </a>
+                        <a href="{{ route('faculty-loading') }}" wire:navigate 
+                        class="flex items-center p-2 rounded-xl text-[13px] transition-all {{ request()->routeIs('faculty-loading') ? 'text-white font-bold bg-white/10' : 'text-blue-100/60 hover:text-white hover:bg-white/5' }}">
+                            <span class="mr-2">✒️</span>
+                            <span>Faculty Info</span>
+                        </a>
 
-                <a href="{{ route('block-schedule') }}" wire:navigate 
-                class="flex items-center p-2 rounded-xl text-[13px] transition-all {{ request()->routeIs('block-schedule') ? 'text-white font-bold bg-white/10' : 'text-blue-100/60 hover:text-white hover:bg-white/5' }}">
-                    <span class="mr-2">📚</span>
-                    <span x-show="sidebarOpen">Block Schedule</span>
-                </a>
-
-            </div>
-        </div>
+                        <a href="{{ route('block-schedule') }}" wire:navigate 
+                        class="flex items-center p-2 rounded-xl text-[13px] transition-all {{ request()->routeIs('block-schedule') ? 'text-white font-bold bg-white/10' : 'text-blue-100/60 hover:text-white hover:bg-white/5' }}">
+                            <span class="mr-2">📚</span>
+                            <span>Block Schedule</span>
+                        </a>
+                    </div>
+                </div>
 
                 @if(in_array(auth()->user()->role, ['admin', 'registrar']))
                 <a href="{{ route('settings') }}" wire:navigate 
                     class="relative flex items-center p-3 rounded-2xl transition-all duration-300 group {{ request()->routeIs('settings') ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
                     @if(request()->routeIs('settings')) <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> @endif
-                    <span class="text-xl flex shrink-0 justify-center transition-transform group-hover:scale-110" :class="sidebarOpen ? 'mr-3' : 'w-full'">⚙️</span>
-                    <span x-show="sidebarOpen" x-transition.opacity class="font-bold text-[14px] tracking-tight whitespace-nowrap">Settings</span>
+                    <span class="text-xl sidebar-icon transition-transform group-hover:scale-110">⚙️</span>
+                    <span class="sidebar-label font-bold text-[14px] tracking-tight">Settings</span>
                 </a>
                 @endif
             </nav>
 
-            <div class="shrink-0 p-4 border-t border-slate-800/50 bg-[#0f172a]">
+            {{-- Bottom user area --}}
+            <div class="shrink-0 p-2 border-t border-slate-800/50 bg-[#0f172a]">
                 <a href="/manage-account" wire:navigate 
                    class="flex items-center gap-3 p-3 rounded-2xl bg-slate-400/5 hover:bg-slate-400/10 transition-all duration-500 group border border-slate-700/30 hover:border-blue-500/40 backdrop-blur-md shadow-sm">
                     
                     <div class="relative shrink-0">
-                        <div class="w-10 h-10 rounded-xl bg-slate-700/50 group-hover:bg-blue-600 text-slate-300 group-hover:text-white flex items-center justify-center text-[10px] font-black transition-all duration-500 border border-slate-600/30">
+                        <div class="w-9 h-9 rounded-xl bg-slate-700/50 group-hover:bg-blue-600 text-slate-300 group-hover:text-white flex items-center justify-center text-[10px] font-black transition-all duration-500 border border-slate-600/30">
                             {{ auth()->user()->initials() }}
                         </div>
                         <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#0f172a] rounded-full"></div>
                     </div>
 
-                    <div x-show="sidebarOpen" x-transition.opacity class="flex flex-col min-w-0">
+                    <div class="sidebar-user-info flex flex-col min-w-0">
                         <span class="text-[10px] font-black text-slate-300 group-hover:text-blue-400 uppercase tracking-[0.12em] leading-none mb-1 transition-colors">
                             Manage Account
                         </span>
@@ -204,26 +318,17 @@
                         </span>
                     </div>
 
-                    <span x-show="sidebarOpen" class="ml-auto opacity-40 group-hover:opacity-100 group-hover:translate-x-1 transition-all duration-300 text-slate-400 group-hover:text-blue-400">
+                    <span class="sidebar-user-arrow ml-auto group-hover:opacity-100 group-hover:translate-x-1 transition-all duration-300 text-slate-400 group-hover:text-blue-400">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
                         </svg>
                     </span>
                 </a>
             </div>
-
-            <button 
-                @click="sidebarOpen = !sidebarOpen" 
-                class="absolute top-6 -right-3.5 z-50 p-1.5 bg-blue-600 text-white rounded-full border-2 border-[#0f172a] shadow-xl transition-all duration-300 hover:scale-110 active:scale-95"
-            >
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 transition-transform duration-300" :class="sidebarOpen ? 'rotate-0' : 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="4" d="M15 19l-7-7 7-7" />
-                </svg>
-            </button>
         </aside>
 
         <div class="flex-1 flex flex-col min-w-0">
-            <header class="h-20 flex items-center justify-between px-10 bg-[#0f172a] text-white shrink-0 z-30 shadow-2xl relative border-b border-slate-800/50">
+            <header class="h-16 flex items-center justify-between px-10 bg-[#0f172a] text-white shrink-0 z-30 shadow-2xl relative border-b border-slate-800/50">
                 <div class="flex flex-col">
                     <h3 class="text-base font-black text-slate-100 tracking-tight uppercase">Professional Academy of the Philippines</h3>
                     <p class="text-[9px] text-blue-500 font-black uppercase tracking-[0.3em] leading-tight mt-0.5">Academic Personnel Management</p>
@@ -274,10 +379,7 @@
     x-data="{ 
         notifications: [], 
         add(e) { 
-            // In Livewire v3, the data is inside e.detail[0] if sent as positional arguments
-            // or directly in e.detail if sent as named arguments.
             const data = Array.isArray(e.detail) ? e.detail[0] : e.detail;
-            
             this.notifications.push({
                 id: Date.now(),
                 type: data.type || 'info',
@@ -290,5 +392,5 @@
     @notify.window="add($event)"
     class="fixed bottom-10 right-10 z-[200] flex flex-col gap-3 w-full max-w-sm"
 >
-   </div>
+</div>
 </html>
