@@ -163,27 +163,27 @@ class Room extends Model
      */
     public function calculateUtilization(): float
     {
-        $settings = \App\Models\Setting::query()
-            ->whereIn('key', ['day_start_time', 'day_end_time', 'default_slot_duration'])
-            ->pluck('value', 'key');
+        $settings = \App\Models\Setting::getScheduleSettings();
 
-        $startTime = $settings['day_start_time'] ?? '07:00';
-        $endTime = $settings['day_end_time'] ?? '20:00';
-        $slotDuration = (int)($settings['default_slot_duration'] ?? 60);
+        $startTime = $settings['start_time'];
+        $endTime = $settings['end_time'];
+        $slotDuration = (int) $settings['slot_duration_minutes'];
+        $activeDays = $settings['active_days'];
 
-        // Calculate total available slots per day (6 days)
         $start = \Carbon\Carbon::parse($startTime);
         $end = \Carbon\Carbon::parse($endTime);
         $minutesPerDay = $start->diffInMinutes($end);
         $slotsPerDay = floor($minutesPerDay / $slotDuration);
-        $totalSlotsWeek = $slotsPerDay * 6; // 6 days
+        $totalSlotsWeek = $slotsPerDay * max(1, count($activeDays));
 
         if ($totalSlotsWeek === 0) {
             return 0;
         }
 
         // Count scheduled slots for this room
-        $scheduledSlots = $this->schedules()->count();
+        $scheduledSlots = $this->schedules()
+            ->whereIn('day', $activeDays)
+            ->count();
 
         return round(($scheduledSlots / $totalSlotsWeek) * 100, 2);
     }
@@ -226,15 +226,17 @@ class Room extends Model
      */
     public function getNextAvailableSlot(string $day): ?array
     {
-        $settings = \App\Models\Setting::query()
-            ->whereIn('key', ['day_start_time', 'day_end_time', 'default_slot_duration', 'lunch_break_start', 'lunch_break_end'])
-            ->pluck('value', 'key');
+        $settings = \App\Models\Setting::getScheduleSettings();
 
-        $startTime = $settings['day_start_time'] ?? '07:00';
-        $endTime = $settings['day_end_time'] ?? '20:00';
-        $slotDuration = (int)($settings['default_slot_duration'] ?? 60);
-        $lunchStart = $settings['lunch_break_start'] ?? '12:00';
-        $lunchEnd = $settings['lunch_break_end'] ?? '13:00';
+        if (!in_array($day, $settings['active_days'], true)) {
+            return null;
+        }
+
+        $startTime = $settings['start_time'];
+        $endTime = $settings['end_time'];
+        $slotDuration = (int) $settings['slot_duration_minutes'];
+        $lunchStart = '12:00';
+        $lunchEnd = '13:00';
 
         $current = \Carbon\Carbon::parse($startTime);
         $dayEnd = \Carbon\Carbon::parse($endTime);

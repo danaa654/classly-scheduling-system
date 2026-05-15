@@ -366,7 +366,7 @@
                                         <div class="mt-4 grid grid-cols-1 gap-3">
                                             <label class="space-y-1.5">
                                                 <span class="block text-[9px] font-black uppercase tracking-widest text-slate-500">Meetings Per Week</span>
-                                                <input type="number" min="1" max="6" step="1" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.meetings_per_week" class="w-full rounded-xl border border-red-500/50 bg-slate-900/90 px-3 py-3 text-sm font-black text-white outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-500/10">
+                                                <input type="number" min="1" max="{{ $maxMeetingDays ?? 1 }}" step="1" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.meetings_per_week" class="w-full rounded-xl border border-red-500/50 bg-slate-900/90 px-3 py-3 text-sm font-black text-white outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-500/10">
                                                 <p class="text-[10px] font-bold text-slate-500">
                                                     The scheduler will automatically find the room, start time, and clean paired days.
                                                 </p>
@@ -475,7 +475,7 @@
 
                         <label class="space-y-2">
                             <span class="block text-[10px] font-black uppercase tracking-widest text-slate-500">Meetings Per Week</span>
-                            <input type="number" min="1" max="6" step="1" wire:model.live="generatedScheduleEditInputs.meetings_per_week" class="w-full rounded-xl border border-indigo-500/40 bg-slate-900/90 px-4 py-3 text-sm font-black text-white outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-500/10">
+                            <input type="number" min="1" max="{{ $maxMeetingDays ?? 1 }}" step="1" wire:model.live="generatedScheduleEditInputs.meetings_per_week" class="w-full rounded-xl border border-indigo-500/40 bg-slate-900/90 px-4 py-3 text-sm font-black text-white outline-none transition focus:border-indigo-300 focus:ring-4 focus:ring-indigo-500/10">
                             <p class="text-[10px] font-bold text-slate-500">Duration stays based on the subject record.</p>
                         </label>
 
@@ -496,7 +496,7 @@
                     <div class="mt-5 space-y-2">
                         <span class="block text-[10px] font-black uppercase tracking-widest text-slate-500">Meeting Days</span>
                         <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                            @foreach($generationDays ?? ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as $dayOption)
+                            @foreach($generationDays ?? $days ?? [] as $dayOption)
                                 <label class="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-3 text-[11px] font-black uppercase tracking-widest text-slate-300">
                                     <input
                                         type="checkbox"

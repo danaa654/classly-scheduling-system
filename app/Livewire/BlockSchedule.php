@@ -29,9 +29,9 @@ class BlockSchedule extends Component
 
     public function loadSettings()
     {
-        $this->schoolYear = Setting::where('key', 'school_year')->first()?->value ?? '2026-2027';
-        $this->semester = Setting::where('key', 'semester')->first()?->value ?? '1st';
-        $this->semesterName = Setting::where('key', 'semester_name')->first()?->value ?? 'First Semester 2026-2027';
+        $this->schoolYear = Setting::getValue('school_year', '2026-2027');
+        $this->semester = Setting::getValue('semester', '1st');
+        $this->semesterName = Setting::getValue('semester_name', 'First Semester 2026-2027');
     }
 
     public function getDepartmentName($code)
@@ -80,8 +80,9 @@ class BlockSchedule extends Component
             ) && (int)$schedule->subject->year_level === (int)$this->selectedYear;
         })->values();
 
-        $dayOrder = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        $dayOrder = Setting::getActiveDays();
         $scheduleRows = $filteredSchedules
+            ->whereIn('day', $dayOrder)
             ->groupBy(function ($schedule) {
                 return $schedule->pairing_key ?: implode('|', [
                     $schedule->subject_id,
@@ -119,7 +120,7 @@ class BlockSchedule extends Component
             })
             ->values();
 
-        $schedules = $filteredSchedules->groupBy('day');
+        $schedules = $filteredSchedules->whereIn('day', $dayOrder)->groupBy('day');
 
         $departmentName = $this->getDepartmentName($this->selectedDepartment);
 

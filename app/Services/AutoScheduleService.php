@@ -14,7 +14,7 @@ use Illuminate\Support\Str;
 
 class AutoScheduleService
 {
-    private const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    private const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
     private const SLOT_MINUTES = 30;
     private const LUNCH_START = '12:00:00';
     private const LUNCH_END = '13:00:00';
@@ -63,6 +63,16 @@ class AutoScheduleService
 
     public function __construct(private ScheduleConflictService $conflicts)
     {
+    }
+
+    private function activeDays(): array
+    {
+        return Setting::getActiveDays();
+    }
+
+    private function activeDayCount(): int
+    {
+        return max(1, count($this->activeDays()));
     }
 
     public function generatePartialSchedules(array $filters = [], ?int $userId = null, bool $persist = false): array
@@ -228,6 +238,11 @@ class AutoScheduleService
             ->orWhereIn('subject_id', $subjectIds)
             ->get();
 
+        $scheduleSettings = Setting::getScheduleSettings();
+        $activeDays = $scheduleSettings['active_days'];
+        $boundsStart = Carbon::parse($scheduleSettings['start_time']);
+        $boundsEnd = Carbon::parse($scheduleSettings['end_time']);
+
         $result = [
             'saved' => 0,
             'failed' => 0,
@@ -263,15 +278,23 @@ class AutoScheduleService
                     break;
                 }
 
-                if ($day === 'Sunday' || !in_array($day, self::DAYS, true)) {
-                    $result['failure_reasons'][] = "{$subject->subject_code}: Sunday schedules are not allowed";
+                if (!in_array($day, $activeDays, true)) {
+                    $result['failure_reasons'][] = "{$subject->subject_code}: {$day} is not enabled for scheduling";
                     $groupFailed = true;
                     break;
                 }
 
                 $start = Carbon::parse($start)->format('H:i:s');
                 $end = Carbon::parse($end)->format('H:i:s');
+                $slotStart = Carbon::parse($start);
+                $slotEnd = Carbon::parse($end);
                 $validationSchedules = $existingSchedules->concat($validatedSchedules);
+
+                if ($slotStart->lt($boundsStart) || $slotEnd->gt($boundsEnd)) {
+                    $result['failure_reasons'][] = "{$subject->subject_code}: generated slot is outside the configured schedule hours";
+                    $groupFailed = true;
+                    break;
+                }
 
                 if (!$this->isRoomCompatible($room, $subject, allowMinorLabFallback: true)) {
                     $result['failure_reasons'][] = "{$subject->subject_code}: room is no longer compatible";
@@ -624,7 +647,7 @@ class AutoScheduleService
         ];
 
         $preferredDays = $this->normalizeDayList($overrides['preferred_days'] ?? []);
-        $meetingsNeeded = max((int) $subject->meetings_per_week, count($preferredDays) ?: 1);
+        $meetingsNeeded = max(1, min($this->activeDayCount(), max((int) $subject->meetings_per_week, count($preferredDays) ?: 1)));
         $subject->meetings_per_week = $meetingsNeeded;
 
         $preferredStart = $this->normalizePreferredStart($overrides['preferred_start_time'] ?? null);
@@ -716,7 +739,7 @@ class AutoScheduleService
         $requestedMeetings = filled($overrides['meetings_per_week'] ?? null)
             ? (int) $overrides['meetings_per_week']
             : (count($days) ?: (int) $subject->meetings_per_week);
-        $meetingsNeeded = max(1, min(count(self::DAYS), $requestedMeetings));
+        $meetingsNeeded = max(1, min($this->activeDayCount(), $requestedMeetings));
         $subject->meetings_per_week = $meetingsNeeded;
 
         if (array_key_exists('faculty_id', $overrides)) {
@@ -903,7 +926,7 @@ class AutoScheduleService
         ?int $meetingsNeeded = null,
         int $meetingIndex = 0
     ): ?array {
-        $meetingsNeeded = max(1, min(count(self::DAYS), $meetingsNeeded ?? (int) $subject->meetings_per_week));
+        $meetingsNeeded = max(1, min($this->activeDayCount(), $meetingsNeeded ?? (int) $subject->meetings_per_week));
 
         $anchoredPattern = $this->findAnchoredLinkedPattern($subject, $rooms, $existingSchedules, $meetingsNeeded);
         if ($anchoredPattern) {
@@ -1069,7 +1092,7 @@ class AutoScheduleService
         $slotEnd = Carbon::parse($end);
 
         foreach ($days as $day) {
-            if (!in_array($day, self::DAYS, true)) {
+            if (!in_array($day, $this->activeDays(), true)) {
                 return $this->manualConflict(
                     'BLOCKED_DAY',
                     'Blocked Schedule Day',
@@ -1313,8 +1336,8 @@ class AutoScheduleService
         $placements = [];
 
         foreach ($days as $day) {
-            if ($day === 'Sunday') {
-                continue;
+            if (!in_array($day, $this->activeDays(), true)) {
+                return null;
             }
 
             if (!$this->roomAvailable($existingSchedules, $room->id, $day, $start, $end)) {
@@ -1356,16 +1379,17 @@ class AutoScheduleService
 
     private function meetingDayPatterns(int $meetings, array $mustIncludeDays = []): array
     {
-        $meetings = max(1, min(count(self::DAYS), $meetings));
+        $activeDays = $this->activeDays();
+        $meetings = max(1, min(count($activeDays), $meetings));
         $patterns = array_merge(
-            self::DAY_PAIRINGS[$meetings] ?? [],
-            $this->fallbackDayPatterns($meetings),
-            $this->dayCombinations($meetings)
+            $this->preferredDayPatterns($meetings, $activeDays),
+            $this->fallbackDayPatterns($meetings, $activeDays),
+            $this->dayCombinations($meetings, $activeDays)
         );
 
         $unique = [];
         foreach ($patterns as $pattern) {
-            $pattern = array_values(array_intersect(self::DAYS, $pattern));
+            $pattern = array_values(array_intersect($activeDays, $pattern));
 
             if (count($pattern) !== $meetings) {
                 continue;
@@ -1395,9 +1419,33 @@ class AutoScheduleService
         return $patterns;
     }
 
-    private function fallbackDayPatterns(int $meetings): array
+    private function preferredDayPatterns(int $meetings, array $days): array
     {
-        return match ($meetings) {
+        $patterns = self::DAY_PAIRINGS[$meetings] ?? [];
+
+        if ($meetings === 1) {
+            $patterns = array_merge($patterns, array_map(fn (string $day) => [$day], $days));
+        }
+
+        if ($meetings === 2 && count($days) >= 4) {
+            $patterns[] = [$days[0], $days[2]];
+            $patterns[] = [$days[1], $days[3]];
+        }
+
+        if ($meetings === 3 && count($days) >= 5) {
+            $patterns[] = [$days[0], $days[2], $days[4]];
+        }
+
+        if ($meetings === 3 && count($days) >= 6) {
+            $patterns[] = [$days[1], $days[3], $days[5]];
+        }
+
+        return $patterns;
+    }
+
+    private function fallbackDayPatterns(int $meetings, array $days): array
+    {
+        $defaults = match ($meetings) {
             4 => [
                 ['Monday', 'Tuesday', 'Thursday', 'Friday'],
                 ['Monday', 'Wednesday', 'Thursday', 'Saturday'],
@@ -1410,12 +1458,17 @@ class AutoScheduleService
             6 => [self::DAYS],
             default => [],
         };
+
+        if ($meetings === count($days)) {
+            $defaults[] = $days;
+        }
+
+        return $defaults;
     }
 
-    private function dayCombinations(int $meetings): array
+    private function dayCombinations(int $meetings, array $days): array
     {
         $result = [];
-        $days = self::DAYS;
 
         $build = function (int $start, array $current) use (&$build, &$result, $days, $meetings) {
             if (count($current) === $meetings) {
@@ -1558,8 +1611,9 @@ class AutoScheduleService
             ->pluck('day')
             ->all();
 
-        $unused = array_values(array_diff(self::DAYS, $usedDays));
-        $ordered = array_merge($unused, array_values(array_intersect(self::DAYS, $usedDays)));
+        $activeDays = $this->activeDays();
+        $unused = array_values(array_diff($activeDays, $usedDays));
+        $ordered = array_merge($unused, array_values(array_intersect($activeDays, $usedDays)));
         $offset = $meetingIndex % max(1, count($ordered));
 
         return array_merge(array_slice($ordered, $offset), array_slice($ordered, 0, $offset));
@@ -1870,8 +1924,8 @@ class AutoScheduleService
         }
 
         return collect($days ?? [])
-            ->map(fn ($day) => ucfirst(strtolower(trim((string) $day))))
-            ->filter(fn (string $day) => in_array($day, self::DAYS, true))
+            ->map(fn ($day) => Setting::normalizeDayName((string) $day))
+            ->filter(fn (?string $day) => $day !== null && in_array($day, $this->activeDays(), true))
             ->unique()
             ->values()
             ->all();
@@ -1888,7 +1942,7 @@ class AutoScheduleService
         ?int $preferredRoomId = null,
         ?string $preferredRoomHint = null
     ): ?array {
-        $meetingsNeeded = max(1, min(count(self::DAYS), max($meetingsNeeded, count($preferredDays))));
+        $meetingsNeeded = max(1, min($this->activeDayCount(), max($meetingsNeeded, count($preferredDays))));
         $minutes = $this->minutesPerMeeting($subject);
         $compatibleRooms = $this->compatibleRooms($rooms, $subject, $existingSchedules);
 

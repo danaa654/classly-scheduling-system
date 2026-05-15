@@ -115,11 +115,19 @@ class MasterGrid extends Component
 
     public function loadSettings()
     {
-        $this->dayStart = Setting::where('key', 'day_start')->first()?->value ?? '07:00';
-        $this->dayEnd = Setting::where('key', 'day_end')->first()?->value ?? '21:00';
-        $this->schoolYear = Setting::where('key', 'school_year')->first()?->value ?? '2026-2027';
-        $this->semester = Setting::where('key', 'semester')->first()?->value ?? '1st';
-        $this->semesterName = Setting::where('key', 'semester_name')->first()?->value ?? 'First Semester 2026-2027';
+        $scheduleSettings = Setting::getScheduleSettings();
+
+        $this->days = $scheduleSettings['active_days'];
+        $this->dayStart = $scheduleSettings['start_time'];
+        $this->dayEnd = $scheduleSettings['end_time'];
+        $this->schoolYear = Setting::getValue('school_year', '2026-2027');
+        $this->semester = Setting::getValue('semester', '1st');
+        $this->semesterName = Setting::getValue('semester_name', 'First Semester 2026-2027');
+    }
+
+    public function maxMeetingDays(): int
+    {
+        return max(1, count($this->days));
     }
 
     public function updatedSearchSubject() 
@@ -761,7 +769,7 @@ class MasterGrid extends Component
 
         $this->failedRetryInputs = collect($this->generationSummary['failed_items'])
             ->mapWithKeys(function (array $item) {
-                $meetings = max(1, min(6, (int) ($item['meetings_per_week'] ?? 1)));
+                $meetings = max(1, min($this->maxMeetingDays(), (int) ($item['meetings_per_week'] ?? 1)));
 
                 return [
                     $item['subject_id'] => [
@@ -830,7 +838,7 @@ class MasterGrid extends Component
 
         $subjectId = $this->retrySubjectId;
         $overrides = $this->failedRetryInputs[$subjectId] ?? [];
-        $meetings = max(1, min(6, (int) ($overrides['meetings_per_week'] ?? 1)));
+        $meetings = max(1, min($this->maxMeetingDays(), (int) ($overrides['meetings_per_week'] ?? 1)));
 
         $overrides = ['meetings_per_week' => $meetings];
 
@@ -966,7 +974,7 @@ class MasterGrid extends Component
             $selectedFacultyId = '';
         }
 
-        $meetingsPerWeek = max(1, min(6, (int) ($first['meetings_per_week'] ?? (count($days) ?: ($subject->meetings_per_week ?? 1)))));
+        $meetingsPerWeek = max(1, min($this->maxMeetingDays(), (int) ($first['meetings_per_week'] ?? (count($days) ?: ($subject->meetings_per_week ?? 1)))));
 
         $this->generatedScheduleEditInputs = [
             'summary_key' => $summaryKey,
@@ -1017,7 +1025,7 @@ class MasterGrid extends Component
 
         $inputs = $this->generatedScheduleEditInputs;
         $inputs['days'] = $this->normalizePreferredDays($inputs['days'] ?? []);
-        $inputs['meetings_per_week'] = max(1, min(6, (int) ($inputs['meetings_per_week'] ?? count($inputs['days']))));
+        $inputs['meetings_per_week'] = max(1, min($this->maxMeetingDays(), (int) ($inputs['meetings_per_week'] ?? count($inputs['days']))));
 
         if (empty($inputs['room_id']) || empty($inputs['start_time']) || empty($inputs['days'])) {
             $this->dispatch('toast', [
@@ -1156,8 +1164,8 @@ class MasterGrid extends Component
         }
 
         return collect($days ?? [])
-            ->map(fn ($day) => ucfirst(strtolower(trim((string) $day))))
-            ->filter(fn (string $day) => in_array($day, $this->days, true))
+            ->map(fn ($day) => Setting::normalizeDayName((string) $day))
+            ->filter(fn (?string $day) => $day !== null && in_array($day, $this->days, true))
             ->unique()
             ->values()
             ->all();
@@ -1364,8 +1372,8 @@ class MasterGrid extends Component
 
     private function createPartialSchedule(Subject $subject, Room $room, string $day, string $startTime, string $endTime): Schedule
     {
-        if ($day === 'Sunday') {
-            throw new \InvalidArgumentException('Sunday schedules are not allowed.');
+        if (!in_array($day, Setting::getActiveDays(), true)) {
+            throw new \InvalidArgumentException("{$day} is not enabled for scheduling.");
         }
 
         return Schedule::create([
@@ -1506,7 +1514,7 @@ class MasterGrid extends Component
     public function calculateRoomUtilization($room): int
     {
         $totalBricksPerDay = count($this->generateDisplaySlots());
-        $totalDaysPerWeek = 6;
+        $totalDaysPerWeek = $this->maxMeetingDays();
         $totalAvailableBricks = $totalBricksPerDay * $totalDaysPerWeek;
 
         if ($totalAvailableBricks === 0) {
@@ -1514,6 +1522,7 @@ class MasterGrid extends Component
         }
 
         $scheduledSubjects = Schedule::where('room_id', $room->id)
+            ->whereIn('day', $this->days)
             ->with('subject')
             ->get();
 
@@ -1597,11 +1606,11 @@ class MasterGrid extends Component
      */
     public function assignSubject($subjectId, $day, $startTime)
     {
-        if ($day === 'Sunday') {
+        if (!in_array($day, $this->days, true)) {
             $this->dispatch('toast', [
                 'type' => 'error',
-                'message' => 'Sunday Blocked',
-                'detail' => 'Schedules can only be created from Monday to Saturday.'
+                'message' => 'Day Disabled',
+                'detail' => "{$day} is not enabled in Global Settings."
             ]);
             return;
         }
@@ -1659,8 +1668,20 @@ class MasterGrid extends Component
         $minutesPerMeeting = $this->calculateMinutesPerMeeting($subject);
         $endTime = $this->calculateEndTime($startTime, $minutesPerMeeting);
 
+        $gridStart = Carbon::parse($this->dayStart);
         $gridEnd = Carbon::parse($this->dayEnd);
+        $calculatedStartTime = Carbon::parse($startTime);
         $calculatedEndTime = Carbon::parse($endTime);
+
+        if ($calculatedStartTime < $gridStart) {
+            $gridStartDisplay = $this->formatTime12h($this->dayStart);
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Start Time Out of Bounds',
+                'detail' => "This subject would start before the grid start time ({$gridStartDisplay}). Please select a later time slot."
+            ]);
+            return;
+        }
         
         if ($calculatedEndTime > $gridEnd) {
             $gridEndDisplay = $this->formatTime12h($this->dayEnd);
@@ -2001,6 +2022,7 @@ class MasterGrid extends Component
 
         $schedules = $this->selectedRoomId
             ? Schedule::where('room_id', $this->selectedRoomId)
+                ->whereIn('day', $this->days)
                 ->with(['subject' => function ($query) {
                     $query->select(
                         'id', 'subject_code', 'description', 'edp_code', 
@@ -2019,8 +2041,10 @@ class MasterGrid extends Component
             ->get();
 
         return view('livewire.master-grid', [
-            'days'                 => ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'],
+            'days'                 => $this->days,
+            'dayLabels'            => Setting::getActiveDayLabels(),
             'generationDays'       => $this->days,
+            'maxMeetingDays'       => $this->maxMeetingDays(),
             'displaySlots'         => $this->generateDisplaySlots(),
             'lunchSlots'           => $lunchSlots,
             'schedules'            => $schedules,

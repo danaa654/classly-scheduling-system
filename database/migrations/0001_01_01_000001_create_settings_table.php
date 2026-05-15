@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
@@ -172,6 +173,63 @@ return new class extends Migration
                 ->on('users')
                 ->onDelete('cascade');
         });
+
+        DB::table('settings')->insert([
+            [
+                'key' => 'active_days',
+                'value' => json_encode(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']),
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'day_start',
+                'value' => '07:00',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'day_end',
+                'value' => '21:00',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'school_year',
+                'value' => '2026-2027',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'semester',
+                'value' => '1st',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'semester_name',
+                'value' => 'First Semester 2026-2027',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'config_locked',
+                'value' => '1',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'maintenance_mode',
+                'value' => '0',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+            [
+                'key' => 'default_slot_duration',
+                'value' => '30',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ],
+        ]);
     }
 
     /**

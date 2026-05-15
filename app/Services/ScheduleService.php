@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Schedule;
 use App\Models\Room;
+use App\Models\Setting;
 use Carbon\Carbon;
 
 class ScheduleService
@@ -42,11 +43,13 @@ class ScheduleService
      */
     public function getRoomLoad($roomId)
     {
-        // Define your operational window (e.g., 7:30 AM to 5:30 PM = 10 hours)
-        // Based on your code: 12 hours * 60 mins * 6 days = 4,320 total mins
-        $totalAvailableMinutes = 12 * 60 * 6; 
+        $settings = Setting::getScheduleSettings();
+        $minutesPerDay = Carbon::parse($settings['start_time'])
+            ->diffInMinutes(Carbon::parse($settings['end_time']));
+        $totalAvailableMinutes = $minutesPerDay * max(1, count($settings['active_days']));
         
         $scheduledMinutes = Schedule::where('room_id', $roomId)
+            ->whereIn('day', $settings['active_days'])
             ->get()
             ->sum(function ($schedule) {
                 $start = Carbon::parse($schedule->start_time);

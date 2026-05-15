@@ -345,12 +345,18 @@ class Schedule extends Model
         return $scheduleStart >= $dayStart && $scheduleEnd <= $dayEnd;
     }
 
+    public function isOnActiveScheduleDay(): bool
+    {
+        return Setting::dayIsActive((string) $this->day);
+    }
+
     /**
      * Validate schedule before saving
      */
     public function isValid(): bool
     {
-        return $this->isWithinOperationalHours()
+        return $this->isOnActiveScheduleDay()
+            && $this->isWithinOperationalHours()
             && $this->respectsLunchBreak()
             && $this->isCompatible();
     }
@@ -364,6 +370,10 @@ class Schedule extends Model
 
         if (!$this->isWithinOperationalHours()) {
             $errors[] = 'Schedule is outside operational hours.';
+        }
+
+        if (!$this->isOnActiveScheduleDay()) {
+            $errors[] = 'Schedule day is disabled in global settings.';
         }
 
         if (!$this->respectsLunchBreak()) {

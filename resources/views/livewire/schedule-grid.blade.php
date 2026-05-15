@@ -3,14 +3,21 @@
     x-init="initializeGrid()" 
     class="relative w-full h-full bg-white/40 dark:bg-slate-900/30 backdrop-blur-sm rounded-xl border border-slate-300 dark:border-slate-700 overflow-hidden shadow-sm"
 >
+    @php
+        $activeDays = array_values($days ?? []);
+        $activeDayCount = max(1, count($activeDays));
+        $minimumGridWidth = 'max(100%, calc(6rem + ' . ($activeDayCount * 8) . 'rem))';
+        $dayColumnWidth = "((100% - 6rem) / {$activeDayCount})";
+    @endphp
+
     {{-- SCROLLABLE GRID CONTAINER --}}
-    <div class="overflow-auto custom-scrollbar relative w-full h-full">
+    <div class="overflow-auto custom-scrollbar relative w-full h-full pb-16">
         
         {{-- MAIN GRID STRUCTURE --}}
-        <div class="relative inline-block w-full min-h-full">
+        <div class="relative inline-block min-h-full pb-14" style="width: {{ $minimumGridWidth }}; min-width: {{ $minimumGridWidth }};">
             
             {{-- BASE GRID: TIME SLOTS + DAYS --}}
-            <div class="grid gap-0 auto-rows-[45px]" style="grid-template-columns: 6rem repeat(6, 1fr);">
+            <div class="grid gap-0 auto-rows-[45px]" style="grid-template-columns: 6rem repeat({{ $activeDayCount }}, minmax(8rem, 1fr));">
                 
                 {{-- HEADER: TIME LABEL --}}
                 <div class="sticky top-0 left-0 z-30 h-14 flex items-center justify-center bg-gradient-to-b from-slate-900 to-slate-800 dark:from-slate-950 dark:to-slate-900 text-white text-[11px] font-black uppercase border-r-2 border-b-2 border-slate-700 dark:border-slate-600">
@@ -18,9 +25,9 @@
                 </div>
 
                 {{-- HEADER: DAY LABELS --}}
-                @foreach(['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'] as $dayLabel)
+                @foreach($activeDays as $dayFull)
                     <div class="sticky top-0 z-30 h-14 flex items-center justify-center bg-gradient-to-b from-slate-900 to-slate-800 dark:from-slate-950 dark:to-slate-900 text-white text-[11px] font-black uppercase border-r-2 border-b-2 border-slate-700 dark:border-slate-600">
-                        {{ $dayLabel }}
+                        {{ $dayLabels[$dayFull] ?? strtoupper(substr($dayFull, 0, 3)) }}
                     </div>
                 @endforeach
 
@@ -31,8 +38,8 @@
                         {{ $slot['display'] }}
                     </div>
 
-                    {{-- DAY CELLS (6 columns) --}}
-                    @foreach(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as $dayIndex => $dayFull)
+                    {{-- DAY CELLS --}}
+                    @foreach($activeDays as $dayIndex => $dayFull)
                         @php
                             $isLunch = $slot['isLunch'] ?? false;
                             $cellKey = "{$dayFull}-{$slot['start']}";
@@ -71,14 +78,14 @@
             </div>
 
             {{-- ABSOLUTE POSITIONED SCHEDULE BLOCKS LAYER --}} 
-            <div class="absolute inset-0 pointer-events-none overflow-hidden" style="top: 3.5rem;">
+            <div class="absolute inset-x-0 pointer-events-none overflow-visible" style="top: 3.5rem; bottom: 3.5rem;">
                 
                 {{-- LUNCH BREAK BAR (MINIMALIST FULL-WIDTH) --}}
                 @php
                     // Calculate lunch break position based on dayStart
                     $gridStart = \Carbon\Carbon::parse($dayStart);
-                    $lunchStart = \Carbon\Carbon::parse('12:00:00');
-                    $lunchEnd = \Carbon\Carbon::parse('13:00:00');
+                    $lunchStart = \Carbon\Carbon::parse($lunchStart);
+                    $lunchEnd = \Carbon\Carbon::parse($lunchEnd);
                     
                     $minutesFromStart = $gridStart->diffInMinutes($lunchStart);
                     
@@ -147,11 +154,11 @@
 
                         // 4. Day Index for Horizontal placement
                         $dayFull = $schedule->day;
-                        $dayIndex = array_search($dayFull, ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']);
+                        $dayIndex = array_search($dayFull, $activeDays, true);
                         if ($dayIndex === false) continue;
                         
                         // 5. Column positioning math
-                        $oneDayColumn = "((100% - 6rem) / 6)";
+                        $oneDayColumn = $dayColumnWidth;
                         
                         // Calculate Overlaps for side-by-side display
                         $overlappingSchedules = $this->getSchedulesAtSlot($dayFull, $schedule->start_time, $schedule->end_time);

@@ -10,6 +10,7 @@ use App\Models\Faculty;
 use App\Models\Subject;
 use App\Models\SettingChangeLog;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 use Carbon\Carbon;
 
 class GlobalSettings extends Component
@@ -19,6 +20,7 @@ class GlobalSettings extends Component
     
     // Institutional time settings
     public $day_start, $day_end, $school_year, $semester, $semester_name;
+    public array $active_days = [];
     
     // Access Control & Audit
     public $config_locked = true;
@@ -56,17 +58,20 @@ class GlobalSettings extends Component
      */
     private function loadAllSettings()
     {
-        $this->day_start = Setting::where('key', 'day_start')->first()?->value ?? '07:00';
-        $this->day_end = Setting::where('key', 'day_end')->first()?->value ?? '21:00';
-        $this->school_year = Setting::where('key', 'school_year')->first()?->value ?? '2026-2027';
-        $this->semester = Setting::where('key', 'semester')->first()?->value ?? '1st';
-        $this->semester_name = Setting::where('key', 'semester_name')->first()?->value ?? 'First Semester 2026-2027';
+        $scheduleSettings = Setting::getScheduleSettings();
+
+        $this->active_days = $scheduleSettings['active_days'];
+        $this->day_start = $scheduleSettings['start_time'];
+        $this->day_end = $scheduleSettings['end_time'];
+        $this->school_year = Setting::getValue('school_year', '2026-2027');
+        $this->semester = Setting::getValue('semester', '1st');
+        $this->semester_name = Setting::getValue('semester_name', 'First Semester 2026-2027');
         
         // Access control
-        $this->config_locked = (bool)Setting::where('key', 'config_locked')->first()?->value ?? true;
+        $this->config_locked = Setting::isConfigLocked();
         
         // Maintenance mode
-        $this->maintenance_mode = (bool)Setting::where('key', 'maintenance_mode')->first()?->value ?? false;
+        $this->maintenance_mode = Setting::getBoolean('maintenance_mode', false);
     }
 
     /**
@@ -113,18 +118,29 @@ class GlobalSettings extends Component
         $conflicts = [];
         $newStart = Carbon::parse($this->day_start);
         $newEnd = Carbon::parse($this->day_end);
-        $oldStart = Carbon::parse(Setting::where('key', 'day_start')->first()?->value ?? '07:00');
-        $oldEnd = Carbon::parse(Setting::where('key', 'day_end')->first()?->value ?? '21:00');
+        $activeDays = Setting::normalizeActiveDays($this->active_days);
 
         // Get all schedules
-        $schedules = Schedule::all();
+        $schedules = Schedule::with('subject:id,subject_code')->get();
 
         foreach ($schedules as $schedule) {
             $scheduleStart = Carbon::parse($schedule->start_time);
             $scheduleEnd = Carbon::parse($schedule->end_time);
 
+            if (!in_array($schedule->day, $activeDays, true)) {
+                $conflicts[] = [
+                    'schedule_id' => $schedule->id,
+                    'subject_code' => $schedule->subject?->subject_code ?? 'Unknown',
+                    'day' => $schedule->day,
+                    'time' => $scheduleStart->format('H:i') . ' - ' . $scheduleEnd->format('H:i'),
+                    'issue' => 'is scheduled on a disabled day',
+                ];
+
+                continue;
+            }
+
             // Check if schedule starts before new day start
-            if ($scheduleStart < $newStart && $scheduleStart >= $oldStart) {
+            if ($scheduleStart < $newStart) {
                 $conflicts[] = [
                     'schedule_id' => $schedule->id,
                     'subject_code' => $schedule->subject?->subject_code ?? 'Unknown',
@@ -135,7 +151,7 @@ class GlobalSettings extends Component
             }
 
             // Check if schedule ends after new day end
-            if ($scheduleEnd > $newEnd && $scheduleEnd <= $oldEnd) {
+            if ($scheduleEnd > $newEnd) {
                 $conflicts[] = [
                     'schedule_id' => $schedule->id,
                     'subject_code' => $schedule->subject?->subject_code ?? 'Unknown',
@@ -203,9 +219,13 @@ class GlobalSettings extends Component
             'school_year'   => 'required|string|min:4',
             'semester'      => 'required|in:1st,2nd,Summer',
             'semester_name' => 'required|string|min:3',
+            'active_days'   => 'required|array|min:1',
+            'active_days.*' => ['required', 'string', Rule::in(Setting::ALL_SCHEDULE_DAYS)],
             'day_start'     => 'required|date_format:H:i',
             'day_end'       => 'required|date_format:H:i|after:day_start',
         ]);
+
+        $this->active_days = Setting::normalizeActiveDays($this->active_days);
 
         // NEW: Validate 30-minute increments
         if (!$this->validateAllTimeIncrements()) {
@@ -252,6 +272,7 @@ class GlobalSettings extends Component
                     'school_year'   => $this->school_year,
                     'semester'      => $this->semester,
                     'semester_name' => $this->semester_name,
+                    'active_days'   => json_encode($this->active_days),
                     'day_start'     => $this->day_start,
                     'day_end'       => $this->day_end,
                 ];
@@ -321,7 +342,10 @@ class GlobalSettings extends Component
                 // 1. Archive current schedules
                 DB::table('schedule_archives')->insert([
                     'semester_name' => $this->semester_name,
+                    'school_year' => $this->school_year,
+                    'total_schedules' => $currentSchedules->count(),
                     'schedule_data' => $currentSchedules->toJson(),
+                    'archived_by' => auth()->id(),
                     'archived_at'   => now(),
                     'created_at'    => now(),
                     'updated_at'    => now(),
@@ -361,6 +385,7 @@ class GlobalSettings extends Component
             'brickDuration' => self::BRICK_DURATION,
             'lunchStart' => self::LUNCH_START,
             'lunchEnd' => self::LUNCH_END,
+            'availableDays' => Setting::ALL_SCHEDULE_DAYS,
         ])->layout('layouts.app');
     }
 }

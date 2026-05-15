@@ -150,6 +150,33 @@
                 </div>
             </div>
 
+            <!-- ACTIVE SCHEDULE DAYS -->
+            <div class="mb-6">
+                <div class="mb-3 flex items-center justify-between gap-3">
+                    <label class="text-[10px] font-black text-slate-500 dark:text-slate-400 uppercase tracking-widest">Active Schedule Days</label>
+                    <span class="text-[10px] font-bold text-slate-400 dark:text-slate-500">{{ count($active_days) }} active</span>
+                </div>
+                <div class="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
+                    @foreach($availableDays as $day)
+                        <label class="flex min-h-12 items-center gap-2 rounded-xl border border-slate-200/70 bg-slate-50/60 px-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-700 transition dark:border-slate-700/70 dark:bg-slate-800/50 dark:text-slate-200 {{ $config_locked ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:border-blue-300 hover:bg-blue-50/60 dark:hover:border-blue-800 dark:hover:bg-blue-950/20' }}">
+                            <input
+                                type="checkbox"
+                                value="{{ $day }}"
+                                wire:model.live="active_days"
+                                {{ $config_locked ? 'disabled' : '' }}
+                                class="rounded border-slate-300 bg-white text-blue-600 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900">
+                            <span class="truncate">{{ $day }}</span>
+                        </label>
+                    @endforeach
+                </div>
+                @error('active_days')
+                    <span class="text-[10px] text-red-500 font-bold mt-2 uppercase block">{{ $message }}</span>
+                @enderror
+                @error('active_days.*')
+                    <span class="text-[10px] text-red-500 font-bold mt-2 uppercase block">{{ $message }}</span>
+                @enderror
+            </div>
+
             <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                 <!-- DAY START TIME -->
                 <div>
