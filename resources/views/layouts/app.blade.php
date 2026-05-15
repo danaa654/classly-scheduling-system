@@ -11,125 +11,285 @@
     @livewireStyles
 
     <style>
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        /* ─── Scrollbars ─────────────────────────────────────────────── */
+        .custom-scrollbar::-webkit-scrollbar { width: 3px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 99px; }
         .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #334155; }
+
         [x-cloak] { display: none !important; }
 
-        /* Smooth sidebar */
-        #app-sidebar {
-            width: 4rem; /* 64px collapsed */
-            transition: width 400ms cubic-bezier(0.4, 0, 0.2, 1);
-            will-change: width;
-        }
-        #app-sidebar.sidebar-expanded {
-            width: 16rem; /* 256px expanded */
+        /* ─── CSS variables ──────────────────────────────────────────── */
+        :root {
+            --sidebar-collapsed-w: 64px;
+            --sidebar-expanded-w: 240px;
+            --sidebar-bg: #0b1120;
+            --sidebar-border: rgba(255,255,255,0.05);
+            --sidebar-duration: 280ms;
+            --sidebar-ease: cubic-bezier(0.4, 0, 0.2, 1);
+            --blue-glow: rgba(59, 130, 246, 0.35);
         }
 
-        /* Sidebar label text: hidden when collapsed, shown when expanded */
-        .sidebar-label {
-            max-width: 0;
+        /* ─── Layout shell ───────────────────────────────────────────── */
+        #layout-shell {
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* ─── Sidebar ────────────────────────────────────────────────── */
+        #app-sidebar {
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            width: var(--sidebar-collapsed-w);
+            min-width: var(--sidebar-collapsed-w);
+            height: 100vh;
+            background: var(--sidebar-bg);
+            border-right: 1px solid var(--sidebar-border);
+            transition: width var(--sidebar-duration) var(--sidebar-ease),
+                        min-width var(--sidebar-duration) var(--sidebar-ease);
+            will-change: width;
+            z-index: 50;
+            overflow: hidden;
+        }
+
+        /* Expanded: hover or pinned */
+        #app-sidebar.is-expanded,
+        #app-sidebar:hover {
+            width: var(--sidebar-expanded-w);
+            min-width: var(--sidebar-expanded-w);
+        }
+
+        /* ─── Label reveal ───────────────────────────────────────────── */
+        .nav-label {
             opacity: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            max-width: 0;
+            transition: opacity 200ms ease 60ms,
+                        max-width var(--sidebar-duration) var(--sidebar-ease);
+            pointer-events: none;
+            font-size: 13px;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+        }
+
+        #app-sidebar.is-expanded .nav-label,
+        #app-sidebar:hover .nav-label {
+            opacity: 1;
+            max-width: 180px;
+            pointer-events: auto;
+        }
+
+        /* ─── Section heading ────────────────────────────────────────── */
+        .nav-section-heading {
+            opacity: 0;
+            max-height: 0;
+            overflow: hidden;
+            transition: opacity 200ms ease 60ms,
+                        max-height var(--sidebar-duration) var(--sidebar-ease);
+        }
+        #app-sidebar.is-expanded .nav-section-heading,
+        #app-sidebar:hover .nav-section-heading {
+            opacity: 1;
+            max-height: 32px;
+        }
+
+        /* ─── User info strip ────────────────────────────────────────── */
+        .sidebar-user-text {
+            opacity: 0;
+            max-width: 0;
             overflow: hidden;
             white-space: nowrap;
-            transition: max-width 400ms cubic-bezier(0.4, 0, 0.2, 1),
-                        opacity 300ms ease 80ms;
-            display: inline-block;
+            transition: opacity 200ms ease 60ms,
+                        max-width var(--sidebar-duration) var(--sidebar-ease);
         }
-        #app-sidebar.sidebar-expanded .sidebar-label {
-            max-width: 200px;
+        #app-sidebar.is-expanded .sidebar-user-text,
+        #app-sidebar:hover .sidebar-user-text {
             opacity: 1;
+            max-width: 160px;
         }
 
-        /* Section header labels */
-        .sidebar-section-label {
-            max-height: 0;
+        /* ─── Chevron (submenu arrow) ────────────────────────────────── */
+        .nav-chevron {
             opacity: 0;
+            max-width: 0;
             overflow: hidden;
-            transition: max-height 400ms cubic-bezier(0.4, 0, 0.2, 1),
-                        opacity 300ms ease 80ms;
+            transition: opacity 200ms ease 60ms,
+                        max-width var(--sidebar-duration) var(--sidebar-ease),
+                        transform 200ms ease;
         }
-        #app-sidebar.sidebar-expanded .sidebar-section-label {
-            max-height: 40px;
+        #app-sidebar.is-expanded .nav-chevron,
+        #app-sidebar:hover .nav-chevron {
             opacity: 1;
+            max-width: 28px;
+        }
+        .nav-chevron.is-open {
+            transform: rotate(180deg);
         }
 
-        /* Divider shown only when collapsed */
-        .sidebar-divider-collapsed {
-            opacity: 1;
-            transition: opacity 200ms ease;
-        }
-        #app-sidebar.sidebar-expanded .sidebar-divider-collapsed {
+        /* ─── Pin button ─────────────────────────────────────────────── */
+        .pin-btn {
             opacity: 0;
             pointer-events: none;
+            transition: opacity 200ms ease 60ms;
         }
-
-        /* Submenu toggle arrow */
-        .sidebar-chevron {
-            max-width: 0;
-            opacity: 0;
-            overflow: hidden;
-            transition: max-width 400ms cubic-bezier(0.4, 0, 0.2, 1),
-                        opacity 300ms ease 80ms;
-        }
-        #app-sidebar.sidebar-expanded .sidebar-chevron {
-            max-width: 40px;
+        #app-sidebar.is-expanded .pin-btn,
+        #app-sidebar:hover .pin-btn {
             opacity: 1;
+            pointer-events: auto;
         }
 
-        /* Submenu container */
-        .sidebar-submenu {
+        /* ─── Submenu ────────────────────────────────────────────────── */
+        .nav-submenu {
+            overflow: hidden;
             max-height: 0;
             opacity: 0;
-            overflow: hidden;
-            transition: max-height 350ms cubic-bezier(0.4, 0, 0.2, 1),
-                        opacity 250ms ease;
+            transition: max-height 260ms var(--sidebar-ease),
+                        opacity 200ms ease;
         }
-        .sidebar-submenu.submenu-open {
-            max-height: 200px;
+        .nav-submenu.is-open {
+            max-height: 180px;
             opacity: 1;
         }
 
-        /* Icon margin: only when expanded */
-        .sidebar-icon {
-            transition: margin-right 400ms cubic-bezier(0.4, 0, 0.2, 1),
-                        width 400ms cubic-bezier(0.4, 0, 0.2, 1);
-            margin-right: 0;
-            width: 100%;
+        /* ─── Nav item icon centering ────────────────────────────────── */
+        .nav-item-icon {
+            flex-shrink: 0;
+            width: 20px;
             display: flex;
+            align-items: center;
             justify-content: center;
         }
-        #app-sidebar.sidebar-expanded .sidebar-icon {
-            margin-right: 0.75rem;
-            width: auto;
+
+        /* ─── Active glow ────────────────────────────────────────────── */
+        .nav-link-active {
+            background: rgba(59, 130, 246, 0.15) !important;
+            border: 1px solid rgba(59, 130, 246, 0.25) !important;
+            color: #93c5fd !important;
+            box-shadow: 0 0 0 0 transparent;
         }
 
-        /* Bottom user info */
-        .sidebar-user-info {
-            max-width: 0;
+        /* ─── Tooltip (collapsed only) ───────────────────────────────── */
+        .nav-tooltip {
+            position: absolute;
+            left: calc(var(--sidebar-collapsed-w) + 10px);
+            top: 50%;
+            transform: translateY(-50%);
+            background: #1e293b;
+            color: #e2e8f0;
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            padding: 5px 10px;
+            border-radius: 8px;
+            white-space: nowrap;
+            pointer-events: none;
             opacity: 0;
-            overflow: hidden;
-            transition: max-width 400ms cubic-bezier(0.4, 0, 0.2, 1),
-                        opacity 300ms ease 80ms;
+            border: 1px solid rgba(255,255,255,0.07);
+            transition: opacity 120ms ease;
+            z-index: 200;
         }
-        #app-sidebar.sidebar-expanded .sidebar-user-info {
+        .nav-link-wrap:hover .nav-tooltip {
+            opacity: 1;
+        }
+        #app-sidebar.is-expanded .nav-tooltip,
+        #app-sidebar:hover .nav-tooltip {
+            display: none;
+        }
+
+        /* ─── Logo wordmark ──────────────────────────────────────────── */
+        .logo-wordmark {
+            opacity: 0;
+            max-width: 0;
+            overflow: hidden;
+            white-space: nowrap;
+            transition: opacity 200ms ease 60ms,
+                        max-width var(--sidebar-duration) var(--sidebar-ease);
+        }
+        #app-sidebar.is-expanded .logo-wordmark,
+        #app-sidebar:hover .logo-wordmark {
+            opacity: 1;
             max-width: 160px;
-            opacity: 1;
         }
-        .sidebar-user-arrow {
-            max-width: 0;
-            opacity: 0;
+
+        /* ─── Mobile overlay ─────────────────────────────────────────── */
+        #sidebar-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 40;
+            backdrop-filter: blur(2px);
+        }
+
+        @media (max-width: 768px) {
+            #app-sidebar {
+                position: fixed;
+                top: 0;
+                left: 0;
+                height: 100vh;
+                transform: translateX(-100%);
+                transition: transform var(--sidebar-duration) var(--sidebar-ease),
+                            width var(--sidebar-duration) var(--sidebar-ease);
+                width: var(--sidebar-expanded-w) !important;
+                min-width: var(--sidebar-expanded-w) !important;
+            }
+            #app-sidebar.mobile-open {
+                transform: translateX(0);
+            }
+            #app-sidebar.mobile-open .nav-label,
+            #app-sidebar.mobile-open .nav-section-heading,
+            #app-sidebar.mobile-open .sidebar-user-text,
+            #app-sidebar.mobile-open .nav-chevron,
+            #app-sidebar.mobile-open .pin-btn,
+            #app-sidebar.mobile-open .logo-wordmark {
+                opacity: 1;
+                max-width: 200px;
+                max-height: 40px;
+                pointer-events: auto;
+            }
+            #sidebar-overlay.active { display: block; }
+            #layout-content {
+                margin-left: 0 !important;
+            }
+        }
+
+        /* ─── Main content ───────────────────────────────────────────── */
+        #layout-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
             overflow: hidden;
-            transition: max-width 350ms ease, opacity 250ms ease;
         }
-        #app-sidebar.sidebar-expanded .sidebar-user-arrow {
-            max-width: 24px;
+
+        /* ─── Glow dot (active indicator) ───────────────────────────── */
+        .active-pip {
+            position: absolute;
+            left: 0;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 3px;
+            height: 18px;
+            border-radius: 0 3px 3px 0;
+            background: #3b82f6;
+            box-shadow: 0 0 8px rgba(59,130,246,0.7);
+        }
+
+        /* ─── Subtle noise texture overlay on sidebar ────────────────── */
+        #app-sidebar::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+            pointer-events: none;
             opacity: 0.4;
+            z-index: 0;
         }
-        #app-sidebar.sidebar-expanded .sidebar-user-arrow:hover {
-            opacity: 1;
-        }
+        #app-sidebar > * { position: relative; z-index: 1; }
     </style>
 
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -144,13 +304,13 @@
                     timer: 3000,
                     timerProgressBar: true,
                     didOpen: (toast) => {
-                        toast.style.zIndex = "10000"; 
-                        toast.addEventListener('mouseenter', Swal.stopTimer)
-                        toast.addEventListener('mouseleave', Swal.resumeTimer)
+                        toast.style.zIndex = "10000";
+                        toast.addEventListener('mouseenter', Swal.stopTimer);
+                        toast.addEventListener('mouseleave', Swal.resumeTimer);
                     }
                 });
                 Toast.fire({
-                    icon: data.type, 
+                    icon: data.type,
                     title: data.message,
                     text: data.detail || '',
                     background: document.documentElement.classList.contains('dark') ? '#0f172a' : '#ffffff',
@@ -160,237 +320,379 @@
         });
     </script>
 </head>
-<body 
-    x-data="{ 
+<body
+    x-data="{
         darkMode: localStorage.getItem('theme') === 'dark',
+        sidebarPinned: localStorage.getItem('sidebar-pinned') === 'true',
+        mobileOpen: false,
         toggleTheme() {
             this.darkMode = !this.darkMode;
             localStorage.setItem('theme', this.darkMode ? 'dark' : 'light');
+        },
+        togglePin() {
+            this.sidebarPinned = !this.sidebarPinned;
+            localStorage.setItem('sidebar-pinned', this.sidebarPinned);
+            const sidebar = document.getElementById('app-sidebar');
+            if (this.sidebarPinned) {
+                sidebar.classList.add('is-expanded');
+            } else {
+                sidebar.classList.remove('is-expanded');
+            }
+        },
+        openMobile() {
+            this.mobileOpen = true;
+            document.getElementById('app-sidebar').classList.add('mobile-open');
+            document.getElementById('sidebar-overlay').classList.add('active');
+        },
+        closeMobile() {
+            this.mobileOpen = false;
+            document.getElementById('app-sidebar').classList.remove('mobile-open');
+            document.getElementById('sidebar-overlay').classList.remove('active');
         }
     }"
+    x-init="
+        if (sidebarPinned) {
+            document.getElementById('app-sidebar').classList.add('is-expanded');
+        }
+        $watch('darkMode', val => document.documentElement.classList.toggle('dark', val));
+    "
     :class="{ 'dark': darkMode }"
-    class="font-sans antialiased text-slate-900 dark:text-white bg-[#E6E6E6] dark:bg-[#020617] transition-colors duration-500"
+    class="font-sans antialiased text-slate-900 dark:text-white bg-slate-100 dark:bg-[#020617] transition-colors duration-300"
 >
 
-    <div class="relative flex h-screen overflow-hidden">
-        
-        {{-- Sidebar: CSS-driven smooth hover expand/collapse --}}
-        <aside 
-            id="app-sidebar"
-            class="bg-[#0f172a] text-white flex flex-col h-screen shrink-0 border-r border-slate-800 z-40 relative"
-            onmouseenter="this.classList.add('sidebar-expanded')"
-            onmouseleave="this.classList.remove('sidebar-expanded'); this.querySelectorAll('.sidebar-submenu').forEach(function(m){ m.classList.remove('submenu-open'); }); this.querySelectorAll('.sidebar-chevron').forEach(function(c){ c.classList.remove('rotate-180'); });"
-        >
-            {{-- Logo --}}
-            <div class="px-3 h-16 flex items-center overflow-hidden shrink-0 border-b border-slate-800/50">
-                <div class="flex items-center gap-3">
-                    <div class="w-9 h-9 bg-blue-600 rounded-xl flex items-center justify-center shrink-0 shadow-[0_0_15px_rgba(37,99,235,0.4)]">
-                        <span class="text-lg font-black text-white">C</span>
-                    </div>
-                    <div class="sidebar-user-info flex flex-col">
-                        <h1 class="text-lg font-black tracking-tighter text-white leading-none uppercase">Classly<span class="text-blue-500">.</span></h1>
-                        <p class="text-[7px] text-slate-500 font-black uppercase tracking-[0.2em]">Academy OS</p>
-                    </div>
+{{-- Mobile overlay --}}
+<div id="sidebar-overlay" @click="closeMobile()"></div>
+
+<div id="layout-shell">
+
+    {{-- ═══════════════════════════════════════════════════
+         SIDEBAR
+    ═══════════════════════════════════════════════════ --}}
+    <aside id="app-sidebar">
+
+        {{-- ── Logo ── --}}
+        <div class="flex items-center h-16 px-4 border-b shrink-0" style="border-color: var(--sidebar-border);">
+            <div class="flex items-center gap-3 w-full overflow-hidden">
+                {{-- Icon mark --}}
+                <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-white font-black text-sm"
+                     style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%); box-shadow: 0 0 16px rgba(37,99,235,0.5);">
+                    C
+                </div>
+                {{-- Wordmark --}}
+                <div class="logo-wordmark flex flex-col leading-none">
+                    <span class="text-white font-black text-[15px] tracking-tight uppercase">Classly<span class="text-blue-500">.</span></span>
+                    <span class="text-slate-600 font-bold text-[8px] uppercase tracking-[0.2em] mt-0.5">Academy OS</span>
+                </div>
+                {{-- Spacer + pin --}}
+                <div class="ml-auto pin-btn shrink-0">
+                    <button @click="togglePin()" title="Pin sidebar"
+                        class="p-1.5 rounded-md transition-all duration-150 text-slate-600 hover:text-blue-400 hover:bg-white/5"
+                        :class="{ 'text-blue-400': sidebarPinned }">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
+                            <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
+                        </svg>
+                    </button>
                 </div>
             </div>
-
-            {{-- Nav --}}
-            <nav class="flex-1 px-2 space-y-1.5 overflow-y-auto pt-4 custom-scrollbar">
-                <div class="sidebar-section-label px-3 pb-2">
-                    <p class="text-[9px] font-black text-slate-600 uppercase tracking-widest">General Navigation</p>
-                </div>
-
-                <a href="{{ route('dashboard') }}" wire:navigate
-                    class="relative flex items-center p-3 rounded-2xl transition-all duration-300 group {{ request()->routeIs('dashboard') ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
-                    @if(request()->routeIs('dashboard')) <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> @endif
-                    <span class="text-xl sidebar-icon transition-transform group-hover:scale-110">📊</span>
-                    <span class="sidebar-label font-bold text-[14px] tracking-tight">Dashboard</span>
-                </a>
-
-                @if(auth()->user()->role === 'admin')
-                <a href="/manage-users" wire:navigate 
-                    class="relative flex items-center p-3 rounded-2xl transition-all duration-300 group {{ request()->is('manage-users*') ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
-                    @if(request()->is('manage-users*')) <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> @endif
-                    <span class="text-xl sidebar-icon transition-transform group-hover:scale-110">👥</span>
-                    <span class="sidebar-label font-bold text-[14px] tracking-tight">Manage Users</span>
-                </a>
-                @endif
-
-                <a href="/manage-rooms" wire:navigate 
-                    class="relative flex items-center p-3 rounded-2xl transition-all duration-300 group {{ request()->is('manage-rooms*') ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
-                    @if(request()->is('manage-rooms*')) <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> @endif
-                    <span class="text-xl sidebar-icon transition-transform group-hover:scale-110">🏫</span>
-                    <span class="sidebar-label font-bold text-[14px] tracking-tight">Manage Rooms</span>
-                </a>
-
-                <a href="/faculty" wire:navigate 
-                    class="relative flex items-center p-3 rounded-2xl transition-all duration-300 group {{ request()->is('faculty') ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
-                    @if(request()->is('faculty')) <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> @endif
-                    <span class="text-xl sidebar-icon transition-transform group-hover:scale-110">👨‍🏫</span>
-                    <span class="sidebar-label font-bold text-[14px] tracking-tight">Faculty List</span>
-                </a>
-
-                <a href="{{ route('subjects') }}" wire:navigate 
-                    class="relative flex items-center p-3 rounded-2xl transition-all duration-300 group {{ request()->routeIs('subjects*') ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
-                    @if(request()->routeIs('subjects*')) <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> @endif
-                    <span class="text-xl sidebar-icon transition-transform group-hover:scale-110">📚</span>
-                    <span class="sidebar-label font-bold text-[14px] tracking-tight">Subjects</span>
-                </a>
-
-                <div class="sidebar-section-label px-3 pb-2 pt-6">
-                    <p class="text-[9px] font-black text-slate-600 uppercase tracking-widest">Academic Tools</p>
-                </div>
-                <div class="sidebar-divider-collapsed border-t border-slate-800/40 my-2"></div>
-
-                <div data-mastergrid>
-                    
-                    <div class="relative group">
-                        <a href="{{ route('master-grid') }}" wire:navigate 
-                           class="relative flex items-center p-3 rounded-2xl transition-all duration-300 
-                           {{ request()->is('master-grid*', 'block-schedule*', 'faculty-load*') 
-                              ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' 
-                              : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
-                            
-                            @if(request()->is('master-grid*', 'block-schedule*', 'faculty-load*')) 
-                                <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> 
-                            @endif
-                            
-                            <span class="text-xl sidebar-icon transition-transform group-hover:scale-110">📅</span>
-                            <span class="sidebar-label font-bold text-[14px] tracking-tight">Master Grid</span>
-                            
-                            <span class="sidebar-chevron ml-auto cursor-pointer p-1 hover:bg-white/10 rounded-md" 
-                                  onclick="event.preventDefault(); this.closest('[data-mastergrid]').querySelector('.sidebar-submenu').classList.toggle('submenu-open'); this.classList.toggle('rotate-180')">
-                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
-                            </span>
-                        </a>
-                    </div>
-
-                    <div class="sidebar-submenu mt-2 ml-6 space-y-1 border-l-2 border-white/20 pl-4 {{ request()->is('master-grid*', 'block-schedule*', 'faculty-load*') ? 'submenu-open' : '' }}">
-                        
-                        <a href="{{ route('master-grid') }}" wire:navigate 
-                        class="flex items-center p-2 rounded-xl text-[13px] transition-all {{ request()->routeIs('master-grid') ? 'text-white font-bold bg-white/10' : 'text-blue-100/60 hover:text-white hover:bg-white/5' }}">
-                            <span class="mr-2">🏠</span>
-                            <span>Room View</span>
-                        </a>
-
-                        <a href="{{ route('faculty-loading') }}" wire:navigate 
-                        class="flex items-center p-2 rounded-xl text-[13px] transition-all {{ request()->routeIs('faculty-loading') ? 'text-white font-bold bg-white/10' : 'text-blue-100/60 hover:text-white hover:bg-white/5' }}">
-                            <span class="mr-2">✒️</span>
-                            <span>Faculty Info</span>
-                        </a>
-
-                        <a href="{{ route('block-schedule') }}" wire:navigate 
-                        class="flex items-center p-2 rounded-xl text-[13px] transition-all {{ request()->routeIs('block-schedule') ? 'text-white font-bold bg-white/10' : 'text-blue-100/60 hover:text-white hover:bg-white/5' }}">
-                            <span class="mr-2">📚</span>
-                            <span>Block Schedule</span>
-                        </a>
-                    </div>
-                </div>
-
-                @if(in_array(auth()->user()->role, ['admin', 'registrar']))
-                <a href="{{ route('settings') }}" wire:navigate 
-                    class="relative flex items-center p-3 rounded-2xl transition-all duration-300 group {{ request()->routeIs('settings') ? 'bg-blue-600 text-white shadow-[0_0_20px_rgba(37,99,235,0.3)]' : 'text-slate-400 hover:bg-slate-800/50 hover:text-slate-100' }}">
-                    @if(request()->routeIs('settings')) <span class="absolute left-0 w-1 h-6 bg-white rounded-r-full"></span> @endif
-                    <span class="text-xl sidebar-icon transition-transform group-hover:scale-110">⚙️</span>
-                    <span class="sidebar-label font-bold text-[14px] tracking-tight">Settings</span>
-                </a>
-                @endif
-            </nav>
-
-            {{-- Bottom user area --}}
-            <div class="shrink-0 p-2 border-t border-slate-800/50 bg-[#0f172a]">
-                <a href="/manage-account" wire:navigate 
-                   class="flex items-center gap-3 p-3 rounded-2xl bg-slate-400/5 hover:bg-slate-400/10 transition-all duration-500 group border border-slate-700/30 hover:border-blue-500/40 backdrop-blur-md shadow-sm">
-                    
-                    <div class="relative shrink-0">
-                        <div class="w-9 h-9 rounded-xl bg-slate-700/50 group-hover:bg-blue-600 text-slate-300 group-hover:text-white flex items-center justify-center text-[10px] font-black transition-all duration-500 border border-slate-600/30">
-                            {{ auth()->user()->initials() }}
-                        </div>
-                        <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-500 border-2 border-[#0f172a] rounded-full"></div>
-                    </div>
-
-                    <div class="sidebar-user-info flex flex-col min-w-0">
-                        <span class="text-[10px] font-black text-slate-300 group-hover:text-blue-400 uppercase tracking-[0.12em] leading-none mb-1 transition-colors">
-                            Manage Account
-                        </span>
-                        <span class="text-[9px] font-bold text-slate-500 uppercase tracking-widest truncate group-hover:text-slate-300 transition-colors">
-                            {{ auth()->user()->role }}
-                        </span>
-                    </div>
-
-                    <span class="sidebar-user-arrow ml-auto group-hover:opacity-100 group-hover:translate-x-1 transition-all duration-300 text-slate-400 group-hover:text-blue-400">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
-                        </svg>
-                    </span>
-                </a>
-            </div>
-        </aside>
-
-        <div class="flex-1 flex flex-col min-w-0">
-            <header class="h-16 flex items-center justify-between px-10 bg-[#0f172a] text-white shrink-0 z-30 shadow-2xl relative border-b border-slate-800/50">
-                <div class="flex flex-col">
-                    <h3 class="text-base font-black text-slate-100 tracking-tight uppercase">Professional Academy of the Philippines</h3>
-                    <p class="text-[9px] text-blue-500 font-black uppercase tracking-[0.3em] leading-tight mt-0.5">Academic Personnel Management</p>
-                </div>
-
-                <div class="flex items-center gap-6">
-                    <div @click="toggleTheme()" class="cursor-pointer p-2.5 rounded-2xl transition-all group bg-slate-800/40 border border-slate-700 hover:border-blue-500/50">
-                        <svg x-show="darkMode" x-cloak class="w-5 h-5 text-yellow-400 drop-shadow-[0_0_8px_rgba(250,204,21,0.6)]" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1a1 1 0 112 0v1a2 2 0 11-4 0 1 1 0 112 0zM13 10a3 3 0 11-6 0 3 3 0 016 0z"></path>
-                        </svg>
-                        <svg x-show="!darkMode" x-cloak class="w-5 h-5 text-slate-400" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M9.663 17h4.674M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
-                        </svg>
-                    </div>
-
-                    @livewire('notification-center')
-
-                    <div class="flex items-center gap-4 pl-6 border-l border-slate-800">
-                        <div class="text-right hidden md:block">
-                            <p class="text-[12px] font-black text-white leading-none uppercase tracking-tighter">{{ auth()->user()->name }}</p>
-                            <p class="text-[9px] text-blue-500 font-black uppercase mt-1 tracking-widest">{{ auth()->user()->role }}</p>
-                        </div>
-                        <div class="w-10 h-10 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-700 flex items-center justify-center text-white text-[11px] font-black shadow-lg border border-white/10 transition-transform hover:scale-105">
-                            {{ auth()->user()->initials() }}
-                        </div>
-                    </div>
-
-                    <form method="POST" action="{{ route('logout') }}">
-                        @csrf
-                        <button type="submit" class="p-2 text-slate-500 hover:text-rose-500 transition-colors duration-300">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-                            </svg>
-                        </button>
-                    </form>
-                </div>
-            </header>
-
-            <main class="flex-1 overflow-y-auto custom-scrollbar bg-[#E6E6E6] dark:bg-[#020617] p-8">
-                {{ $slot }}
-            </main>
         </div>
+
+        {{-- ── Navigation ── --}}
+        <nav class="flex-1 overflow-y-auto custom-scrollbar px-2 py-3 space-y-0.5">
+
+            {{-- Section: General --}}
+            <div class="nav-section-heading px-2 pb-1 pt-2">
+                <p class="text-[9px] font-black text-slate-600 uppercase tracking-[0.18em]">General</p>
+            </div>
+
+            {{-- Dashboard --}}
+            <div class="nav-link-wrap relative">
+                <a href="{{ route('dashboard') }}" wire:navigate
+                    class="relative flex items-center gap-3 px-2 py-2.5 rounded-xl transition-all duration-150 group
+                    {{ request()->routeIs('dashboard')
+                        ? 'nav-link-active'
+                        : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent' }}">
+                    @if(request()->routeIs('dashboard'))
+                        <span class="active-pip"></span>
+                    @endif
+                    <span class="nav-item-icon text-base transition-transform duration-150 group-hover:scale-110">📊</span>
+                    <span class="nav-label">Dashboard</span>
+                </a>
+                <span class="nav-tooltip">Dashboard</span>
+            </div>
+
+            {{-- Manage Users (admin only) --}}
+            @if(auth()->user()->role === 'admin')
+            <div class="nav-link-wrap relative">
+                <a href="/manage-users" wire:navigate
+                    class="relative flex items-center gap-3 px-2 py-2.5 rounded-xl transition-all duration-150 group
+                    {{ request()->is('manage-users*')
+                        ? 'nav-link-active'
+                        : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent' }}">
+                    @if(request()->is('manage-users*'))
+                        <span class="active-pip"></span>
+                    @endif
+                    <span class="nav-item-icon text-base transition-transform duration-150 group-hover:scale-110">👥</span>
+                    <span class="nav-label">Manage Users</span>
+                </a>
+                <span class="nav-tooltip">Manage Users</span>
+            </div>
+            @endif
+
+            {{-- Manage Rooms --}}
+            <div class="nav-link-wrap relative">
+                <a href="/manage-rooms" wire:navigate
+                    class="relative flex items-center gap-3 px-2 py-2.5 rounded-xl transition-all duration-150 group
+                    {{ request()->is('manage-rooms*')
+                        ? 'nav-link-active'
+                        : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent' }}">
+                    @if(request()->is('manage-rooms*'))
+                        <span class="active-pip"></span>
+                    @endif
+                    <span class="nav-item-icon text-base transition-transform duration-150 group-hover:scale-110">🏫</span>
+                    <span class="nav-label">Manage Rooms</span>
+                </a>
+                <span class="nav-tooltip">Rooms</span>
+            </div>
+
+            {{-- Faculty --}}
+            <div class="nav-link-wrap relative">
+                <a href="/faculty" wire:navigate
+                    class="relative flex items-center gap-3 px-2 py-2.5 rounded-xl transition-all duration-150 group
+                    {{ request()->is('faculty')
+                        ? 'nav-link-active'
+                        : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent' }}">
+                    @if(request()->is('faculty'))
+                        <span class="active-pip"></span>
+                    @endif
+                    <span class="nav-item-icon text-base transition-transform duration-150 group-hover:scale-110">👨‍🏫</span>
+                    <span class="nav-label">Faculty List</span>
+                </a>
+                <span class="nav-tooltip">Faculty</span>
+            </div>
+
+            {{-- Subjects --}}
+            <div class="nav-link-wrap relative">
+                <a href="{{ route('subjects') }}" wire:navigate
+                    class="relative flex items-center gap-3 px-2 py-2.5 rounded-xl transition-all duration-150 group
+                    {{ request()->routeIs('subjects*')
+                        ? 'nav-link-active'
+                        : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent' }}">
+                    @if(request()->routeIs('subjects*'))
+                        <span class="active-pip"></span>
+                    @endif
+                    <span class="nav-item-icon text-base transition-transform duration-150 group-hover:scale-110">📚</span>
+                    <span class="nav-label">Subjects</span>
+                </a>
+                <span class="nav-tooltip">Subjects</span>
+            </div>
+
+            {{-- Divider --}}
+            <div class="my-2 border-t" style="border-color: var(--sidebar-border);"></div>
+
+            {{-- Section: Academic Tools --}}
+            <div class="nav-section-heading px-2 pb-1 pt-1">
+                <p class="text-[9px] font-black text-slate-600 uppercase tracking-[0.18em]">Academic Tools</p>
+            </div>
+
+            {{-- Master Grid (with submenu) --}}
+            <div x-data="{ submenuOpen: {{ request()->is('master-grid*', 'block-schedule*', 'faculty-load*') ? 'true' : 'false' }} }">
+                <div class="nav-link-wrap relative">
+                    <div class="relative flex items-center gap-3 px-2 py-2.5 rounded-xl transition-all duration-150 group cursor-pointer
+                        {{ request()->is('master-grid*', 'block-schedule*', 'faculty-load*')
+                            ? 'nav-link-active'
+                            : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent' }}"
+                        @click="
+                            const sidebar = document.getElementById('app-sidebar');
+                            const isVisible = sidebar.classList.contains('is-expanded') || sidebar.matches(':hover');
+                            if (isVisible) {
+                                submenuOpen = !submenuOpen;
+                            } else {
+                                window.location.href = '{{ route('master-grid') }}';
+                            }
+                        ">
+                        @if(request()->is('master-grid*', 'block-schedule*', 'faculty-load*'))
+                            <span class="active-pip"></span>
+                        @endif
+                        <span class="nav-item-icon text-base transition-transform duration-150 group-hover:scale-110">📅</span>
+                        <span class="nav-label flex-1">Master Grid</span>
+                        <span class="nav-chevron ml-auto" :class="{ 'is-open': submenuOpen }">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                        </span>
+                    </div>
+                    <span class="nav-tooltip">Master Grid</span>
+                </div>
+
+                {{-- Submenu --}}
+                <div class="nav-submenu pl-2 mt-0.5 space-y-0.5" :class="{ 'is-open': submenuOpen }">
+                    <div class="ml-6 pl-3 border-l space-y-0.5" style="border-color: rgba(59,130,246,0.2);">
+                        <a href="{{ route('master-grid') }}" wire:navigate
+                            class="flex items-center gap-2 px-2 py-2 rounded-lg text-[12px] font-semibold transition-all duration-150
+                            {{ request()->routeIs('master-grid') ? 'text-blue-300 bg-blue-500/10' : 'text-slate-500 hover:text-slate-200 hover:bg-white/5' }}">
+                            <span class="text-sm">🏠</span>
+                            <span class="nav-label" style="font-size:12px;">Room View</span>
+                        </a>
+                        <a href="{{ route('faculty-loading') }}" wire:navigate
+                            class="flex items-center gap-2 px-2 py-2 rounded-lg text-[12px] font-semibold transition-all duration-150
+                            {{ request()->routeIs('faculty-loading') ? 'text-blue-300 bg-blue-500/10' : 'text-slate-500 hover:text-slate-200 hover:bg-white/5' }}">
+                            <span class="text-sm">✒️</span>
+                            <span class="nav-label" style="font-size:12px;">Faculty Info</span>
+                        </a>
+                        <a href="{{ route('block-schedule') }}" wire:navigate
+                            class="flex items-center gap-2 px-2 py-2 rounded-lg text-[12px] font-semibold transition-all duration-150
+                            {{ request()->routeIs('block-schedule') ? 'text-blue-300 bg-blue-500/10' : 'text-slate-500 hover:text-slate-200 hover:bg-white/5' }}">
+                            <span class="text-sm">📚</span>
+                            <span class="nav-label" style="font-size:12px;">Block Schedule</span>
+                        </a>
+                    </div>
+                </div>
+            </div>
+
+            {{-- Settings (admin/registrar only) --}}
+            @if(in_array(auth()->user()->role, ['admin', 'registrar']))
+            <div class="nav-link-wrap relative">
+                <a href="{{ route('settings') }}" wire:navigate
+                    class="relative flex items-center gap-3 px-2 py-2.5 rounded-xl transition-all duration-150 group
+                    {{ request()->routeIs('settings')
+                        ? 'nav-link-active'
+                        : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent' }}">
+                    @if(request()->routeIs('settings'))
+                        <span class="active-pip"></span>
+                    @endif
+                    <span class="nav-item-icon text-base transition-transform duration-150 group-hover:scale-110">⚙️</span>
+                    <span class="nav-label">Settings</span>
+                </a>
+                <span class="nav-tooltip">Settings</span>
+            </div>
+            @endif
+
+        </nav>
+
+        {{-- ── Bottom: User + Logout ── --}}
+        <div class="shrink-0 border-t p-2 space-y-1" style="border-color: var(--sidebar-border);">
+            {{-- Account link --}}
+            <div class="nav-link-wrap relative">
+                <a href="/manage-account" wire:navigate
+                    class="flex items-center gap-3 px-2 py-2.5 rounded-xl transition-all duration-150 group
+                           text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent">
+                    <div class="relative shrink-0">
+                        <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-blue-600 to-indigo-700 flex items-center justify-center text-white font-black text-[10px]">
+                            {{ auth()->user()->initials() }}
+                        </div>
+                        <span class="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-500 border border-[var(--sidebar-bg)]"></span>
+                    </div>
+                    <div class="sidebar-user-text flex flex-col leading-none overflow-hidden">
+                        <span class="text-[11px] font-bold text-slate-300 group-hover:text-blue-300 transition-colors truncate">Manage Account</span>
+                        <span class="text-[9px] font-semibold text-slate-600 uppercase tracking-widest mt-0.5">{{ auth()->user()->role }}</span>
+                    </div>
+                </a>
+                <span class="nav-tooltip">Account</span>
+            </div>
+
+            {{-- Logout --}}
+            <div class="nav-link-wrap relative">
+                <form method="POST" action="{{ route('logout') }}" class="w-full">
+                    @csrf
+                    <button type="submit"
+                        class="w-full flex items-center gap-3 px-2 py-2.5 rounded-xl transition-all duration-150 group
+                               text-slate-600 hover:text-rose-400 hover:bg-rose-500/5 border border-transparent">
+                        <span class="nav-item-icon">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="w-[18px] h-[18px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+                            </svg>
+                        </span>
+                        <span class="nav-label text-rose-400/70 group-hover:text-rose-400">Sign Out</span>
+                    </button>
+                </form>
+                <span class="nav-tooltip">Sign Out</span>
+            </div>
+        </div>
+    </aside>
+
+    {{-- ═══════════════════════════════════════════════════
+         MAIN CONTENT
+    ═══════════════════════════════════════════════════ --}}
+    <div id="layout-content">
+
+        {{-- ── Top Header ── --}}
+        <header class="h-16 flex items-center justify-between px-6 md:px-8 shrink-0 z-30 border-b"
+                style="background: #0b1120; border-color: var(--sidebar-border);">
+
+            {{-- Mobile hamburger --}}
+            <button @click="openMobile()"
+                    class="md:hidden p-2 text-slate-400 hover:text-white transition-colors mr-3">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                </svg>
+            </button>
+
+            {{-- School name --}}
+            <div class="flex flex-col leading-tight">
+                <h3 class="text-[13px] font-black text-slate-100 tracking-tight uppercase hidden sm:block">
+                    Professional Academy of the Philippines
+                </h3>
+                <p class="text-[9px] text-blue-500 font-black uppercase tracking-[0.28em] leading-tight mt-0.5 hidden sm:block">
+                    Academic Personnel Management
+                </p>
+                <h3 class="text-[13px] font-black text-slate-100 tracking-tight uppercase sm:hidden">PAP</h3>
+            </div>
+
+            {{-- Right controls --}}
+            <div class="flex items-center gap-3">
+
+                {{-- Theme toggle --}}
+                <button @click="toggleTheme()"
+                        class="p-2 rounded-xl transition-all duration-150 text-slate-500 hover:text-slate-200 hover:bg-white/5 border border-slate-800 hover:border-slate-700">
+                    <svg x-show="darkMode" x-cloak class="w-4 h-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1a1 1 0 112 0v1a2 2 0 11-4 0 1 1 0 112 0zM13 10a3 3 0 11-6 0 3 3 0 016 0z"/>
+                    </svg>
+                    <svg x-show="!darkMode" x-cloak class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
+                    </svg>
+                </button>
+
+                {{-- Notifications --}}
+                @livewire('notification-center')
+
+                {{-- User pill --}}
+                <div class="flex items-center gap-3 pl-3 border-l border-slate-800">
+                    <div class="hidden md:flex flex-col items-end leading-tight">
+                        <span class="text-[12px] font-black text-white tracking-tight">{{ auth()->user()->name }}</span>
+                        <span class="text-[9px] text-blue-400 font-bold uppercase tracking-widest mt-0.5">{{ auth()->user()->role }}</span>
+                    </div>
+                    <div class="w-8 h-8 rounded-xl flex items-center justify-center text-white text-[10px] font-black border border-white/10 transition-transform hover:scale-105"
+                         style="background: linear-gradient(135deg, #2563eb, #4f46e5);">
+                        {{ auth()->user()->initials() }}
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        {{-- ── Page content ── --}}
+        <main class="flex-1 overflow-y-auto custom-scrollbar bg-slate-100 dark:bg-[#020617] p-6 md:p-8">
+            {{ $slot }}
+        </main>
     </div>
 
-    @livewireScripts
-</body>
-<div 
-    x-data="{ 
-        notifications: [], 
-        add(e) { 
+</div>{{-- #layout-shell --}}
+
+@livewireScripts
+
+{{-- Notification container --}}
+<div
+    x-data="{
+        notifications: [],
+        add(e) {
             const data = Array.isArray(e.detail) ? e.detail[0] : e.detail;
-            this.notifications.push({
-                id: Date.now(),
-                type: data.type || 'info',
-                title: data.title || 'Notification',
-                message: data.message,
-            });
-            setTimeout(() => { this.notifications.shift() }, 5000);
-        } 
-    }" 
+            this.notifications.push({ id: Date.now(), type: data.type || 'info', title: data.title || 'Notification', message: data.message });
+            setTimeout(() => { this.notifications.shift(); }, 5000);
+        }
+    }"
     @notify.window="add($event)"
-    class="fixed bottom-10 right-10 z-[200] flex flex-col gap-3 w-full max-w-sm"
+    class="fixed bottom-6 right-6 z-[200] flex flex-col gap-2 w-full max-w-sm pointer-events-none"
 >
 </div>
+
+</body>
 </html>

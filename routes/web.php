@@ -19,9 +19,11 @@ use App\Http\Controllers\DiagnosticController;
 
 
 
+
 Route::get('/', function () {
     return view('welcome');
 })->name('home');
+
 
 // All protected system routes
 Route::middleware(['auth'])->group(function () {
@@ -68,7 +70,6 @@ Route::get('/diagnostic/schedules', [DiagnosticController::class, 'checkSchedule
 Route::get('/diagnostic/block', [DiagnosticController::class, 'checkBlockSchedule']);
 Route::get('/diagnostic/subjects', [DiagnosticController::class, 'checkSubjects']);
 Route::get('/diagnostic/subject/{id}', [DiagnosticController::class, 'checkSubjectDetail']);
-
 
 
 });
