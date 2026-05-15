@@ -32,7 +32,10 @@ class FortifyServiceProvider extends ServiceProvider
         $this->configureRateLimiting();
 
         // Direct Fortify to your redirect logic in web.php
-        config(['fortify.home' => '/dashboard']);
+        config([
+    'fortify.home' => '/dashboard',
+    'auth.defaults.guard' => 'web',
+]);
     }
 
     /**
