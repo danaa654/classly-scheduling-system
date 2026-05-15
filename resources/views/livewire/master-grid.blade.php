@@ -1,4 +1,4 @@
-<div class="flex h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 overflow-hidden"
+<div class="master-grid-shell flex h-[calc(100vh-7rem)] min-h-[36rem] w-full max-w-full overflow-hidden rounded-none bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 shadow-xl shadow-slate-300/30 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:shadow-black/20 md:h-[calc(100vh-8rem)]"
      x-data="{
         roomsOpen: true,
         subjectsOpen: true,
@@ -18,10 +18,10 @@
         console.log('✅ CONFLICT MODAL STATE UPDATED:', conflictData);
      ">
 
-    <main class="flex-1 flex flex-col min-w-0 relative h-full">
+    <main class="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
 
         {{-- HEADER --}}
-        <header class="h-16 bg-white/50 dark:bg-slate-900/50 border-b-2 border-slate-300 dark:border-slate-700 backdrop-blur-md flex items-center justify-between px-6 z-20 shrink-0 shadow-md">
+        <header class="z-20 flex h-16 shrink-0 items-center justify-between border-b-2 border-slate-300 bg-white/70 px-4 shadow-md backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/60 sm:px-6">
             <div class="flex flex-col justify-center">
                 <h2 class="text-xl font-black text-slate-900 dark:text-slate-50 uppercase tracking-tight">
                     Master <span class="text-blue-600 dark:text-blue-400">Grid</span>
@@ -46,7 +46,7 @@
                 </div>
             </div>
 
-            <div class="flex items-center gap-3">
+            <div class="flex shrink-0 items-center gap-2 sm:gap-3">
                 <!-- AI GENERATION BUTTON -->
                 @if($canAutoGenerate ?? false)
                 <button 
@@ -83,16 +83,16 @@
         </header>
 
         {{-- MAIN CONTENT AREA --}}
-        <div class="flex-1 flex overflow-hidden gap-0">
+        <div class="flex min-h-0 min-w-0 flex-1 overflow-hidden gap-0">
 
             {{-- GRID AREA --}}
-            <main class="flex-1 overflow-hidden p-2">
+            <main class="min-w-0 flex-1 overflow-hidden p-2 md:p-3">
                 @include('livewire.schedule-grid')
             </main>
 
             {{-- SIDEBARS CONTAINER --}}
             <div 
-                class="flex overflow-hidden bg-white/40 dark:bg-slate-900/30 border-l-2 border-slate-300 dark:border-slate-700 backdrop-blur-md shadow-2xl transition-all"
+                class="master-grid-sidebars flex h-full max-w-[min(35rem,50vw)] shrink-0 overflow-hidden border-l-2 border-slate-300 bg-white/50 shadow-2xl backdrop-blur-md transition-all dark:border-slate-700 dark:bg-slate-900/30"
                 x-show="roomsOpen || subjectsOpen"
                 x-transition:enter="transition ease-out duration-300"
                 x-transition:enter-start="translate-x-full"

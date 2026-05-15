@@ -1,5 +1,5 @@
 {{-- Sidebar Container with Glassmorphism --}}
-<div class="flex h-full bg-white/30 dark:bg-slate-900/30 border-l-2 border-slate-300 dark:border-slate-700 overflow-hidden backdrop-blur-md"
+<div class="flex h-full max-w-full shrink-0 overflow-hidden border-l-2 border-slate-300 bg-white/30 backdrop-blur-md dark:border-slate-700 dark:bg-slate-900/30"
      @validateRoomSelection.window="validateAndHighlight()">
 
     {{-- SUBJECTS SIDEBAR --}}
@@ -10,7 +10,7 @@
          x-transition:leave="transition ease-in duration-200"
          x-transition:leave-start="translate-x-0 opacity-100"
          x-transition:leave-end="-translate-x-full opacity-0"
-         class="w-[280px] flex flex-col border-r-2 border-slate-300 dark:border-slate-700 bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl overflow-hidden"
+         class="flex w-[clamp(15.5rem,17vw,17.5rem)] shrink-0 flex-col overflow-hidden border-r-2 border-slate-300 bg-white/60 backdrop-blur-xl dark:border-slate-700 dark:bg-slate-900/60"
          @refreshGrid.window="$wire.$refresh()">
 
         {{-- HEADER --}}
@@ -235,7 +235,7 @@
          x-transition:leave="transition ease-in duration-200"
          x-transition:leave-start="translate-x-0 opacity-100"
          x-transition:leave-end="translate-x-full opacity-0"
-         class="w-[280px] flex flex-col bg-white/60 dark:bg-slate-900/60 backdrop-blur-xl overflow-hidden"
+         class="flex w-[clamp(15.5rem,17vw,17.5rem)] shrink-0 flex-col overflow-hidden bg-white/60 backdrop-blur-xl dark:bg-slate-900/60"
          x-data="{ 
         get isRoomActive() { return $wire.selectedRoomId !== null } 
             }"

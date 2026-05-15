@@ -354,6 +354,7 @@
         if (sidebarPinned) {
             document.getElementById('app-sidebar').classList.add('is-expanded');
         }
+        document.documentElement.classList.toggle('dark', darkMode);
         $watch('darkMode', val => document.documentElement.classList.toggle('dark', val));
     "
     :class="{ 'dark': darkMode }"
@@ -670,7 +671,7 @@
         </header>
 
         {{-- ── Page content ── --}}
-        <main class="flex-1 overflow-y-auto custom-scrollbar bg-slate-100 dark:bg-[#020617] p-6 md:p-8">
+        <main class="flex-1 min-w-0 overflow-y-auto overflow-x-hidden custom-scrollbar bg-slate-100 dark:bg-[#020617] p-6 md:p-8">
             {{ $slot }}
         </main>
     </div>

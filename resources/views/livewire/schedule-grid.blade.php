@@ -1,23 +1,26 @@
 ﻿<div 
     x-data="scheduleGridApp()" 
     x-init="initializeGrid()" 
-    class="relative w-full h-full bg-white/40 dark:bg-slate-900/30 backdrop-blur-sm rounded-xl border border-slate-300 dark:border-slate-700 overflow-hidden shadow-sm"
+    class="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-slate-300 bg-white/40 shadow-sm backdrop-blur-sm dark:border-slate-700 dark:bg-slate-900/30"
 >
     @php
         $activeDays = array_values($days ?? []);
         $activeDayCount = max(1, count($activeDays));
-        $minimumGridWidth = 'max(100%, calc(6rem + ' . ($activeDayCount * 8) . 'rem))';
-        $dayColumnWidth = "((100% - 6rem) / {$activeDayCount})";
+        $timeColumnWidthRem = 7;
+        $minimumDayColumnWidthRem = $activeDayCount >= 7 ? 10 : ($activeDayCount >= 6 ? 9.5 : 8.75);
+        $minimumGridWidthRem = $timeColumnWidthRem + ($activeDayCount * $minimumDayColumnWidthRem);
+        $minimumGridWidth = "max(100%, {$minimumGridWidthRem}rem)";
+        $dayColumnWidth = "((100% - {$timeColumnWidthRem}rem) / {$activeDayCount})";
     @endphp
 
     {{-- SCROLLABLE GRID CONTAINER --}}
-    <div class="overflow-auto custom-scrollbar relative w-full h-full pb-16">
+    <div class="schedule-grid-scroll custom-scrollbar relative min-h-0 w-full flex-1 overflow-auto overscroll-contain pb-16">
         
         {{-- MAIN GRID STRUCTURE --}}
-        <div class="relative inline-block min-h-full pb-14" style="width: {{ $minimumGridWidth }}; min-width: {{ $minimumGridWidth }};">
+        <div class="relative inline-block min-h-full pb-14" style="--time-col: {{ $timeColumnWidthRem }}rem; --day-min: {{ $minimumDayColumnWidthRem }}rem; width: {{ $minimumGridWidth }}; min-width: {{ $minimumGridWidth }};">
             
             {{-- BASE GRID: TIME SLOTS + DAYS --}}
-            <div class="grid gap-0 auto-rows-[45px]" style="grid-template-columns: 6rem repeat({{ $activeDayCount }}, minmax(8rem, 1fr));">
+            <div class="grid gap-0 auto-rows-[45px]" style="grid-template-columns: var(--time-col) repeat({{ $activeDayCount }}, minmax(var(--day-min), 1fr));">
                 
                 {{-- HEADER: TIME LABEL --}}
                 <div class="sticky top-0 left-0 z-30 h-14 flex items-center justify-center bg-gradient-to-b from-slate-900 to-slate-800 dark:from-slate-950 dark:to-slate-900 text-white text-[11px] font-black uppercase border-r-2 border-b-2 border-slate-700 dark:border-slate-600">
@@ -106,7 +109,7 @@
                         class="absolute left-0 right-0 pointer-events-none flex items-center justify-center bg-slate-200/60 dark:bg-slate-700/50 backdrop-blur-sm border-t-2 border-b-2 border-slate-400 dark:border-slate-600"
                         style="
                             top: calc(({{ $lunchSlotIndex }} * 45px) + 2px);
-                            left: 6rem;
+                            left: var(--time-col);
                             right: 0;
                             height: {{ $lunchHeightPx }}px;
                             z-index: 10;
@@ -213,7 +216,7 @@
                             top: calc(({{ $slotIndex }} * 45px) + 2px);
                             
                             /* Horizontal: Places class in correct day column */
-                            left: calc(6rem + ({{ $dayIndex }} * {!! $oneDayColumn !!}) + ({!! $oneDayColumn !!} * {{ $offsetFactor }}) + 2px);
+                            left: calc(var(--time-col) + ({{ $dayIndex }} * {!! $oneDayColumn !!}) + ({!! $oneDayColumn !!} * {{ $offsetFactor }}) + 2px);
                             
                             /* Width: Shrinks if there are overlaps */
                             width: calc(({!! $oneDayColumn !!} * {{ $widthFactor }}) - 4px);
@@ -556,6 +559,10 @@
     
     .custom-scrollbar::-webkit-scrollbar-thumb:hover {
         background: #94a3b8;
+    }
+
+    .schedule-grid-scroll {
+        scrollbar-gutter: stable;
     }
     
     @media (prefers-color-scheme: dark) {
