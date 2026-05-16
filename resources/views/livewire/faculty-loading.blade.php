@@ -1,17 +1,17 @@
 @php
     $summary = $facultySummary ?? [
-        'totalUnits' => 0,
-        'maxUnits' => 21,
-        'remainingUnits' => 21,
-        'overloadUnits' => 0,
+        'totalUnits'         => 0,
+        'maxUnits'           => 21,
+        'remainingUnits'     => 21,
+        'overloadUnits'      => 0,
         'utilizationPercent' => 0,
-        'majorCount' => 0,
-        'minorCount' => 0,
-        'majorUnits' => 0,
-        'minorUnits' => 0,
-        'averageMajorUnits' => 0,
-        'averageMinorUnits' => 0,
-        'scheduleCount' => 0,
+        'majorCount'         => 0,
+        'minorCount'         => 0,
+        'majorUnits'         => 0,
+        'minorUnits'         => 0,
+        'averageMajorUnits'  => 0,
+        'averageMinorUnits'  => 0,
+        'scheduleCount'      => 0,
     ];
 @endphp
 
@@ -27,38 +27,42 @@
                 message: toast.message || '',
                 timeout: null
             };
-
             this.toasts.push(item);
             item.timeout = setTimeout(() => this.removeToast(id), 4200);
         },
         removeToast(id) {
             const toast = this.toasts.find((item) => item.id === id);
-
             if (toast && toast.timeout) {
                 clearTimeout(toast.timeout);
             }
-
             this.toasts = this.toasts.filter((item) => item.id !== id);
         },
         toastClasses(type) {
             return {
                 success: 'border-emerald-400/60 bg-emerald-500 text-white shadow-emerald-950/30',
                 warning: 'border-amber-300/70 bg-amber-500 text-slate-950 shadow-amber-950/20',
-                error: 'border-red-400/70 bg-red-600 text-white shadow-red-950/30'
+                error:   'border-red-400/70 bg-red-600 text-white shadow-red-950/30'
             }[type] || 'border-sky-400/60 bg-slate-900 text-white shadow-slate-950/30';
         },
         toastIcon(type) {
             return {
                 success: 'OK',
                 warning: '!',
-                error: '!'
+                error:   '!'
             }[type] || 'i';
         }
     }"
     x-on:toast.window="addToast($event.detail)"
     class="faculty-loading-shell h-[calc(100vh-7rem)] min-h-[36rem] overflow-hidden bg-slate-100 text-slate-950 dark:bg-[#06111f] dark:text-slate-100 md:h-[calc(100vh-8rem)]">
+
     <div class="flex h-full min-h-0 flex-col overflow-hidden lg:flex-row">
+
+        {{-- ============================================================ --}}
+        {{-- SIDEBAR — Faculty Roster                                      --}}
+        {{-- ============================================================ --}}
         <aside class="no-print flex max-h-[46vh] w-full shrink-0 flex-col border-b border-slate-200 bg-white/90 shadow-2xl shadow-slate-300/50 backdrop-blur-xl dark:border-white/10 dark:bg-[#071526]/95 dark:shadow-black/30 lg:h-full lg:max-h-none lg:w-[23rem] lg:border-b-0 lg:border-r">
+
+            {{-- Header --}}
             <div class="shrink-0 border-b border-white/10 p-4">
                 <div class="mb-4 flex items-center justify-between">
                     <div>
@@ -101,22 +105,24 @@
                 </div>
             </div>
 
+            {{-- Faculty List --}}
             <div class="custom-scrollbar flex-1 space-y-2 overflow-y-auto p-3">
                 @forelse($faculties as $faculty)
                     @php
-                        $units = (int) ($faculty->assigned_units ?? 0);
-                        $max = max(1, (int) ($faculty->max_units ?? 21));
-                        $percent = min(100, round(($units / $max) * 100));
-                        $ringColor = $percent >= 100 ? '#f43f5e' : ($percent >= 85 ? '#f59e0b' : '#38bdf8');
-                        $circumference = 2 * 3.14159 * 18;
+                        $units           = (int) ($faculty->assigned_units ?? 0);
+                        $max             = max(1, (int) ($faculty->max_units ?? 21));
+                        $percent         = min(100, round(($units / $max) * 100));
+                        $ringColor       = $percent >= 100 ? '#f43f5e' : ($percent >= 85 ? '#f59e0b' : '#38bdf8');
+                        $circumference   = 2 * 3.14159 * 18;
                         $strokeDashOffset = $circumference - ($percent / 100) * $circumference;
-                        $isSelected = (int) $selectedFacultyId === (int) $faculty->id;
+                        $isSelected      = (int) $selectedFacultyId === (int) $faculty->id;
                     @endphp
 
                     <div
                         wire:key="faculty-card-{{ $faculty->id }}"
                         x-data="{ open: false }"
                         class="group relative rounded-xl border transition duration-200 {{ $isSelected ? 'border-sky-300/70 bg-sky-400/12 shadow-lg shadow-sky-950/40' : 'border-white/10 bg-white/[0.055] hover:border-sky-300/50 hover:bg-white/[0.08]' }}">
+
                         <div class="flex items-center gap-3 p-3">
                             <button
                                 type="button"
@@ -125,7 +131,6 @@
                                 <span class="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-sky-400 to-blue-700 text-sm font-black text-white shadow-lg shadow-sky-950/40">
                                     {{ strtoupper(substr($faculty->full_name, 0, 1)) }}
                                 </span>
-
                                 <span class="min-w-0 flex-1">
                                     <span class="block truncate text-sm font-black uppercase tracking-tight text-white">
                                         {{ $faculty->full_name }}
@@ -140,6 +145,7 @@
                             </button>
 
                             <div class="flex shrink-0 items-center gap-2">
+                                {{-- Unit ring --}}
                                 <div class="relative h-12 w-12">
                                     <svg class="h-full w-full -rotate-90" viewBox="0 0 42 42" aria-hidden="true">
                                         <circle cx="21" cy="21" r="18" stroke="currentColor" stroke-width="3" fill="none" class="text-white/10"></circle>
@@ -162,6 +168,7 @@
                                     </div>
                                 </div>
 
+                                {{-- Actions dropdown --}}
                                 <button
                                     type="button"
                                     x-on:click.stop="open = !open"
@@ -199,6 +206,7 @@
                             </button>
                         </div>
                     </div>
+
                 @empty
                     <div class="flex h-48 items-center justify-center rounded-xl border border-dashed border-white/10 text-center">
                         <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-500">No faculty found</p>
@@ -207,8 +215,14 @@
             </div>
         </aside>
 
+        {{-- ============================================================ --}}
+        {{-- MAIN PANEL                                                    --}}
+        {{-- ============================================================ --}}
         <main class="print-area custom-scrollbar flex min-w-0 flex-1 flex-col overflow-y-auto bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.16),transparent_34%),linear-gradient(135deg,#f8fafc_0%,#eef6ff_48%,#e2e8f0_100%)] dark:bg-[radial-gradient(circle_at_top_right,rgba(14,165,233,0.18),transparent_34%),linear-gradient(135deg,#081526_0%,#0b1220_48%,#050914_100%)]">
+
             @if($currentFaculty)
+
+                {{-- Faculty Header + KPI cards --}}
                 <section class="border-b border-white/10 bg-white/[0.045] p-4 backdrop-blur-xl sm:p-6">
                     <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                         <div class="min-w-0">
@@ -217,7 +231,6 @@
                                 <span class="rounded-full border border-violet-300/30 bg-violet-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-violet-200">{{ $currentFaculty->teaching_specialization ?? 'Both' }}</span>
                                 <span class="rounded-full border border-emerald-300/30 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-200">{{ $currentFaculty->employment_type ?? 'Faculty' }}</span>
                             </div>
-
                             <h1 class="truncate text-2xl font-black uppercase tracking-tight text-white sm:text-4xl">
                                 {{ $currentFaculty->full_name }}
                             </h1>
@@ -239,6 +252,7 @@
                         </div>
                     </div>
 
+                    {{-- KPI Cards --}}
                     <div class="mt-5 grid gap-3 md:grid-cols-4">
                         <div class="rounded-xl border border-sky-300/20 bg-sky-400/10 p-4 shadow-xl shadow-sky-950/20">
                             <p class="text-[10px] font-black uppercase tracking-[0.2em] text-sky-200">Current Units</p>
@@ -280,10 +294,15 @@
                     @endif
                 </section>
 
+                {{-- Tab navigation --}}
                 <section class="no-print shrink-0 border-b border-white/10 bg-[#071526]/80 px-4 pt-4 backdrop-blur-xl sm:px-6">
                     <div class="flex gap-5 overflow-x-auto">
+                        {{--
+                            Tab counter shows grouped row count so it matches
+                            the visible table rows instead of raw DB schedule count.
+                        --}}
                         <button type="button" wire:click="toggleTab('subjects')" class="whitespace-nowrap border-b-2 px-1 pb-3 text-xs font-black uppercase tracking-widest transition {{ $activeTab === 'subjects' ? 'border-sky-300 text-sky-200' : 'border-transparent text-slate-500 hover:text-slate-200' }}">
-                            Assigned Subjects ({{ $assignedSchedules->count() }})
+                            Assigned Subjects ({{ $groupedAssignedSubjects->count() }})
                         </button>
                         <button type="button" wire:click="toggleTab('schedule')" class="whitespace-nowrap border-b-2 px-1 pb-3 text-xs font-black uppercase tracking-widest transition {{ $activeTab === 'schedule' ? 'border-sky-300 text-sky-200' : 'border-transparent text-slate-500 hover:text-slate-200' }}">
                             Schedule Overview
@@ -297,10 +316,15 @@
                     </div>
                 </section>
 
+                {{-- Tab content --}}
                 <section class="flex-1 p-4 sm:p-6">
+
+                    {{-- ------------------------------------------------ --}}
+                    {{-- TAB: Assigned Subjects                             --}}
+                    {{-- ------------------------------------------------ --}}
                     @if($activeTab === 'subjects')
                         <div class="overflow-hidden rounded-xl border border-white/10 bg-white/[0.045] shadow-2xl shadow-black/20 backdrop-blur-xl">
-                            @if($assignedSchedules->count() > 0)
+                            @if($groupedAssignedSubjects->count() > 0)
                                 <div class="custom-scrollbar overflow-x-auto">
                                     <table class="min-w-[960px] w-full text-left text-xs">
                                         <thead class="bg-white/[0.07] text-[10px] uppercase tracking-[0.18em] text-slate-400">
@@ -316,39 +340,75 @@
                                             </tr>
                                         </thead>
                                         <tbody class="divide-y divide-white/10">
-                                            @foreach($assignedSchedules as $schedule)
-                                                @php
-                                                    $subject = $schedule->subject;
-                                                    $room = $schedule->room;
-                                                    $groupDepartment = $schedule->department ?? $subject?->department ?? 'N/A';
-                                                    $groupMajor = $schedule->major ?? $subject?->major ?? 'N/A';
-                                                    $groupYear = $schedule->year_level ?? $subject?->year_level ?? 'N/A';
-                                                    $groupSection = $schedule->section ?? $subject?->section ?? 'N/A';
-                                                @endphp
+                                            {{--
+                                                Each $assignedSubject is one grouped offering.
+                                                Multi-day subjects appear as a SINGLE row with
+                                                all meeting days stacked in the Schedule cell.
+                                            --}}
+                                            @foreach($groupedAssignedSubjects as $assignedSubject)
+                                                <tr
+                                                    wire:key="assigned-row-{{ $assignedSubject['first_schedule_id'] }}"
+                                                    class="transition hover:bg-sky-400/5">
 
-                                                <tr wire:key="assigned-row-{{ $schedule->id }}" class="transition hover:bg-sky-400/5">
+                                                    {{-- Code + EDP --}}
                                                     <td class="px-4 py-3">
-                                                        <p class="font-black uppercase text-sky-200">{{ $subject?->subject_code ?? 'N/A' }}</p>
-                                                        <p class="mt-1 text-[10px] font-bold uppercase text-amber-200/80">{{ $subject?->edp_code ?? 'No EDP' }}</p>
+                                                        <p class="font-black uppercase text-sky-200">{{ $assignedSubject['subject_code'] }}</p>
+                                                        <p class="mt-1 text-[10px] font-bold uppercase text-amber-200/80">{{ $assignedSubject['edp_code'] }}</p>
                                                     </td>
+
+                                                    {{-- Subject description --}}
                                                     <td class="max-w-sm px-4 py-3">
-                                                        <p class="line-clamp-2 font-bold text-white">{{ $subject?->description ?? 'Untitled subject' }}</p>
+                                                        <p class="line-clamp-2 font-bold text-white">{{ $assignedSubject['description'] }}</p>
                                                     </td>
+
+                                                    {{-- Group label --}}
                                                     <td class="px-4 py-3 font-bold text-slate-300">
-                                                        {{ $groupDepartment }} / {{ $groupMajor }} / Y{{ $groupYear }} / {{ $groupSection }}
+                                                        {{ $assignedSubject['group'] }}
                                                     </td>
-                                                    <td class="px-4 py-3 font-bold text-slate-300">{{ $room?->room_name ?? 'No room' }}</td>
+
+                                                    {{-- Room --}}
                                                     <td class="px-4 py-3 font-bold text-slate-300">
-                                                        {{ $schedule->day }} / {{ \Carbon\Carbon::parse($schedule->start_time)->format('h:i A') }} - {{ \Carbon\Carbon::parse($schedule->end_time)->format('h:i A') }}
+                                                        {{ $assignedSubject['room'] }}
                                                     </td>
-                                                    <td class="px-4 py-3 text-center font-black text-white">{{ $subject?->units ?? 0 }}</td>
+
+                                                    {{--
+                                                        Schedule — unescaped so the <br> between
+                                                        meeting days renders correctly in one cell.
+                                                        The string is built from Carbon-formatted
+                                                        DB values only; no user HTML is involved.
+                                                    --}}
+                                                    <td class="px-4 py-3 font-bold leading-6 text-slate-300">
+                                                        {!! $assignedSubject['schedule'] !!}
+                                                    </td>
+
+                                                    {{-- Units --}}
+                                                    <td class="px-4 py-3 text-center font-black text-white">
+                                                        {{ $assignedSubject['units'] }}
+                                                    </td>
+
+                                                    {{-- Type badge --}}
                                                     <td class="px-4 py-3 text-center">
-                                                        <span class="rounded-full border px-2 py-1 text-[10px] font-black uppercase {{ ($subject?->type ?? '') === 'Major' ? 'border-amber-300/30 bg-amber-400/10 text-amber-100' : 'border-violet-300/30 bg-violet-400/10 text-violet-100' }}">
-                                                            {{ $subject?->type ?? 'N/A' }}
+                                                        <span class="rounded-full border px-2 py-1 text-[10px] font-black uppercase
+                                                            {{ $assignedSubject['type'] === 'Major'
+                                                                ? 'border-amber-300/30 bg-amber-400/10 text-amber-100'
+                                                                : 'border-violet-300/30 bg-violet-400/10 text-violet-100' }}">
+                                                            {{ $assignedSubject['type'] }}
                                                         </span>
                                                     </td>
+
+                                                    {{--
+                                                        Remove — targets the first schedule ID in the
+                                                        group. The removeSubject() action clears
+                                                        faculty_id on that specific schedule row.
+                                                        To remove ALL days at once, use
+                                                        removeSubjectGroup(array $ids) and pass
+                                                        $assignedSubject['schedule_ids'].
+                                                    --}}
                                                     <td class="px-4 py-3 text-right">
-                                                        <button type="button" wire:click="removeSubject({{ $schedule->id }})" class="rounded-lg border border-red-300/20 bg-red-400/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-red-100 transition hover:bg-red-400/20">
+                                                        <button
+                                                            type="button"
+                                                            wire:click="removeSubject({{ $assignedSubject['first_schedule_id'] }})"
+                                                            class="rounded-lg border border-red-300/20 bg-red-400/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-red-100 transition hover:bg-red-400/20">
                                                             Remove
                                                         </button>
                                                     </td>
@@ -368,6 +428,9 @@
                         </div>
                     @endif
 
+                    {{-- ------------------------------------------------ --}}
+                    {{-- TAB: Schedule Overview                             --}}
+                    {{-- ------------------------------------------------ --}}
                     @if($activeTab === 'schedule')
                         <div class="grid gap-4 xl:grid-cols-2">
                             @forelse($scheduleGroups as $day => $daySchedules)
@@ -402,6 +465,9 @@
                         </div>
                     @endif
 
+                    {{-- ------------------------------------------------ --}}
+                    {{-- TAB: Conflicts                                     --}}
+                    {{-- ------------------------------------------------ --}}
                     @if($activeTab === 'conflicts')
                         <div class="rounded-xl border border-white/10 bg-white/[0.045] p-4 shadow-xl shadow-black/20 backdrop-blur-xl">
                             <div class="mb-4 flex items-center justify-between">
@@ -423,6 +489,9 @@
                         </div>
                     @endif
 
+                    {{-- ------------------------------------------------ --}}
+                    {{-- TAB: Load Summary                                  --}}
+                    {{-- ------------------------------------------------ --}}
                     @if($activeTab === 'summary')
                         <div class="grid gap-4 lg:grid-cols-2">
                             <div class="rounded-xl border border-white/10 bg-white/[0.045] p-5 shadow-xl shadow-black/20 backdrop-blur-xl">
@@ -469,8 +538,11 @@
                             </div>
                         </div>
                     @endif
+
                 </section>
+
             @else
+                {{-- No faculty selected --}}
                 <div class="flex h-full min-h-0 flex-col items-center justify-center p-8 text-center">
                     <div class="rounded-2xl border border-white/10 bg-white/[0.045] p-8 shadow-2xl shadow-black/20 backdrop-blur-xl">
                         <p class="text-xs font-black uppercase tracking-[0.24em] text-sky-300">Faculty Loading</p>
@@ -484,12 +556,17 @@
         </main>
     </div>
 
+    {{-- ============================================================ --}}
+    {{-- ASSIGNMENT SLIDE-OVER PANEL                                   --}}
+    {{-- ============================================================ --}}
     <div
         x-cloak
         x-show="assignmentOpen"
         class="fixed inset-0 z-[80] overflow-hidden"
         aria-modal="true"
         role="dialog">
+
+        {{-- Backdrop --}}
         <div
             x-show="assignmentOpen"
             x-transition.opacity
@@ -497,6 +574,7 @@
             class="absolute inset-0 bg-slate-950/70 backdrop-blur-sm">
         </div>
 
+        {{-- Panel --}}
         <aside
             x-show="assignmentOpen"
             x-transition:enter="transition ease-out duration-300"
@@ -506,7 +584,9 @@
             x-transition:leave-start="translate-x-0 opacity-100"
             x-transition:leave-end="translate-x-full opacity-60"
             class="absolute right-0 top-0 flex h-full w-full max-w-3xl flex-col border-l border-sky-300/20 bg-[#071526]/95 shadow-2xl shadow-black/50 backdrop-blur-2xl">
+
             @if($currentFaculty)
+                {{-- Panel header --}}
                 <div class="shrink-0 border-b border-white/10 p-5">
                     <div class="flex items-start justify-between gap-4">
                         <div class="min-w-0">
@@ -514,7 +594,6 @@
                             <h2 class="mt-2 truncate text-2xl font-black uppercase tracking-tight text-white">{{ $currentFaculty->full_name }}</h2>
                             <p class="mt-1 text-xs font-bold text-slate-400">{{ $currentFaculty->department }} / {{ $currentFaculty->employment_type ?? 'Faculty' }} / {{ $currentFaculty->teaching_specialization ?? 'Both' }}</p>
                         </div>
-
                         <button type="button" wire:click="closeAssignmentPanel" class="rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-white/12">
                             Close
                         </button>
@@ -535,7 +614,9 @@
                         </div>
                         <div class="rounded-lg border {{ $summary['overloadUnits'] > 0 ? 'border-red-300/40 bg-red-400/10' : 'border-emerald-300/20 bg-emerald-400/10' }} p-3">
                             <p class="text-[9px] font-black uppercase tracking-wider {{ $summary['overloadUnits'] > 0 ? 'text-red-100' : 'text-emerald-100' }}">State</p>
-                            <p class="mt-1 text-sm font-black uppercase {{ $summary['overloadUnits'] > 0 ? 'text-red-100' : 'text-emerald-100' }}">{{ $summary['overloadUnits'] > 0 ? 'Overload' : 'Available' }}</p>
+                            <p class="mt-1 text-sm font-black uppercase {{ $summary['overloadUnits'] > 0 ? 'text-red-100' : 'text-emerald-100' }}">
+                                {{ $summary['overloadUnits'] > 0 ? 'Overload' : 'Available' }}
+                            </p>
                         </div>
                     </div>
 
@@ -546,6 +627,7 @@
                     @endif
                 </div>
 
+                {{-- Search & filters --}}
                 <div class="sticky top-0 z-10 shrink-0 border-b border-white/10 bg-[#071526]/95 p-4 backdrop-blur-2xl">
                     <div class="grid gap-3">
                         <input
@@ -601,27 +683,22 @@
                     </div>
                 </div>
 
+                {{-- Assignable schedules list --}}
                 <div class="custom-scrollbar flex-1 space-y-3 overflow-y-auto p-4">
-                    @forelse($availableSubjects as $schedule)
+                    @forelse($groupedAvailableSubjects as $group)
                         @php
-                            $subject = $schedule->subject;
-                            $room = $schedule->room;
-                            $department = $schedule->department ?? $subject?->department ?? 'N/A';
-                            $major = $schedule->major ?? $subject?->major ?? 'N/A';
-                            $year = $schedule->year_level ?? $subject?->year_level ?? 'N/A';
-                            $section = $schedule->section ?? $subject?->section ?? 'N/A';
-                            $assignedToCurrent = $schedule->faculty_id && (int) $schedule->faculty_id === (int) $currentFaculty->id;
-                            $assignedElsewhere = $schedule->faculty_id && !$assignedToCurrent;
-                            $isFinalized = $schedule->status === 'finalized';
+                            $assignedToCurrent = $group['faculty_id'] && (int) $group['faculty_id'] === (int) $currentFaculty->id;
+                            $assignedElsewhere = $group['faculty_id'] && ! $assignedToCurrent;
+                            $isFinalized       = $group['is_finalized'];
                         @endphp
 
-                        <article wire:key="assignable-schedule-{{ $schedule->id }}" class="rounded-xl border border-white/10 bg-white/[0.055] p-4 transition hover:border-sky-300/40 hover:bg-white/[0.075]">
+                        <article wire:key="assignable-group-{{ $group['first_schedule_id'] }}" class="rounded-xl border border-white/10 bg-white/[0.055] p-4 transition hover:border-sky-300/40 hover:bg-white/[0.075]">
                             <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                                 <div class="min-w-0 flex-1">
                                     <div class="flex flex-wrap items-center gap-2">
-                                        <span class="rounded-md border border-amber-300/30 bg-amber-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-amber-100">{{ $subject?->edp_code ?? 'No EDP' }}</span>
-                                        <span class="rounded-md border border-sky-300/30 bg-sky-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-sky-100">{{ $subject?->subject_code ?? 'N/A' }}</span>
-                                        <span class="rounded-md border px-2 py-1 text-[10px] font-black uppercase tracking-wider {{ ($subject?->type ?? '') === 'Major' ? 'border-amber-300/30 bg-amber-400/10 text-amber-100' : 'border-violet-300/30 bg-violet-400/10 text-violet-100' }}">{{ $subject?->type ?? 'N/A' }}</span>
+                                        <span class="rounded-md border border-amber-300/30 bg-amber-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-amber-100">{{ $group['edp_code'] }}</span>
+                                        <span class="rounded-md border border-sky-300/30 bg-sky-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-sky-100">{{ $group['subject_code'] }}</span>
+                                        <span class="rounded-md border px-2 py-1 text-[10px] font-black uppercase tracking-wider {{ $group['type'] === 'Major' ? 'border-amber-300/30 bg-amber-400/10 text-amber-100' : 'border-violet-300/30 bg-violet-400/10 text-violet-100' }}">{{ $group['type'] }}</span>
                                         @if($assignedToCurrent)
                                             <span class="rounded-md border border-emerald-300/30 bg-emerald-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-emerald-100">Assigned here</span>
                                         @elseif($assignedElsewhere)
@@ -629,25 +706,32 @@
                                         @else
                                             <span class="rounded-md border border-sky-300/20 bg-sky-400/10 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-sky-100">Unassigned</span>
                                         @endif
+                                        @if(count($group['schedule_ids']) > 1)
+                                            <span class="rounded-md border border-white/10 bg-white/8 px-2 py-1 text-[10px] font-black uppercase tracking-wider text-slate-300">{{ count($group['schedule_ids']) }} days</span>
+                                        @endif
                                     </div>
 
-                                    <h3 class="mt-3 line-clamp-2 text-base font-black text-white">{{ $subject?->description ?? 'Untitled subject' }}</h3>
+                                    <h3 class="mt-3 line-clamp-2 text-base font-black text-white">{{ $group['description'] }}</h3>
 
                                     <div class="mt-3 grid gap-2 text-[11px] font-bold uppercase tracking-wider text-slate-400 sm:grid-cols-2">
-                                        <p>Department: <span class="text-slate-200">{{ $department }}</span></p>
-                                        <p>Major: <span class="text-slate-200">{{ $major }}</span></p>
-                                        <p>Year / Section: <span class="text-slate-200">Y{{ $year }} / {{ $section }}</span></p>
-                                        <p>Room: <span class="text-slate-200">{{ $room?->room_name ?? 'No room' }}</span></p>
-                                        <p>Day: <span class="text-slate-200">{{ $schedule->day }}</span></p>
-                                        <p>Time: <span class="text-slate-200">{{ \Carbon\Carbon::parse($schedule->start_time)->format('h:i A') }} - {{ \Carbon\Carbon::parse($schedule->end_time)->format('h:i A') }}</span></p>
-                                        <p>Units: <span class="text-slate-200">{{ $subject?->units ?? 0 }}</span></p>
-                                        <p>Status: <span class="text-slate-200">{{ $schedule->faculty?->full_name ?? 'Unassigned' }}</span></p>
+                                        <p>Department: <span class="text-slate-200">{{ $group['department'] }}</span></p>
+                                        <p>Major: <span class="text-slate-200">{{ $group['major'] }}</span></p>
+                                        <p>Year / Section: <span class="text-slate-200">Y{{ $group['year'] }} / {{ $group['section'] }}</span></p>
+                                        <p>Room: <span class="text-slate-200">{{ $group['room'] }}</span></p>
+                                        <p>Day: <span class="text-slate-200">{{ $group['days'] }}</span></p>
+                                        <p>Time: <span class="text-slate-200">{{ $group['time'] }}</span></p>
+                                        <p>Units: <span class="text-slate-200">{{ $group['units'] }}</span></p>
+                                        <p>Status: <span class="text-slate-200">{{ $group['faculty_name'] ?? 'Unassigned' }}</span></p>
                                     </div>
                                 </div>
 
                                 <div class="flex shrink-0 flex-col gap-2 sm:w-40">
                                     @if($assignedToCurrent)
-                                        <button type="button" wire:click="removeSubject({{ $schedule->id }})" class="rounded-lg border border-red-300/20 bg-red-400/10 px-3 py-2 text-xs font-black uppercase tracking-widest text-red-100 transition hover:bg-red-400/20">
+                                        {{-- Remove all days in this group at once --}}
+                                        <button
+                                            type="button"
+                                            wire:click="removeSubjectGroup({{ json_encode($group['schedule_ids']) }})"
+                                            class="rounded-lg border border-red-300/20 bg-red-400/10 px-3 py-2 text-xs font-black uppercase tracking-widest text-red-100 transition hover:bg-red-400/20">
                                             Remove
                                         </button>
                                     @elseif($assignedElsewhere)
@@ -659,13 +743,20 @@
                                             Finalized
                                         </button>
                                     @else
-                                        <button type="button" wire:click="assignSubject({{ $schedule->id }})" wire:loading.attr="disabled" wire:target="assignSubject({{ $schedule->id }})" class="rounded-lg bg-sky-400 px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-950 shadow-lg shadow-sky-950/30 transition hover:bg-sky-300 active:scale-95 disabled:cursor-wait disabled:opacity-70">
+                                        {{-- Assign all days in this group at once --}}
+                                        <button
+                                            type="button"
+                                            wire:click="assignSubjectGroup({{ json_encode($group['schedule_ids']) }})"
+                                            wire:loading.attr="disabled"
+                                            wire:target="assignSubjectGroup"
+                                            class="rounded-lg bg-sky-400 px-3 py-2 text-xs font-black uppercase tracking-widest text-slate-950 shadow-lg shadow-sky-950/30 transition hover:bg-sky-300 active:scale-95 disabled:cursor-wait disabled:opacity-70">
                                             Assign
                                         </button>
                                     @endif
                                 </div>
                             </div>
                         </article>
+
                     @empty
                         <div class="flex h-64 flex-col items-center justify-center rounded-xl border border-dashed border-white/10 text-center">
                             <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-500">No schedules match the current filters</p>
@@ -677,6 +768,9 @@
         </aside>
     </div>
 
+    {{-- ============================================================ --}}
+    {{-- CONFLICT / OVERRIDE MODAL                                     --}}
+    {{-- ============================================================ --}}
     @if($conflictModalOpen)
         <div class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
             <div class="w-full max-w-lg rounded-2xl border border-amber-300/30 bg-[#081a2d] p-5 shadow-2xl shadow-black/50">
@@ -714,6 +808,9 @@
         </div>
     @endif
 
+    {{-- ============================================================ --}}
+    {{-- TOAST NOTIFICATIONS                                           --}}
+    {{-- ============================================================ --}}
     <div class="faculty-loading-toasts pointer-events-none fixed right-5 top-5 z-[120] w-[min(24rem,calc(100vw-2rem))] space-y-3">
         <template x-for="toast in toasts" :key="toast.id">
             <div
@@ -740,28 +837,16 @@
         </template>
     </div>
 
+    {{-- ============================================================ --}}
+    {{-- STYLES                                                        --}}
+    {{-- ============================================================ --}}
     <style>
-        [x-cloak] {
-            display: none !important;
-        }
+        [x-cloak] { display: none !important; }
 
-        .custom-scrollbar::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-
-        .custom-scrollbar::-webkit-scrollbar-track {
-            background: transparent;
-        }
-
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-            background: rgba(56, 189, 248, 0.28);
-            border-radius: 999px;
-        }
-
-        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-            background: rgba(56, 189, 248, 0.46);
-        }
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(56,189,248,0.28); border-radius: 999px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: rgba(56,189,248,0.46); }
 
         .line-clamp-2 {
             display: -webkit-box;
@@ -770,91 +855,55 @@
             overflow: hidden;
         }
 
+        /* Light-mode overrides */
         body:not(.dark) .faculty-loading-shell [class*="bg-[#071526]"],
         body:not(.dark) .faculty-loading-shell [class*="bg-[#081a2d]"],
-        body:not(.dark) .faculty-loading-shell [class*="bg-[#0b1b30]"] {
-            background-color: rgba(255, 255, 255, 0.92) !important;
-        }
+        body:not(.dark) .faculty-loading-shell [class*="bg-[#0b1b30]"] { background-color: rgba(255,255,255,0.92) !important; }
 
         body:not(.dark) .faculty-loading-shell [class*="bg-white/"],
-        body:not(.dark) .faculty-loading-shell [class*="bg-white/["] {
-            background-color: rgba(255, 255, 255, 0.72) !important;
-        }
+        body:not(.dark) .faculty-loading-shell [class*="bg-white/["] { background-color: rgba(255,255,255,0.72) !important; }
 
-        body:not(.dark) .faculty-loading-shell [class*="border-white/"] {
-            border-color: rgba(148, 163, 184, 0.38) !important;
-        }
+        body:not(.dark) .faculty-loading-shell [class*="border-white/"] { border-color: rgba(148,163,184,0.38) !important; }
 
         body:not(.dark) .faculty-loading-shell input,
         body:not(.dark) .faculty-loading-shell select {
-            background-color: rgba(255, 255, 255, 0.9) !important;
-            border-color: rgba(148, 163, 184, 0.45) !important;
+            background-color: rgba(255,255,255,0.9) !important;
+            border-color: rgba(148,163,184,0.45) !important;
             color: #0f172a !important;
         }
 
-        body:not(.dark) .faculty-loading-shell input::placeholder {
-            color: #94a3b8 !important;
-        }
+        body:not(.dark) .faculty-loading-shell input::placeholder { color: #94a3b8 !important; }
 
         body:not(.dark) .faculty-loading-shell .text-white,
         body:not(.dark) .faculty-loading-shell .text-slate-100,
-        body:not(.dark) .faculty-loading-shell .text-slate-200 {
-            color: #0f172a !important;
-        }
+        body:not(.dark) .faculty-loading-shell .text-slate-200 { color: #0f172a !important; }
 
-        body:not(.dark) .faculty-loading-shell .text-slate-300 {
-            color: #334155 !important;
-        }
-
+        body:not(.dark) .faculty-loading-shell .text-slate-300 { color: #334155 !important; }
         body:not(.dark) .faculty-loading-shell .text-slate-400,
-        body:not(.dark) .faculty-loading-shell .text-slate-500 {
-            color: #64748b !important;
-        }
+        body:not(.dark) .faculty-loading-shell .text-slate-500 { color: #64748b !important; }
 
         body:not(.dark) .faculty-loading-shell .text-sky-100,
         body:not(.dark) .faculty-loading-shell .text-sky-200,
-        body:not(.dark) .faculty-loading-shell .text-sky-300 {
-            color: #0369a1 !important;
-        }
+        body:not(.dark) .faculty-loading-shell .text-sky-300 { color: #0369a1 !important; }
 
         body:not(.dark) .faculty-loading-shell .text-emerald-100,
-        body:not(.dark) .faculty-loading-shell .text-emerald-200 {
-            color: #047857 !important;
-        }
+        body:not(.dark) .faculty-loading-shell .text-emerald-200 { color: #047857 !important; }
 
         body:not(.dark) .faculty-loading-shell .text-amber-100,
-        body:not(.dark) .faculty-loading-shell .text-amber-200 {
-            color: #a16207 !important;
-        }
+        body:not(.dark) .faculty-loading-shell .text-amber-200 { color: #a16207 !important; }
 
         body:not(.dark) .faculty-loading-shell .text-violet-100,
-        body:not(.dark) .faculty-loading-shell .text-violet-200 {
-            color: #6d28d9 !important;
-        }
+        body:not(.dark) .faculty-loading-shell .text-violet-200 { color: #6d28d9 !important; }
 
-        body:not(.dark) .faculty-loading-shell .text-red-100 {
-            color: #b91c1c !important;
-        }
+        body:not(.dark) .faculty-loading-shell .text-red-100 { color: #b91c1c !important; }
 
-        body:not(.dark) .faculty-loading-shell [class*="shadow-black"] {
-            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.12) !important;
-        }
+        body:not(.dark) .faculty-loading-shell [class*="shadow-black"] { box-shadow: 0 18px 45px rgba(15,23,42,0.12) !important; }
 
-        body:not(.dark) .faculty-loading-shell .faculty-loading-toasts .text-white {
-            color: #fff !important;
-        }
-
-        body:not(.dark) .faculty-loading-shell .bg-gradient-to-br.text-white {
-            color: #fff !important;
-        }
+        body:not(.dark) .faculty-loading-shell .faculty-loading-toasts .text-white { color: #fff !important; }
+        body:not(.dark) .faculty-loading-shell .bg-gradient-to-br.text-white { color: #fff !important; }
 
         @media print {
-            .no-print,
-            aside,
-            [role='dialog'] {
-                display: none !important;
-            }
-
+            .no-print, aside, [role='dialog'] { display: none !important; }
             .print-area {
                 display: block !important;
                 height: auto !important;
