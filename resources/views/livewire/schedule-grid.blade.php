@@ -6,30 +6,29 @@
     @php
         $activeDays = array_values($days ?? []);
         $activeDayCount = max(1, count($activeDays));
-        $timeColumnWidthRem = 7;
-        $minimumDayColumnWidthRem = $activeDayCount >= 7 ? 10 : ($activeDayCount >= 6 ? 9.5 : 8.75);
+        $timeColumnWidthRem = 5.5;
+        $minimumDayColumnWidthRem = $activeDayCount >= 7 ? 6.5 : ($activeDayCount >= 6 ? 7 : 7.5);
         $minimumGridWidthRem = $timeColumnWidthRem + ($activeDayCount * $minimumDayColumnWidthRem);
-        $minimumGridWidth = "max(100%, {$minimumGridWidthRem}rem)";
         $dayColumnWidth = "((100% - {$timeColumnWidthRem}rem) / {$activeDayCount})";
     @endphp
 
     {{-- SCROLLABLE GRID CONTAINER --}}
-    <div class="schedule-grid-scroll custom-scrollbar relative min-h-0 w-full flex-1 overflow-auto overscroll-contain pb-16">
+    <div class="schedule-grid-scroll custom-scrollbar relative min-h-0 w-full flex-1 overflow-auto overscroll-contain">
         
         {{-- MAIN GRID STRUCTURE --}}
-        <div class="relative inline-block min-h-full pb-14" style="--time-col: {{ $timeColumnWidthRem }}rem; --day-min: {{ $minimumDayColumnWidthRem }}rem; width: {{ $minimumGridWidth }}; min-width: {{ $minimumGridWidth }};">
+        <div class="relative w-full h-full min-h-full" style="--time-col: {{ $timeColumnWidthRem }}rem; --day-min: {{ $minimumDayColumnWidthRem }}rem; min-width: {{ $minimumGridWidthRem }}rem;">
             
             {{-- BASE GRID: TIME SLOTS + DAYS --}}
             <div class="grid gap-0 auto-rows-[45px]" style="grid-template-columns: var(--time-col) repeat({{ $activeDayCount }}, minmax(var(--day-min), 1fr));">
                 
                 {{-- HEADER: TIME LABEL --}}
-                <div class="sticky top-0 left-0 z-30 h-14 flex items-center justify-center bg-gradient-to-b from-slate-900 to-slate-800 dark:from-slate-950 dark:to-slate-900 text-white text-[11px] font-black uppercase border-r-2 border-b-2 border-slate-700 dark:border-slate-600">
+                <div class="sticky top-0 left-0 z-30 h-14 flex items-center justify-center bg-gradient-to-b from-slate-900 to-slate-800 dark:from-slate-950 dark:to-slate-900 text-white text-[13px] font-black uppercase tracking-widest border-r-2 border-b-2 border-slate-700 dark:border-slate-600">
                     Time
                 </div>
 
                 {{-- HEADER: DAY LABELS --}}
                 @foreach($activeDays as $dayFull)
-                    <div class="sticky top-0 z-30 h-14 flex items-center justify-center bg-gradient-to-b from-slate-900 to-slate-800 dark:from-slate-950 dark:to-slate-900 text-white text-[11px] font-black uppercase border-r-2 border-b-2 border-slate-700 dark:border-slate-600">
+                    <div class="sticky top-0 z-30 h-14 flex items-center justify-center bg-gradient-to-b from-slate-900 to-slate-800 dark:from-slate-950 dark:to-slate-900 text-white text-[13px] font-black uppercase tracking-widest border-r-2 border-b-2 border-slate-700 dark:border-slate-600">
                         {{ $dayLabels[$dayFull] ?? strtoupper(substr($dayFull, 0, 3)) }}
                     </div>
                 @endforeach
@@ -37,8 +36,13 @@
                 {{-- TIME SLOTS & DAY CELLS --}}
                 @foreach($displaySlots as $slotIndex => $slot)
                     {{-- TIME LABEL COLUMN --}}
-                    <div class="sticky left-0 z-20 h-[45px] flex items-center justify-center text-[11px] font-black uppercase border-r-2 border-b border-slate-300 dark:border-slate-700 bg-gradient-to-r from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-900 text-slate-700 dark:text-slate-300 px-1">
-                        {{ $slot['display'] }}
+                    <div class="sticky left-0 z-20 h-[45px] flex flex-col items-center justify-center border-r-2 border-b border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 bg-gradient-to-r from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-900 text-slate-700 dark:text-slate-300 px-1">
+                        <span class="text-[10px] font-black uppercase leading-tight text-center">
+                            {{ \Carbon\Carbon::parse($slot['start'])->format('g:i A') }} -
+                        </span>
+                        <span class="text-[10px] font-black uppercase leading-tight text-center">
+                            {{ \Carbon\Carbon::parse($slot['end'])->format('g:i A') }}
+                        </span>
                     </div>
 
                     {{-- DAY CELLS --}}
@@ -348,75 +352,8 @@
         </div>
     </div>
 
-    {{-- SCHEDULE DETAIL POPOVER --}}
-    <div 
-        id="schedulePopover" 
-        class="schedule-popover hidden fixed z-[9999] w-[26rem] max-h-[min(32rem,calc(100vh-2rem))] overflow-y-auto rounded-2xl border border-white/60 bg-white/85 p-4 shadow-2xl shadow-slate-950/20 backdrop-blur-2xl pointer-events-auto opacity-0 scale-95 transition-all duration-150 dark:border-slate-700/80 dark:bg-slate-900/90"
-        style="max-width: calc(100vw - 16px);"
-        @mouseenter="keepSchedulePopover()"
-        @mouseleave="schedulePopoverLeave()"
-    >
-        <div class="space-y-3">
-            <div class="flex items-start justify-between gap-3 border-b border-slate-200 pb-3 dark:border-slate-700">
-                <div class="flex-1 min-w-0">
-                    <div class="text-sm font-black uppercase text-slate-900 dark:text-white line-clamp-1" id="popCode"></div>
-                    <div class="mt-1 text-[11px] font-semibold leading-snug text-slate-600 dark:text-slate-300 line-clamp-2" id="popDesc"></div>
-                </div>
-                <span class="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[9px] font-black uppercase text-slate-700 dark:bg-slate-700 dark:text-slate-200" id="popType"></span>
-            </div>
-
-            <div class="grid grid-cols-2 gap-2 text-[10px]">
-                <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
-                    <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">EDP</span>
-                    <span class="mt-1 block truncate font-black text-slate-900 dark:text-slate-100" id="popEdp">-</span>
-                </div>
-                <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
-                    <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">Section</span>
-                    <span class="mt-1 block font-black text-slate-900 dark:text-slate-100" id="popSection">-</span>
-                </div>
-                <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
-                    <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">Type</span>
-                    <span class="mt-1 block font-black text-slate-900 dark:text-slate-100" id="popType2">-</span>
-                </div>
-                <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
-                    <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">Day</span>
-                    <span class="mt-1 block font-black text-slate-900 dark:text-slate-100" id="popDay">-</span>
-                </div>
-            </div>
-
-            <div class="space-y-2 rounded-xl bg-slate-50 p-3 text-[11px] dark:bg-slate-950/50">
-                <div class="flex items-start justify-between gap-3 font-bold">
-                    <span class="shrink-0 text-slate-500 dark:text-slate-400">Time</span>
-                    <span class="text-right text-slate-900 dark:text-slate-100" id="popTime">-</span>
-                </div>
-                <div class="flex items-start justify-between gap-3 font-bold">
-                    <span class="shrink-0 text-slate-500 dark:text-slate-400">Instructor</span>
-                    <span class="min-w-0 text-right text-slate-900 dark:text-slate-100" id="popInstructor">-</span>
-                </div>
-                <div class="flex items-start justify-between gap-3 font-bold">
-                    <span class="shrink-0 text-slate-500 dark:text-slate-400">Room</span>
-                    <span class="min-w-0 text-right text-slate-900 dark:text-slate-100" id="popRoom">-</span>
-                </div>
-            </div>
-
-            <div class="flex gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
-                <button
-                    type="button"
-                    @click="$wire.requestScheduleEdit(activeScheduleId); hideSchedulePopover(true)"
-                    :disabled="!activeCanDelete"
-                    class="flex-1 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-45 dark:border-indigo-900/70 dark:bg-indigo-950/30 dark:text-indigo-300">
-                    Edit
-                </button>
-                <button
-                    type="button"
-                    @click="if (confirm('Remove this schedule?')) { $wire.removeAssignment(activeScheduleId); hideSchedulePopover(true) }"
-                    :disabled="!activeCanDelete"
-                    class="flex-1 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-45 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-300">
-                    Remove
-                </button>
-            </div>
-        </div>
-    </div>
+    {{-- SCHEDULE DETAIL POPOVER PORTAL --}}
+    <div id="schedulePopoverPortal"></div>
 </div>
 
 <script>
@@ -430,9 +367,172 @@
                 console.log('Schedule grid initialized');
             },
 
+            /**
+             * Calculate intelligent popover placement
+             * Returns { x, y, placement }
+             */
+            calculatePopoverPosition(anchorEl, popoverWidth, popoverHeight) {
+                const anchorRect = anchorEl.getBoundingClientRect();
+                const gap = 12;
+                const margin = 12;
+                const viewport = {
+                    width: window.innerWidth,
+                    height: window.innerHeight,
+                };
+
+                // Calculate available space in each direction
+                const space = {
+                    right: viewport.width - anchorRect.right,
+                    left: anchorRect.left,
+                    bottom: viewport.height - anchorRect.bottom,
+                    top: anchorRect.top,
+                };
+
+                // Define candidate positions (priority order)
+                const candidates = [
+                    {
+                        placement: 'right',
+                        space: space.right,
+                        fits: space.right >= popoverWidth + gap + margin,
+                        x: anchorRect.right + gap,
+                        y: anchorRect.top + (anchorRect.height / 2) - (popoverHeight / 2),
+                    },
+                    {
+                        placement: 'left',
+                        space: space.left,
+                        fits: space.left >= popoverWidth + gap + margin,
+                        x: anchorRect.left - popoverWidth - gap,
+                        y: anchorRect.top + (anchorRect.height / 2) - (popoverHeight / 2),
+                    },
+                    {
+                        placement: 'bottom',
+                        space: space.bottom,
+                        fits: space.bottom >= popoverHeight + gap + margin,
+                        x: anchorRect.left + (anchorRect.width / 2) - (popoverWidth / 2),
+                        y: anchorRect.bottom + gap,
+                    },
+                    {
+                        placement: 'top',
+                        space: space.top,
+                        fits: space.top >= popoverHeight + gap + margin,
+                        x: anchorRect.left + (anchorRect.width / 2) - (popoverWidth / 2),
+                        y: anchorRect.top - popoverHeight - gap,
+                    },
+                ];
+
+                // Find first placement that fits perfectly
+                let selected = candidates.find(c => c.fits);
+
+                // If nothing fits perfectly, use the one with most space
+                if (!selected) {
+                    selected = candidates.reduce((best, current) =>
+                        current.space > best.space ? current : best
+                    );
+                }
+
+                // Clamp position to viewport boundaries
+                let x = Math.max(margin, Math.min(selected.x, viewport.width - popoverWidth - margin));
+                let y = Math.max(margin, Math.min(selected.y, viewport.height - popoverHeight - margin));
+
+                // Mobile: center horizontally if near edges
+                if (viewport.width < 640) {
+                    x = (viewport.width - popoverWidth) / 2;
+                    // Prefer bottom placement on mobile
+                    if (space.bottom > popoverHeight + gap + margin) {
+                        y = anchorRect.bottom + gap;
+                    } else if (space.top > popoverHeight + gap + margin) {
+                        y = anchorRect.top - popoverHeight - gap;
+                    }
+                }
+
+                return {
+                    x: Math.round(x),
+                    y: Math.round(y),
+                    placement: selected.placement,
+                };
+            },
+
+            /**
+             * Create and insert popover portal element
+             */
+            createPopoverElement() {
+                const popover = document.createElement('div');
+                popover.id = 'schedulePopover';
+                popover.className = `schedule-popover fixed z-[9999] w-[26rem] max-h-[min(32rem,calc(100vh-2rem))] overflow-y-auto rounded-2xl border border-white/60 bg-white/85 p-4 shadow-2xl shadow-slate-950/20 backdrop-blur-2xl pointer-events-auto opacity-0 scale-95 transition-all duration-150 dark:border-slate-700/80 dark:bg-slate-900/90`;
+                popover.style.maxWidth = 'calc(100vw - 16px)';
+                popover.style.display = 'none';
+
+                // Prevent popover from closing on hover
+                popover.addEventListener('mouseenter', () => this.keepSchedulePopover());
+                popover.addEventListener('mouseleave', () => this.schedulePopoverLeave());
+
+                popover.innerHTML = `
+                    <div class="space-y-3">
+                        <div class="flex items-start justify-between gap-3 border-b border-slate-200 pb-3 dark:border-slate-700">
+                            <div class="flex-1 min-w-0">
+                                <div class="text-sm font-black uppercase text-slate-900 dark:text-white line-clamp-1" id="popCode"></div>
+                                <div class="mt-1 text-[11px] font-semibold leading-snug text-slate-600 dark:text-slate-300 line-clamp-2" id="popDesc"></div>
+                            </div>
+                            <span class="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[9px] font-black uppercase text-slate-700 dark:bg-slate-700 dark:text-slate-200" id="popType"></span>
+                        </div>
+
+                        <div class="grid grid-cols-2 gap-2 text-[10px]">
+                            <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
+                                <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">EDP</span>
+                                <span class="mt-1 block truncate font-black text-slate-900 dark:text-slate-100" id="popEdp">-</span>
+                            </div>
+                            <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
+                                <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">Section</span>
+                                <span class="mt-1 block font-black text-slate-900 dark:text-slate-100" id="popSection">-</span>
+                            </div>
+                            <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
+                                <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">Type</span>
+                                <span class="mt-1 block font-black text-slate-900 dark:text-slate-100" id="popType2">-</span>
+                            </div>
+                            <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
+                                <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">Day</span>
+                                <span class="mt-1 block font-black text-slate-900 dark:text-slate-100" id="popDay">-</span>
+                            </div>
+                        </div>
+
+                        <div class="space-y-2 rounded-xl bg-slate-50 p-3 text-[11px] dark:bg-slate-950/50">
+                            <div class="flex items-start justify-between gap-3 font-bold">
+                                <span class="shrink-0 text-slate-500 dark:text-slate-400">Time</span>
+                                <span class="text-right text-slate-900 dark:text-slate-100" id="popTime">-</span>
+                            </div>
+                            <div class="flex items-start justify-between gap-3 font-bold">
+                                <span class="shrink-0 text-slate-500 dark:text-slate-400">Instructor</span>
+                                <span class="min-w-0 text-right text-slate-900 dark:text-slate-100" id="popInstructor">-</span>
+                            </div>
+                            <div class="flex items-start justify-between gap-3 font-bold">
+                                <span class="shrink-0 text-slate-500 dark:text-slate-400">Room</span>
+                                <span class="min-w-0 text-right text-slate-900 dark:text-slate-100" id="popRoom">-</span>
+                            </div>
+                        </div>
+
+                        <div class="flex gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+                            <button
+                                type="button"
+                                @click="if (confirm('Remove this schedule?')) { $wire.removeAssignment(activeScheduleId); hideSchedulePopover(true) }"
+                                :disabled="!activeCanDelete"
+                                class="flex-1 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-45 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-300">
+                                Remove Schedule
+                            </button>
+                        </div>
+                    </div>
+                `;
+
+                document.body.appendChild(popover);
+                return popover;
+            },
+
             showSchedulePopover(event, anchor, data) {
-                const popover = document.getElementById('schedulePopover');
-                if (!popover) return;
+                let popover = document.getElementById('schedulePopover');
+                
+                // Create popover if it doesn't exist
+                if (!popover) {
+                    popover = this.createPopoverElement();
+                }
 
                 this.keepSchedulePopover();
                 this.activeScheduleId = data.scheduleId || null;
@@ -456,61 +556,25 @@
 
                 popover.style.display = 'block';
                 popover.style.opacity = '0';
-                popover.style.transform = 'translateY(4px) scale(0.96)';
-                popover.style.left = '0px';
-                popover.style.top = '0px';
+                popover.style.transform = 'scale(0.95)';
 
+                // Use requestAnimationFrame to ensure element is rendered before measuring
                 requestAnimationFrame(() => {
-                    const anchorRect = anchor.getBoundingClientRect();
                     const popoverRect = popover.getBoundingClientRect();
-                    const gap = 14;
-                    const margin = 12;
-                    const viewportWidth = window.innerWidth;
-                    const viewportHeight = window.innerHeight;
-                    const popoverWidth = Math.min(popoverRect.width || 320, viewportWidth - (margin * 2));
-                    const popoverHeight = Math.min(popoverRect.height || 240, viewportHeight - (margin * 2));
+                    const popoverWidth = Math.min(popoverRect.width || 416, window.innerWidth - 32);
+                    const popoverHeight = Math.min(popoverRect.height || 384, window.innerHeight - 32);
 
-                    const candidates = [
-                        {
-                            x: anchorRect.right + gap,
-                            y: anchorRect.top + (anchorRect.height / 2) - (popoverHeight / 2),
-                        },
-                        {
-                            x: anchorRect.left - popoverWidth - gap,
-                            y: anchorRect.top + (anchorRect.height / 2) - (popoverHeight / 2),
-                        },
-                        {
-                            x: anchorRect.left + (anchorRect.width / 2) - (popoverWidth / 2),
-                            y: anchorRect.bottom + gap,
-                        },
-                        {
-                            x: anchorRect.left + (anchorRect.width / 2) - (popoverWidth / 2),
-                            y: anchorRect.top - popoverHeight - gap,
-                        },
-                    ];
+                    const position = this.calculatePopoverPosition(anchor, popoverWidth, popoverHeight);
 
-                    const fits = ({ x, y }) => (
-                        x >= margin
-                        && y >= margin
-                        && x + popoverWidth <= viewportWidth - margin
-                        && y + popoverHeight <= viewportHeight - margin
-                    );
-
-                    let { x, y } = candidates.find(fits) || candidates[0];
-
-                    if (viewportWidth < 640) {
-                        x = (viewportWidth - popoverWidth) / 2;
-                        y = anchorRect.bottom + gap;
-                    }
-
-                    x = Math.max(margin, Math.min(x, viewportWidth - popoverWidth - margin));
-                    y = Math.max(margin, Math.min(y, viewportHeight - popoverHeight - margin));
-
-                    popover.style.left = x + 'px';
-                    popover.style.top = y + 'px';
+                    popover.style.left = position.x + 'px';
+                    popover.style.top = position.y + 'px';
                     popover.style.maxWidth = popoverWidth + 'px';
-                    popover.style.opacity = '1';
-                    popover.style.transform = 'translateY(0) scale(1)';
+
+                    // Trigger animation
+                    requestAnimationFrame(() => {
+                        popover.style.opacity = '1';
+                        popover.style.transform = 'scale(1)';
+                    });
                 });
             },
 
@@ -530,12 +594,12 @@
                 const popover = document.getElementById('schedulePopover');
                 if (popover) {
                     popover.style.opacity = '0';
-                    popover.style.transform = 'translateY(4px) scale(0.96)';
+                    popover.style.transform = 'scale(0.95)';
                     setTimeout(() => {
                         if (force || popover.style.opacity === '0') {
                             popover.style.display = 'none';
                         }
-                    }, 120);
+                    }, 150);
                 }
             }
         };
@@ -583,6 +647,20 @@
     .animate-pulse {
         animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     }
+
+    /* Popover positioning animation */
+    .schedule-popover {
+        will-change: transform, opacity;
+    }
+
+    /* Ensure popover is not affected by grid overflow */
+    #schedulePopoverPortal {
+        position: fixed;
+        top: 0;
+        left: 0;
+        z-index: 9999;
+        width: 0;
+        height: 0;
+        pointer-events: none;
+    }
 </style>
-
-
