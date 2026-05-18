@@ -60,6 +60,10 @@ class MasterGrid extends Component
     public array $generatedScheduleEditInputs = [];
     public array $compatibleRoomsForEdit = [];
     public array $compatibleFacultyForEdit = [];
+    public bool $showConflictModal = false;
+    public array $conflictData = [];
+    public array $recommendations = [];
+    public array $conflictContext = [];
     public ?string $editingGeneratedScheduleKey = null;
     public $generateDepartment = null;
     public $generateMajor = null;
@@ -331,33 +335,22 @@ class MasterGrid extends Component
         string $day,
         string $startTime,
         string $endTime,
-        ?int $ignoreScheduleId = null
+        ?int $ignoreScheduleId = null,
+        bool $includeRecommendations = true
     ): ?array {
-        $service = app(ScheduleConflictService::class);
+        $result = app(ScheduleConflictService::class)->validatePlacement(
+            $subject,
+            $room,
+            $day,
+            $startTime,
+            $endTime,
+            $ignoreScheduleId,
+            $includeRecommendations
+        );
 
-        $checks = [
-            $service->checkRoomConflict($room->id, $day, $startTime, $endTime, $ignoreScheduleId),
-            $service->checkSectionConflict($subject, $day, $startTime, $endTime, $ignoreScheduleId),
-            $service->checkFacultyConflict($subject, $day, $startTime, $endTime, $ignoreScheduleId),
-        ];
-
-        if ($subject->faculty_id) {
-            $faculty = $subject->relationLoaded('faculty')
-                ? $subject->faculty
-                : Faculty::select('id', 'full_name', 'availability')->find($subject->faculty_id);
-
-            if ($faculty) {
-                $checks[] = $service->checkFacultyAvailability($faculty, $day, $startTime, $endTime);
-            }
-        }
-
-        foreach ($checks as $check) {
-            if (($check['status'] ?? true) === false) {
-                return $this->formatConflictResponse($check, $subject, $day, $startTime, $endTime);
-            }
-        }
-
-        return null;
+        return (($result['success'] ?? $result['status'] ?? true) === false)
+            ? $this->formatConflictResponse($result, $subject, $day, $startTime, $endTime)
+            : null;
     }
 
     private function formatConflictResponse(array $conflict, Subject $subject, string $day, string $startTime, string $endTime): array
@@ -365,19 +358,148 @@ class MasterGrid extends Component
         $details = array_merge($conflict['details'] ?? [], [
             'conflict_type' => $conflict['conflict_type'] ?? 'SCHEDULE_CONFLICT',
             'requested_subject' => $subject->subject_code,
+            'requested_subject_name' => $subject->description,
             'requested_start' => Carbon::parse($startTime)->format(self::TIME_FORMAT_12H),
             'requested_end' => Carbon::parse($endTime)->format(self::TIME_FORMAT_12H),
+            'requested_time' => $this->formatTimeRange12h($startTime, $endTime),
             'requested_day' => $day,
         ]);
 
-        return [
+        $suggestions = $conflict['suggestions'] ?? [];
+        if (!isset($details['suggestion']) && !empty($suggestions[0]['label'])) {
+            $details['suggestion'] = $suggestions[0]['label'];
+        }
+
+        return array_merge($conflict, [
+            'success' => false,
             'status' => false,
-            'type' => $conflict['conflict_type'] ?? 'SCHEDULE_CONFLICT',
-            'toast_type' => $conflict['type'] ?? 'error',
+            'type' => $conflict['type'] ?? strtolower((string) ($conflict['conflict_type'] ?? 'schedule_conflict')),
+            'toast_type' => $conflict['toast_type'] ?? 'error',
             'title' => $conflict['title'] ?? 'Schedule Conflict',
             'message' => $conflict['message'] ?? 'This schedule conflicts with an existing schedule.',
             'details' => $details,
-        ];
+            'conflicting_schedule' => $conflict['conflicting_schedule'] ?? null,
+            'suggestions' => $suggestions,
+        ]);
+    }
+
+    private function showScheduleConflict(array $conflictData, array $context = []): void
+    {
+        $conflictData['suggestions'] = array_values($conflictData['suggestions'] ?? []);
+        $conflictData['details'] = $conflictData['details'] ?? [];
+        $conflictData['conflicting_schedule'] = $conflictData['conflicting_schedule'] ?? null;
+
+        $this->conflictData = $conflictData;
+        $this->recommendations = $conflictData['suggestions'];
+        $this->conflictContext = $context;
+        $this->showConflictModal = true;
+    }
+
+    public function closeConflictModal(): void
+    {
+        $this->showConflictModal = false;
+        $this->conflictContext = [];
+    }
+
+    public function useConflictSuggestion(int $index): void
+    {
+        $suggestion = $this->recommendations[$index] ?? null;
+
+        if (!is_array($suggestion)) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Suggestion unavailable.',
+                'detail' => 'Choose another room, day, or time manually.'
+            ]);
+            return;
+        }
+
+        $mode = $this->conflictContext['mode'] ?? null;
+
+        if ($mode === 'generated_edit' && $this->editingGeneratedScheduleKey) {
+            $this->applySuggestionToGeneratedEdit($suggestion);
+            $this->closeConflictModal();
+            $this->showEditScheduleModal = true;
+
+            $this->dispatch('toast', [
+                'type' => 'info',
+                'message' => 'Suggestion applied.',
+                'detail' => 'Review the temporary edit, then apply it again.'
+            ]);
+            return;
+        }
+
+        if ($mode === 'assign' && !empty($this->conflictContext['subject_id'])) {
+            $subjectId = (int) $this->conflictContext['subject_id'];
+            $day = $suggestion['day'] ?? null;
+            $startTime = $suggestion['start_time'] ?? null;
+
+            $this->setSelectedRoomFromSuggestion((int) ($suggestion['room_id'] ?? $this->selectedRoomId));
+            $this->closeConflictModal();
+
+            if ($day && $startTime) {
+                $this->assignSubject($subjectId, $day, Carbon::parse($startTime)->format(self::TIME_FORMAT_24H));
+                return;
+            }
+        }
+
+        $this->closeConflictModal();
+    }
+
+    private function applySuggestionToGeneratedEdit(array $suggestion): void
+    {
+        if (!empty($suggestion['room_id'])) {
+            $this->generatedScheduleEditInputs['room_id'] = (string) $suggestion['room_id'];
+        }
+
+        if (!empty($suggestion['start_time'])) {
+            $this->generatedScheduleEditInputs['start_time'] = Carbon::parse($suggestion['start_time'])->format('H:i');
+        }
+
+        if (!empty($suggestion['day'])) {
+            $meetingsPerWeek = max(1, (int) ($this->generatedScheduleEditInputs['meetings_per_week'] ?? 1));
+            $currentDays = $this->normalizePreferredDays($this->generatedScheduleEditInputs['days'] ?? []);
+            $requestedDay = $this->conflictData['details']['requested_day'] ?? null;
+            $suggestedDay = Setting::normalizeDayName((string) $suggestion['day']);
+
+            if ($suggestedDay && in_array($suggestedDay, $this->days, true)) {
+                if ($meetingsPerWeek === 1) {
+                    $currentDays = [$suggestedDay];
+                } elseif ($requestedDay && in_array($requestedDay, $currentDays, true) && (!in_array($suggestedDay, $currentDays, true) || $requestedDay === $suggestedDay)) {
+                    $currentDays = array_map(
+                        fn (string $day) => $day === $requestedDay ? $suggestedDay : $day,
+                        $currentDays
+                    );
+                } elseif (!in_array($suggestedDay, $currentDays, true) && count($currentDays) < $meetingsPerWeek) {
+                    $currentDays[] = $suggestedDay;
+                } elseif (!in_array($suggestedDay, $currentDays, true) && !empty($currentDays)) {
+                    $currentDays[0] = $suggestedDay;
+                }
+
+                $this->generatedScheduleEditInputs['days'] = array_slice(
+                    array_values(array_unique($currentDays)),
+                    0,
+                    $meetingsPerWeek
+                );
+            }
+        }
+    }
+
+    private function setSelectedRoomFromSuggestion(int $roomId): void
+    {
+        if (!$roomId) {
+            return;
+        }
+
+        $room = Room::find($roomId);
+
+        if (!$room) {
+            return;
+        }
+
+        $this->selectedRoomId = $room->id;
+        $this->selectedRoomName = $room->room_name;
+        $this->selectedRoomType = $room->type;
     }
 
     private function checkCurriculumWarning(Subject $subject, Room $room): ?array
@@ -1064,13 +1186,32 @@ class MasterGrid extends Component
 
         if (($result['scheduled'] ?? 0) <= 0) {
             if (!empty($result['conflict']) && is_array($result['conflict'])) {
+                $conflictData = $result['conflict'];
+                $subject = Subject::find((int) ($inputs['subject_id'] ?? 0));
+                $room = Room::find((int) ($inputs['room_id'] ?? 0));
+                $conflictDay = $conflictData['details']['requested_day'] ?? ($inputs['days'][0] ?? $this->days[0] ?? 'Monday');
+
+                if ($subject && $room && !empty($inputs['start_time'])) {
+                    $startTime = Carbon::parse($inputs['start_time'])->format(self::TIME_FORMAT_24H);
+                    $endTime = $this->calculateEndTime($startTime, $this->calculateMinutesPerMeeting($subject));
+
+                    $conflictData = app(ScheduleConflictService::class)->enrichConflictWithRecommendations(
+                        $conflictData,
+                        $subject,
+                        $room,
+                        $conflictDay,
+                        $startTime,
+                        $endTime
+                    );
+                }
+
                 $this->dispatch('toast', [
-                    'type' => $result['conflict']['toast_type'] ?? 'error',
-                    'message' => $result['conflict']['title'] ?? 'Schedule Conflict Detected',
-                    'detail' => $result['conflict']['message'] ?? 'The temporary edit conflicts with another schedule.'
+                    'type' => $conflictData['toast_type'] ?? 'error',
+                    'message' => $conflictData['title'] ?? 'Schedule Conflict Detected',
+                    'detail' => $conflictData['message'] ?? 'The temporary edit conflicts with another schedule.'
                 ]);
 
-                $this->dispatch('show-conflict-modal', conflictData: $result['conflict']);
+                $this->showScheduleConflict($conflictData, ['mode' => 'generated_edit']);
                 return;
             }
 
@@ -1293,7 +1434,9 @@ class MasterGrid extends Component
                             $room,
                             $day,
                             $slotStart->format(self::TIME_FORMAT_24H),
-                            $slotEnd->format(self::TIME_FORMAT_24H)
+                            $slotEnd->format(self::TIME_FORMAT_24H),
+                            null,
+                            false
                         )) {
                             return [
                                 'room' => $room,
@@ -1721,7 +1864,10 @@ class MasterGrid extends Component
                 'message' => $conflictData['message']
             ]);
 
-            $this->dispatch('show-conflict-modal', conflictData: $conflictData);
+            $this->showScheduleConflict($conflictData, [
+                'mode' => 'assign',
+                'subject_id' => (int) $subjectId,
+            ]);
             return;
         }
         // ===== END CONFLICT VALIDATION =====
@@ -1732,15 +1878,6 @@ class MasterGrid extends Component
                 'type' => 'warning',
                 'message' => $curriculumWarning['message']
             ]);
-        }
-
-        if (!app(AutoGenerateScheduler::class)->isRoomCompatible($room, $subject, allowMinorLabFallback: true)) {
-            $this->dispatch('toast', [
-                'type' => 'error',
-                'message' => 'Room Not Compatible',
-                'detail' => "{$room->room_name} is not compatible with {$subject->subject_code}'s room specialization requirements."
-            ]);
-            return;
         }
 
         try {
