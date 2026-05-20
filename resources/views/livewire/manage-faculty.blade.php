@@ -61,7 +61,7 @@ x-data="{
                             <div class="flex justify-between items-start">
                                 <div>
                                     <p class="text-xs font-black text-slate-900 dark:text-white">{{ $request->full_name }}</p>
-                                    <p class="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">{{ $request->department }}</p>
+                                    <p class="text-[10px] font-bold text-slate-400 dark:text-slate-500 uppercase">{{ $request->displayDepartment() }} / {{ $request->scopeLabel() }}</p>
                                 </div>
 
                                 {{-- Action Buttons --}}
@@ -109,7 +109,7 @@ x-data="{
 
                         <div class="flex items-center gap-2 bg-gray-100/50 dark:bg-slate-800/50 p-1.5 rounded-2xl">
                             @if(in_array(auth()->user()->role, ['admin', 'registrar', 'associate_dean']))
-                                @foreach(['ALL', 'CCS', 'CTE', 'COC', 'SHTM'] as $dept)
+                                @foreach(array_merge(['ALL'], $departments ?? ['CCS', 'CTE', 'COC', 'SHTM']) as $dept)
                                     <button wire:click="$set('filterDepartment', '{{ $dept == 'ALL' ? '' : $dept }}')" 
                                         class="px-4 py-1.5 rounded-xl text-xs font-bold transition-all {{ ($filterDepartment == ($dept == 'ALL' ? '' : $dept)) ? 'bg-white dark:bg-slate-700 text-blue-600 dark:text-blue-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:text-slate-500' }}">
                                         {{ $dept }}
@@ -129,11 +129,11 @@ x-data="{
         <option value="Part-time">Part-time</option>
     </select>
 
-    <select wire:model.live="filterSpecialization" class="bg-white dark:bg-slate-900 border-none rounded-2xl text-xs font-bold uppercase py-2.5 px-4 shadow-sm">
-        <option value="">All Specializations</option>
-        <option value="Major">Major</option>
-        <option value="Minor">Minor</option>
-        <option value="Both">Both</option>
+    <select wire:model.live="filterScope" class="bg-white dark:bg-slate-900 border-none rounded-2xl text-xs font-bold uppercase py-2.5 px-4 shadow-sm">
+        <option value="">All Scopes</option>
+        @foreach($scopeOptions ?? [] as $scopeValue => $scopeLabel)
+            <option value="{{ $scopeValue }}">{{ $scopeLabel }}</option>
+        @endforeach
     </select>
 </div>
 
@@ -184,12 +184,19 @@ x-data="{
                                         <td class="px-6 py-6 font-bold text-slate-800 dark:text-slate-200">{{ $faculty->full_name }}</td>
                                         
                                         <td class="px-6 py-6">
-                                            <span class="text-blue-600 dark:text-blue-400 font-black uppercase text-[10px] bg-blue-50 dark:bg-blue-900/20 px-3 py-1 rounded-full whitespace-nowrap">{{ $faculty->department }}</span>
+                                            <span class="text-blue-600 dark:text-blue-400 font-black uppercase text-[10px] bg-blue-50 dark:bg-blue-900/20 px-3 py-1 rounded-full whitespace-nowrap">{{ $faculty->displayDepartment() }}</span>
                                         </td>
 
                                         {{-- Employment Type & Workload Column --}}
                                         <td class="px-6 py-6">
                                             <div class="flex items-center gap-2 flex-wrap">
+                                                @php
+                                                    $scopeClasses = match($faculty->faculty_scope) {
+                                                        \App\Models\Faculty::SCOPE_GENED => 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300',
+                                                        \App\Models\Faculty::SCOPE_CROSS_DEPARTMENT => 'bg-violet-100 dark:bg-violet-900/30 text-violet-700 dark:text-violet-300',
+                                                        default => 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-300',
+                                                    };
+                                                @endphp
                                                 {{-- Employment Type Badge --}}
                                                 <span class="inline-flex items-center gap-1 px-2.5 py-1.5 {{ $faculty->employment_type === 'Full-time' ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300' : 'bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300' }} rounded-full text-[9px] font-black uppercase tracking-tighter whitespace-nowrap">
                                                     @if($faculty->employment_type === 'Full-time')
@@ -205,29 +212,14 @@ x-data="{
                                                     @endif
                                                 </span>
 
-                                                {{-- Specialization Badge --}}
-                                                @if($faculty->teaching_specialization === 'Both')
-                                                    <span class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded-full text-[9px] font-black uppercase tracking-tighter whitespace-nowrap">
-                                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
-                                                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-                                                        </svg>
-                                                        Both
-                                                    </span>
-                                                @elseif($faculty->teaching_specialization === 'Major')
-                                                    <span class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 rounded-full text-[9px] font-black uppercase tracking-tighter whitespace-nowrap">
-                                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
-                                                            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-                                                        </svg>
-                                                        Major
-                                                    </span>
-                                                @else
-                                                    <span class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300 rounded-full text-[9px] font-black uppercase tracking-tighter whitespace-nowrap">
-                                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="currentColor" viewBox="0 0 24 24">
-                                                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-2h2v2zm0-4h-2V7h2v6z"/>
-                                                        </svg>
-                                                        Minor
-                                                    </span>
-                                                @endif
+                                                {{-- Faculty Scope Badge --}}
+                                                <span class="inline-flex items-center gap-1 px-2.5 py-1.5 {{ $scopeClasses }} rounded-full text-[9px] font-black uppercase tracking-tighter whitespace-nowrap">
+                                                    {{ $faculty->scopeLabel() }}
+                                                </span>
+
+                                                <span class="inline-flex items-center gap-1 px-2.5 py-1.5 {{ $faculty->canTeachMinorSubjects() ? 'bg-sky-100 dark:bg-sky-900/30 text-sky-700 dark:text-sky-300' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-300' }} rounded-full text-[9px] font-black uppercase tracking-tighter whitespace-nowrap">
+                                                    {{ $faculty->canTeachMinorSubjects() ? 'Minor OK' : 'Major Only' }}
+                                                </span>
 
                                                 {{-- Max Units Badge --}}
                                                 <span class="inline-flex items-center gap-1 px-2.5 py-1.5 bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-full text-[9px] font-black uppercase tracking-tighter whitespace-nowrap">
@@ -390,7 +382,12 @@ x-data="{
                         $isDeanOrOIC = in_array(auth()->user()->role, ['dean', 'oic']);
                     @endphp
 
-                    @if($isDeanOrOIC && auth()->user()->department)
+                    @if($faculty_scope === \App\Models\Faculty::SCOPE_GENED)
+                        <div class="w-full px-4 py-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/30 rounded-2xl font-bold text-blue-700 dark:text-blue-300">
+                            Institution-wide
+                        </div>
+                        <p class="mt-2 text-[9px] font-bold text-blue-500 dark:text-blue-300 italic">General Education faculty may teach institution-wide subjects.</p>
+                    @elseif($isDeanOrOIC && auth()->user()->department)
                         <div class="w-full px-4 py-3 bg-slate-100 dark:bg-slate-800 border-none rounded-2xl font-black text-blue-600 dark:text-blue-400 flex items-center justify-between">
                             <span>{{ auth()->user()->department }}</span>
                             <span class="text-[8px] bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded text-blue-700 dark:text-blue-300">LOCKED</span>
@@ -401,10 +398,9 @@ x-data="{
                             <select wire:model="department" 
                                     class="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/50 border-none rounded-2xl font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 appearance-none @error('department') ring-2 ring-red-500 @enderror">
                                 <option value="">Select Department</option>
-                                <option value="CCS">CCS</option>
-                                <option value="CTE">CTE</option>
-                                <option value="COC">COC</option>
-                                <option value="SHTM">SHTM</option>
+                                @foreach($departments ?? ['CCS', 'CTE', 'COC', 'SHTM'] as $dept)
+                                    <option value="{{ $dept }}">{{ $dept }}</option>
+                                @endforeach
                             </select>
                             <div class="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none">
                                 <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -470,15 +466,15 @@ x-data="{
                         @enderror
                     </div>
 
-                    {{-- Teaching Specialization --}}
+                    {{-- Faculty Scope --}}
                     <div>
-                        <label class="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-2">📚 Specialization</label>
+                        <label class="text-[10px] font-black text-slate-400 uppercase ml-2 block mb-2">Faculty Scope</label>
                         <div class="relative">
-                            <select wire:model="teaching_specialization" 
-                                    class="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/50 border-none rounded-2xl font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 appearance-none @error('teaching_specialization') ring-2 ring-red-500 @enderror">
-                                <option value="Both">Both (Flexible)</option>
-                                <option value="Major">Major Only</option>
-                                <option value="Minor">Minor Only</option>
+                            <select wire:model.live="faculty_scope"
+                                    class="w-full px-4 py-3 bg-slate-50 dark:bg-slate-800/50 border-none rounded-2xl font-bold text-slate-900 dark:text-white focus:ring-2 focus:ring-blue-500 appearance-none @error('faculty_scope') ring-2 ring-red-500 @enderror">
+                                @foreach($scopeOptions ?? [] as $scopeValue => $scopeLabel)
+                                    <option value="{{ $scopeValue }}">{{ $scopeLabel }}</option>
+                                @endforeach
                             </select>
                             <div class="absolute inset-y-0 right-0 flex items-center pr-4 pointer-events-none">
                                 <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -486,11 +482,23 @@ x-data="{
                                 </svg>
                             </div>
                         </div>
-                        @error('teaching_specialization')
+                        @error('faculty_scope')
                             <span class="text-red-500 text-[9px] font-bold ml-2">⚠️ {{ $message }}</span>
                         @enderror
                     </div>
                 </div>
+
+                {{-- Can Teach Minor --}}
+                <label class="mt-4 flex items-center justify-between rounded-2xl bg-slate-50 dark:bg-slate-800/50 px-4 py-3">
+                    <span>
+                        <span class="block text-[10px] font-black text-slate-500 dark:text-slate-300 uppercase">Can Teach Minor / GenEd</span>
+                        <span class="block text-[9px] font-bold text-slate-400 italic">Required for minor and general education assignments.</span>
+                    </span>
+                    <input type="checkbox" wire:model.live="can_teach_minor" class="h-5 w-5 rounded border-slate-300 text-blue-600 focus:ring-blue-500" @if($faculty_scope === \App\Models\Faculty::SCOPE_GENED) disabled @endif>
+                </label>
+                @error('can_teach_minor')
+                    <span class="text-red-500 text-[9px] font-bold ml-2">{{ $message }}</span>
+                @enderror
 
                 {{-- Max Units --}}
                 <div class="mt-4">
@@ -545,9 +553,10 @@ x-data="{
                     <li>✓ <strong>employee_id</strong> - Unique identifier</li>
                     <li>✓ <strong>full_name</strong> - First and Last name</li>
                     <li>✓ <strong>email</strong> - Valid email address</li>
-                    <li>✓ <strong>department</strong> - CCS, CTE, COC, or SHTM</li>
+                    <li>✓ <strong>department</strong> - optional for gened faculty</li>
                     <li>✓ <strong>employment_type</strong> - "Full-time" or "Part-time"</li>
-                    <li>✓ <strong>teaching_specialization</strong> - "Major", "Minor", or "Both"</li>
+                    <li>✓ <strong>faculty_scope</strong> - "gened", "departmental", or "cross_department"</li>
+                    <li>✓ <strong>can_teach_minor</strong> - yes/no, true/false, or 1/0</li>
                     <li>✓ <strong>max_units</strong> - 1-30 (auto-filled if blank)</li>
                 </ul>
             </div>
@@ -558,10 +567,11 @@ x-data="{
                     <p><span class="text-slate-500">employee_id:</span> 2026-1001</p>
                     <p><span class="text-slate-500">full_name:</span> Juan Dela Cruz</p>
                     <p><span class="text-slate-500">email:</span> juan@pap.edu.ph</p>
-                    <p><span class="text-slate-500">department:</span> CCS</p>
+                    <p><span class="text-slate-500">department:</span> GENED</p>
                     <p><span class="text-slate-500">employment_type:</span> Full-time</p>
-                    <p><span class="text-slate-500">teaching_specialization:</span> Major</p>
-                    <p><span class="text-slate-500">max_units:</span> 21</p>
+                    <p><span class="text-slate-500">faculty_scope:</span> gened</p>
+                    <p><span class="text-slate-500">can_teach_minor:</span> YES</p>
+                    <p><span class="text-slate-500">max_units:</span> 30</p>
                 </div>
             </div>
         </div>
@@ -605,7 +615,8 @@ x-data="{
                                     <th class="px-3 py-2 whitespace-nowrap">Email</th>
                                     <th class="px-3 py-2 whitespace-nowrap">Dept</th>
                                     <th class="px-3 py-2 whitespace-nowrap">Employment</th>
-                                    <th class="px-3 py-2 whitespace-nowrap">Spec.</th>
+                                    <th class="px-3 py-2 whitespace-nowrap">Scope</th>
+                                    <th class="px-3 py-2 whitespace-nowrap">Minor</th>
                                     <th class="px-3 py-2 whitespace-nowrap text-center">Units</th>
                                     <th class="px-3 py-2 whitespace-nowrap text-right">Status</th>
                                 </tr>
@@ -627,20 +638,28 @@ x-data="{
                                             @endif
                                         </td>
                                         <td class="px-3 py-2">
-                                            @if($preview['teaching_specialization'] === 'Both')
-                                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 rounded font-black text-[8px]">✓ Both</span>
-                                            @elseif($preview['teaching_specialization'] === 'Major')
-                                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded font-black text-[8px]">★ Maj</span>
-                                            @else
-                                                <span class="inline-flex items-center gap-1 px-1.5 py-0.5 bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 rounded font-black text-[8px]">ℹ Min</span>
-                                            @endif
+                                            @php
+                                                $previewScopeClasses = match($preview['faculty_scope']) {
+                                                    \App\Models\Faculty::SCOPE_GENED => 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300',
+                                                    \App\Models\Faculty::SCOPE_CROSS_DEPARTMENT => 'bg-violet-100 dark:bg-violet-900/40 text-violet-700 dark:text-violet-300',
+                                                    default => 'bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300',
+                                                };
+                                            @endphp
+                                            <span class="inline-flex items-center gap-1 px-1.5 py-0.5 {{ $previewScopeClasses }} rounded font-black text-[8px]">{{ strtoupper(str_replace('_', '-', $preview['faculty_scope'])) }}</span>
+                                        </td>
+                                        <td class="px-3 py-2">
+                                            <span class="inline-flex px-2 py-0.5 {{ $preview['can_teach_minor'] ? 'bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400' }} rounded font-black text-[8px] uppercase">
+                                                {{ $preview['can_teach_minor'] ? 'Yes' : 'No' }}
+                                            </span>
                                         </td>
                                         <td class="px-3 py-2 font-bold text-slate-700 dark:text-slate-300 text-center">{{ $preview['max_units'] }}</td>
                                         <td class="px-3 py-2 text-right">
-                                            @if($preview['error'])
-                                                <span class="inline-flex px-2 py-0.5 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded font-black text-[8px] uppercase">⚠️ Dup</span>
+                                            @if(($preview['status'] ?? '') === 'invalid')
+                                                <span class="inline-flex px-2 py-0.5 bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400 rounded font-black text-[8px] uppercase" title="{{ implode(' ', $preview['errors'] ?? []) }}">Invalid</span>
+                                            @elseif(($preview['status'] ?? '') === 'duplicate')
+                                                <span class="inline-flex px-2 py-0.5 bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 rounded font-black text-[8px] uppercase">Duplicate</span>
                                             @else
-                                                <span class="inline-flex px-2 py-0.5 bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 rounded font-black text-[8px] uppercase">✓ OK</span>
+                                                <span class="inline-flex px-2 py-0.5 bg-green-100 dark:bg-green-900/40 text-green-600 dark:text-green-400 rounded font-black text-[8px] uppercase">OK</span>
                                             @endif
                                         </td>
                                     </tr>

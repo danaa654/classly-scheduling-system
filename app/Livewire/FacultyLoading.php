@@ -4,11 +4,13 @@ namespace App\Livewire;
 
 use App\Models\Department;
 use App\Models\Faculty;
+use App\Models\Room;
 use App\Models\Schedule;
 use App\Models\Setting;
 use App\Models\Subject;
 use App\Services\ScheduleConflictService;
 use Carbon\Carbon;
+use Carbon\CarbonPeriod;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
@@ -52,6 +54,8 @@ class FacultyLoading extends Component
 
     public array $pendingAssignmentGroupIds = [];
 
+    public array $assignmentRecommendations = [];
+
     protected $listeners = [
         'refreshGrid' => '$refresh',
     ];
@@ -82,11 +86,11 @@ class FacultyLoading extends Component
     private function resetFilters()
     {
         $this->subjectDepartmentFilter = 'all';
-        $this->subjectMajorFilter     = 'all';
+        $this->subjectMajorFilter = 'all';
         $this->subjectYearLevelFilter = 'all';
-        $this->subjectSectionFilter   = 'all';
-        $this->subjectTypeFilter      = 'all';
-        $this->showUnassignedOnly     = false;
+        $this->subjectSectionFilter = 'all';
+        $this->subjectTypeFilter = 'all';
+        $this->showUnassignedOnly = false;
     }
 
     #[Computed]
@@ -110,6 +114,7 @@ class FacultyLoading extends Component
 
         if (! $this->selectedFacultyId) {
             $this->toast('error', 'Please select a faculty member first.');
+
             return;
         }
 
@@ -209,46 +214,44 @@ class FacultyLoading extends Component
     private function groupedAssignedSubjects(): Collection
     {
         return $this->assignedSchedules()
-            ->groupBy(fn (Schedule $schedule) =>
-                $schedule->subject_id . '::' . ($schedule->section ?? 'none')
+            ->groupBy(fn (Schedule $schedule) => $schedule->subject_id.'::'.($schedule->section ?? 'none')
             )
             ->map(function (Collection $group) {
                 /** @var Schedule $first */
-                $first   = $group->first();
+                $first = $group->first();
                 $subject = $first->subject;
-                $room    = $first->room;
+                $room = $first->room;
 
                 // Build one schedule line per distinct day+time in this group
                 $scheduleLines = $group
-                    ->map(fn (Schedule $s) =>
-                        trim(
-                            ($s->day ?? 'N/A')
-                            . ' / '
-                            . Carbon::parse($s->start_time)->format('h:i A')
-                            . ' - '
-                            . Carbon::parse($s->end_time)->format('h:i A')
-                        )
+                    ->map(fn (Schedule $s) => trim(
+                        ($s->day ?? 'N/A')
+                        .' / '
+                        .Carbon::parse($s->start_time)->format('h:i A')
+                        .' - '
+                        .Carbon::parse($s->end_time)->format('h:i A')
+                    )
                     )
                     ->unique()
                     ->values()
                     ->implode('<br>');
 
-                $department = $first->department ?? $subject?->department ?? 'N/A';
-                $major      = $first->major      ?? $subject?->major      ?? 'N/A';
-                $year       = $first->year_level ?? $subject?->year_level ?? '?';
-                $section    = $first->section    ?? $subject?->section    ?? 'N/A';
+                $department = Department::normalizeCode($first->department ?? $subject?->department) ?? 'N/A';
+                $major = $first->major ?? $subject?->major ?? 'N/A';
+                $year = $first->year_level ?? $subject?->year_level ?? '?';
+                $section = $first->section ?? $subject?->section ?? 'N/A';
 
                 return [
-                    'subject_code'       => $subject?->subject_code ?? 'N/A',
-                    'edp_code'           => $subject?->edp_code     ?? 'No EDP',
-                    'description'        => $subject?->description  ?? 'Untitled subject',
-                    'group'              => "{$department} / {$major} / Y{$year} / {$section}",
-                    'room'               => $room?->room_name ?? 'No room',
-                    'schedule'           => $scheduleLines,
-                    'units'              => $subject?->units ?? 0,
-                    'type'              => $subject?->type  ?? 'N/A',
-                    'schedule_ids'       => $group->pluck('id')->all(),
-                    'first_schedule_id'  => $first->id,
+                    'subject_code' => $subject?->subject_code ?? 'N/A',
+                    'edp_code' => $subject?->edp_code ?? 'No EDP',
+                    'description' => $subject?->description ?? 'Untitled subject',
+                    'group' => "{$department} / {$major} / Y{$year} / {$section}",
+                    'room' => $room?->room_name ?? 'No room',
+                    'schedule' => $scheduleLines,
+                    'units' => $subject?->units ?? 0,
+                    'type' => $subject?->type ?? 'N/A',
+                    'schedule_ids' => $group->pluck('id')->all(),
+                    'first_schedule_id' => $first->id,
                 ];
             })
             ->values();
@@ -264,31 +267,31 @@ class FacultyLoading extends Component
             return null;
         }
 
-        $subjects           = $this->assignedSubjects();
-        $totalUnits         = $subjects->sum('units') ?? 0;
-        $maxUnits           = $this->selectedFaculty->max_units ?? 21;
+        $subjects = $this->assignedSubjects();
+        $totalUnits = $subjects->sum('units') ?? 0;
+        $maxUnits = $this->selectedFaculty->max_units ?? 21;
         $utilizationPercent = $maxUnits > 0 ? round(($totalUnits / $maxUnits) * 100) : 0;
 
         $majorSubjects = $subjects->where('type', 'Major');
         $minorSubjects = $subjects->where('type', 'Minor');
-        $majorCount    = $majorSubjects->count();
-        $minorCount    = $minorSubjects->count();
-        $majorUnits    = $majorSubjects->sum('units') ?? 0;
-        $minorUnits    = $minorSubjects->sum('units') ?? 0;
+        $majorCount = $majorSubjects->count();
+        $minorCount = $minorSubjects->count();
+        $majorUnits = $majorSubjects->sum('units') ?? 0;
+        $minorUnits = $minorSubjects->sum('units') ?? 0;
 
         return [
-            'totalUnits'         => $totalUnits,
-            'maxUnits'           => $maxUnits,
-            'remainingUnits'     => max(0, $maxUnits - $totalUnits),
-            'overloadUnits'      => max(0, $totalUnits - $maxUnits),
+            'totalUnits' => $totalUnits,
+            'maxUnits' => $maxUnits,
+            'remainingUnits' => max(0, $maxUnits - $totalUnits),
+            'overloadUnits' => max(0, $totalUnits - $maxUnits),
             'utilizationPercent' => $utilizationPercent,
-            'majorCount'         => $majorCount,
-            'minorCount'         => $minorCount,
-            'majorUnits'         => $majorUnits,
-            'minorUnits'         => $minorUnits,
-            'averageMajorUnits'  => $majorCount > 0 ? round($majorUnits / $majorCount, 2) : 0,
-            'averageMinorUnits'  => $minorCount > 0 ? round($minorUnits / $minorCount, 2) : 0,
-            'scheduleCount'      => $this->assignedSchedules()->count(),
+            'majorCount' => $majorCount,
+            'minorCount' => $minorCount,
+            'majorUnits' => $majorUnits,
+            'minorUnits' => $minorUnits,
+            'averageMajorUnits' => $majorCount > 0 ? round($majorUnits / $majorCount, 2) : 0,
+            'averageMinorUnits' => $minorCount > 0 ? round($minorUnits / $minorCount, 2) : 0,
+            'scheduleCount' => $this->assignedSchedules()->count(),
         ];
     }
 
@@ -300,39 +303,49 @@ class FacultyLoading extends Component
     {
         if (! $this->selectedFacultyId) {
             $this->toast('error', 'Please select a faculty member first.');
+
             return;
         }
 
         $schedule = Schedule::with(['subject', 'room'])->find($scheduleId);
-        $faculty  = Faculty::find($this->selectedFacultyId);
+        $faculty = Faculty::find($this->selectedFacultyId);
 
         if (! $schedule || ! $schedule->subject) {
             $this->toast('error', 'Scheduled subject not found.');
+
             return;
         }
 
         if (! $faculty) {
             $this->toast('error', 'Faculty not found.');
+
             return;
         }
 
         if ($schedule->status === Schedule::STATUS_FINALIZED) {
             $this->toast('error', 'Finalized schedules cannot be changed in Faculty Loading.');
+
             return;
         }
 
         if ((int) $schedule->faculty_id === (int) $faculty->id) {
             $this->toast('warning', "{$schedule->subject->subject_code} is already assigned to {$faculty->full_name}.");
+
             return;
         }
 
         if ($schedule->faculty_id !== null && (int) $schedule->faculty_id !== (int) $faculty->id) {
             $this->toast('warning', "{$schedule->subject->subject_code} is already assigned to another faculty member.");
+
             return;
         }
 
         if (! $this->canAssignSubject(Auth::user(), $faculty, $schedule->subject)) {
-            $this->toast('error', 'Unauthorized assignment.');
+            $this->openAssignmentFailure($schedule, $faculty, [
+                $this->eligibilityWarning($faculty, $schedule->subject, $schedule),
+            ]);
+            $this->toast('error', 'Assignment blocked by faculty eligibility rules.');
+
             return;
         }
 
@@ -340,14 +353,16 @@ class FacultyLoading extends Component
 
         if ($warnings !== []) {
             $this->pendingAssignmentScheduleId = $schedule->id;
-            $this->pendingAssignmentWarnings   = $warnings;
-            $this->conflictModalOpen           = true;
+            $this->pendingAssignmentWarnings = $warnings;
+            $this->assignmentRecommendations = $this->buildAssignmentRecommendations($faculty, $schedule);
+            $this->conflictModalOpen = true;
             $this->toast(
                 $this->canOverrideAssignmentWarnings(Auth::user()) ? 'warning' : 'error',
                 $this->canOverrideAssignmentWarnings(Auth::user())
                     ? 'Assignment needs review before override.'
                     : 'Assignment blocked by load or conflict validation.'
             );
+
             return;
         }
 
@@ -360,12 +375,14 @@ class FacultyLoading extends Component
 
         if (! $this->canOverrideAssignmentWarnings($user)) {
             $this->toast('error', 'You are not authorized to override assignment warnings.');
+
             return;
         }
 
         if (! $this->selectedFacultyId || ! $this->pendingAssignmentScheduleId) {
             $this->resetPendingAssignment();
             $this->toast('error', 'No pending assignment found.');
+
             return;
         }
 
@@ -374,6 +391,7 @@ class FacultyLoading extends Component
         if (! $faculty) {
             $this->resetPendingAssignment();
             $this->toast('error', 'Pending assignment data is no longer available.');
+
             return;
         }
 
@@ -386,6 +404,7 @@ class FacultyLoading extends Component
             if ($schedules->isEmpty()) {
                 $this->resetPendingAssignment();
                 $this->toast('error', 'Pending assignment data is no longer available.');
+
                 return;
             }
 
@@ -396,16 +415,19 @@ class FacultyLoading extends Component
             if ($assignedElsewhere) {
                 $this->resetPendingAssignment();
                 $this->toast('warning', "{$schedules->first()->subject?->subject_code} is already assigned to another faculty member.");
+
                 return;
             }
 
             if (! $this->canAssignSubject($user, $faculty, $schedules->first()->subject)) {
                 $this->resetPendingAssignment();
                 $this->toast('error', 'Unauthorized assignment.');
+
                 return;
             }
 
             $this->persistGroupAssignment($schedules, $faculty, true);
+
             return;
         }
 
@@ -415,18 +437,21 @@ class FacultyLoading extends Component
         if (! $schedule || ! $schedule->subject) {
             $this->resetPendingAssignment();
             $this->toast('error', 'Pending assignment data is no longer available.');
+
             return;
         }
 
         if ($schedule->faculty_id !== null && (int) $schedule->faculty_id !== (int) $faculty->id) {
             $this->resetPendingAssignment();
             $this->toast('warning', "{$schedule->subject->subject_code} is already assigned to another faculty member.");
+
             return;
         }
 
         if (! $this->canAssignSubject($user, $faculty, $schedule->subject)) {
             $this->resetPendingAssignment();
             $this->toast('error', 'Unauthorized assignment.');
+
             return;
         }
 
@@ -438,11 +463,217 @@ class FacultyLoading extends Component
         $this->resetPendingAssignment();
     }
 
+    public function useFacultySuggestion(int $facultyId): void
+    {
+        [$currentFaculty, $schedules] = $this->pendingAssignmentContext();
+        $faculty = Faculty::find($facultyId);
+
+        if (! $faculty || $schedules->isEmpty()) {
+            $this->toast('error', 'Suggestion is no longer available.');
+
+            return;
+        }
+
+        $this->selectedFacultyId = $faculty->id;
+        $warnings = $this->warningsForSchedules($faculty, $schedules);
+
+        if ($warnings !== []) {
+            $this->pendingAssignmentWarnings = $warnings;
+            $this->assignmentRecommendations = $this->buildAssignmentRecommendations($faculty, $schedules->first());
+            $this->toast('error', 'Suggested faculty is no longer available for this schedule.');
+
+            return;
+        }
+
+        $schedules->count() > 1
+            ? $this->persistGroupAssignment($schedules, $faculty)
+            : $this->persistAssignment($schedules->first(), $faculty);
+    }
+
+    public function useSlotSuggestion(string $day, string $startTime, string $endTime): void
+    {
+        [$faculty, $schedules] = $this->pendingAssignmentContext();
+
+        if (! $faculty || $schedules->isEmpty()) {
+            $this->toast('error', 'Suggestion is no longer available.');
+
+            return;
+        }
+
+        $singleSchedule = $schedules->count() === 1;
+
+        $schedules->each(function (Schedule $schedule) use ($day, $startTime, $endTime, $singleSchedule) {
+            if ($singleSchedule) {
+                $schedule->day = $day;
+            }
+
+            $schedule->start_time = Carbon::parse($startTime)->format('H:i:s');
+            $schedule->end_time = Carbon::parse($endTime)->format('H:i:s');
+        });
+
+        $warnings = $this->warningsForSchedules($faculty, $schedules, includeSectionChecks: true);
+
+        if ($warnings !== []) {
+            $this->pendingAssignmentWarnings = $warnings;
+            $this->assignmentRecommendations = $this->buildAssignmentRecommendations($faculty, $schedules->first());
+            $this->toast('error', 'Suggested timeslot is no longer available.');
+
+            return;
+        }
+
+        try {
+            DB::transaction(function () use ($schedules, $faculty, $singleSchedule, $day, $startTime, $endTime) {
+                $ids = $schedules->pluck('id')->all();
+                $fresh = Schedule::lockForUpdate()->findMany($ids);
+
+                foreach ($fresh as $schedule) {
+                    $payload = [
+                        'start_time' => Carbon::parse($startTime)->format('H:i:s'),
+                        'end_time' => Carbon::parse($endTime)->format('H:i:s'),
+                        'faculty_id' => $faculty->id,
+                        'status' => Schedule::STATUS_PARTIAL,
+                    ];
+
+                    if ($singleSchedule) {
+                        $payload['day'] = $day;
+                    }
+
+                    $schedule->update($payload);
+                }
+            });
+
+            $this->subjectSearch = '';
+            $this->resetPendingAssignment();
+            unset($this->selectedFaculty);
+            $this->toast('success', 'Suggested timeslot applied and faculty assigned.');
+        } catch (\Throwable $exception) {
+            report($exception);
+            $this->toast('error', 'Could not apply the suggested timeslot.');
+        }
+    }
+
+    public function useRoomSuggestion(int $roomId): void
+    {
+        [$faculty, $schedules] = $this->pendingAssignmentContext();
+        $room = Room::find($roomId);
+
+        if (! $faculty || ! $room || $schedules->isEmpty()) {
+            $this->toast('error', 'Suggestion is no longer available.');
+
+            return;
+        }
+
+        $schedules->each(function (Schedule $schedule) use ($room) {
+            $schedule->room_id = $room->id;
+            $schedule->setRelation('room', $room);
+        });
+
+        $warnings = $this->warningsForSchedules($faculty, $schedules, includeSectionChecks: true);
+
+        if ($warnings !== []) {
+            $this->pendingAssignmentWarnings = $warnings;
+            $this->assignmentRecommendations = $this->buildAssignmentRecommendations($faculty, $schedules->first());
+            $this->toast('error', 'Suggested room is no longer available.');
+
+            return;
+        }
+
+        try {
+            DB::transaction(function () use ($schedules, $faculty, $room) {
+                $fresh = Schedule::lockForUpdate()->findMany($schedules->pluck('id')->all());
+
+                foreach ($fresh as $schedule) {
+                    $schedule->update([
+                        'room_id' => $room->id,
+                        'faculty_id' => $faculty->id,
+                        'status' => Schedule::STATUS_PARTIAL,
+                    ]);
+                }
+            });
+
+            $this->subjectSearch = '';
+            $this->resetPendingAssignment();
+            unset($this->selectedFaculty);
+            $this->toast('success', 'Suggested room applied and faculty assigned.');
+        } catch (\Throwable $exception) {
+            report($exception);
+            $this->toast('error', 'Could not apply the suggested room.');
+        }
+    }
+
+    private function pendingAssignmentContext(): array
+    {
+        if (! $this->selectedFacultyId || ! $this->pendingAssignmentScheduleId) {
+            return [null, collect()];
+        }
+
+        $ids = $this->pendingAssignmentGroupIds ?: [$this->pendingAssignmentScheduleId];
+
+        return [
+            Faculty::find($this->selectedFacultyId),
+            Schedule::with(['subject', 'room'])->findMany($ids),
+        ];
+    }
+
+    private function warningsForSchedules(Faculty $faculty, Collection $schedules, bool $includeSectionChecks = false): array
+    {
+        $warnings = [];
+        $overloadFlagged = false;
+        $conflictService = app(ScheduleConflictService::class);
+
+        foreach ($schedules as $schedule) {
+            if (! $schedule->subject) {
+                continue;
+            }
+
+            if (! $this->canAssignSubject(Auth::user(), $faculty, $schedule->subject)) {
+                $warnings[] = $this->eligibilityWarning($faculty, $schedule->subject, $schedule);
+            }
+
+            if ($includeSectionChecks) {
+                $sectionConflict = $conflictService->checkSectionConflict(
+                    $schedule->subject,
+                    (string) $schedule->day,
+                    Carbon::parse($schedule->start_time)->format('H:i:s'),
+                    Carbon::parse($schedule->end_time)->format('H:i:s'),
+                    $schedule->id,
+                    $schedule->room
+                );
+
+                if (($sectionConflict['status'] ?? true) === false) {
+                    $warnings[] = $this->warningFromConflict(
+                        $sectionConflict,
+                        $faculty,
+                        $schedule,
+                        'SECTION_CONFLICT',
+                        'Student Group Conflict',
+                        'The student group already has a class during this time.'
+                    );
+                }
+            }
+
+            foreach ($this->assignmentWarnings($faculty, $schedule) as $warning) {
+                if (($warning['type'] ?? '') === 'OVERLOAD') {
+                    if ($overloadFlagged) {
+                        continue;
+                    }
+                    $overloadFlagged = true;
+                }
+
+                if (! collect($warnings)->contains(fn (array $existing) => ($existing['message'] ?? '') === ($warning['message'] ?? ''))) {
+                    $warnings[] = $warning;
+                }
+            }
+        }
+
+        return collect($warnings)->unique(fn (array $warning) => ($warning['type'] ?? '').'|'.($warning['message'] ?? ''))->values()->all();
+    }
+
     private function persistAssignment(Schedule $schedule, Faculty $faculty, bool $overridden = false): void
     {
         try {
             $subjectCode = $schedule->subject->subject_code;
-            $scheduleId  = $schedule->id;
+            $scheduleId = $schedule->id;
 
             DB::transaction(function () use ($scheduleId, $faculty) {
                 $fresh = Schedule::lockForUpdate()->findOrFail($scheduleId);
@@ -455,7 +686,7 @@ class FacultyLoading extends Component
 
                 $fresh->update([
                     'faculty_id' => $faculty->id,
-                    'status'     => Schedule::STATUS_PARTIAL,
+                    'status' => Schedule::STATUS_PARTIAL,
                 ]);
             });
 
@@ -475,20 +706,54 @@ class FacultyLoading extends Component
 
     private function assignmentWarnings(Faculty $faculty, Schedule $schedule): array
     {
-        $warnings              = [];
-        $startTime             = Carbon::parse($schedule->start_time)->format('H:i:s');
-        $endTime               = Carbon::parse($schedule->end_time)->format('H:i:s');
-        $currentSubjects       = $this->assignedSubjects();
-        $currentUnits          = $currentSubjects->sum('units');
-        $subjectAlreadyAssigned = $currentSubjects->contains('id', $schedule->subject_id);
-        $newTotal              = $currentUnits + ($subjectAlreadyAssigned ? 0 : (int) $schedule->subject->units);
-        $maxUnits              = (int) ($faculty->max_units ?? 21);
+        $warnings = [];
+        $startTime = Carbon::parse($schedule->start_time)->format('H:i:s');
+        $endTime = Carbon::parse($schedule->end_time)->format('H:i:s');
+        $assignedSchedules = Schedule::query()
+            ->where('faculty_id', $faculty->id)
+            ->with(['subject', 'room'])
+            ->get();
+        $currentSubjects = $assignedSchedules
+            ->pluck('subject')
+            ->filter()
+            ->unique('id')
+            ->values();
+        $currentUnits = $currentSubjects->sum('units');
+        $duplicateSubject = $assignedSchedules->first(
+            fn (Schedule $assigned) => (int) $assigned->subject_id === (int) $schedule->subject_id
+                && ! $this->sameSubjectOffering($assigned, $schedule)
+        );
+        $subjectAlreadyAssigned = (bool) $duplicateSubject;
+        $newTotal = $currentUnits + ($subjectAlreadyAssigned ? 0 : (int) $schedule->subject->units);
+        $maxUnits = (int) ($faculty->max_units ?? 21);
+
+        if ($subjectAlreadyAssigned) {
+            $warnings[] = [
+                'type' => 'DUPLICATE_SUBJECT',
+                'title' => 'Duplicate Subject Assignment',
+                'message' => "{$faculty->full_name} is already assigned to {$schedule->subject->subject_code}.",
+                'details' => $this->warningDetails(
+                    $faculty,
+                    $schedule,
+                    $duplicateSubject,
+                    'This faculty member is already assigned to the same subject.'
+                ),
+                'overridable' => false,
+            ];
+        }
 
         if ($newTotal > $maxUnits) {
             $warnings[] = [
-                'type'    => 'OVERLOAD',
-                'title'   => 'Faculty Load Over Capacity',
+                'type' => 'OVERLOAD',
+                'title' => 'Faculty Load Limit Exceeded',
                 'message' => "{$schedule->subject->subject_code} would bring {$faculty->full_name} to {$newTotal}/{$maxUnits} units.",
+                'details' => $this->warningDetails(
+                    $faculty,
+                    $schedule,
+                    null,
+                    "Maximum load is {$maxUnits} units; this assignment would reach {$newTotal} units."
+                ),
+                'overridable' => false,
             ];
         }
 
@@ -503,11 +768,14 @@ class FacultyLoading extends Component
         );
 
         if (($facultyConflict['status'] ?? true) === false) {
-            $warnings[] = [
-                'type'    => $facultyConflict['conflict_type'] ?? 'FACULTY_CONFLICT',
-                'title'   => $facultyConflict['title']         ?? 'Faculty Schedule Conflict',
-                'message' => $facultyConflict['message']       ?? 'Faculty schedule conflict detected.',
-            ];
+            $warnings[] = $this->warningFromConflict(
+                $facultyConflict,
+                $faculty,
+                $schedule,
+                'FACULTY_CONFLICT',
+                'Faculty Conflict Detected',
+                'Faculty schedule conflict detected.'
+            );
         }
 
         if ($schedule->room_id) {
@@ -520,11 +788,14 @@ class FacultyLoading extends Component
             );
 
             if (($roomConflict['status'] ?? true) === false) {
-                $warnings[] = [
-                    'type'    => $roomConflict['conflict_type'] ?? 'ROOM_CONFLICT',
-                    'title'   => $roomConflict['title']         ?? 'Room Schedule Conflict',
-                    'message' => $roomConflict['message']       ?? 'Room schedule conflict detected.',
-                ];
+                $warnings[] = $this->warningFromConflict(
+                    $roomConflict,
+                    $faculty,
+                    $schedule,
+                    'ROOM_CONFLICT',
+                    'Room Conflict Detected',
+                    'Room schedule conflict detected.'
+                );
             }
         }
 
@@ -536,22 +807,346 @@ class FacultyLoading extends Component
         );
 
         if (($availability['status'] ?? true) === false) {
-            $warnings[] = [
-                'type'    => $availability['conflict_type'] ?? 'FACULTY_AVAILABILITY',
-                'title'   => $availability['title']         ?? 'Faculty Availability Conflict',
-                'message' => $availability['message']       ?? 'Faculty is not available during this time.',
-            ];
+            $warnings[] = $this->warningFromConflict(
+                $availability,
+                $faculty,
+                $schedule,
+                'FACULTY_AVAILABILITY',
+                'Faculty Availability Conflict',
+                'Faculty is not available during this time.'
+            );
         }
 
         return $warnings;
     }
 
+    private function sameSubjectOffering(Schedule $first, Schedule $second): bool
+    {
+        return (int) $first->subject_id === (int) $second->subject_id
+            && (string) $first->section === (string) $second->section
+            && Carbon::parse($first->start_time)->format('H:i:s') === Carbon::parse($second->start_time)->format('H:i:s')
+            && Carbon::parse($first->end_time)->format('H:i:s') === Carbon::parse($second->end_time)->format('H:i:s');
+    }
+
+    private function warningFromConflict(
+        array $conflict,
+        Faculty $faculty,
+        Schedule $schedule,
+        string $fallbackType,
+        string $fallbackTitle,
+        string $fallbackMessage
+    ): array {
+        $type = $conflict['conflict_type'] ?? $fallbackType;
+        $title = $conflict['title'] ?? $fallbackTitle;
+
+        if (in_array($type, ['FACULTY_CONFLICT', 'SAME_TIME_CONFLICT', 'OVERLAPPING_TIME_CONFLICT'], true)) {
+            $type = $this->facultyConflictType($conflict, $schedule);
+            $title = $type === 'SAME_TIME_CONFLICT'
+                ? 'Same Time Faculty Conflict'
+                : 'Overlapping Faculty Conflict';
+        }
+
+        $message = $conflict['message'] ?? $fallbackMessage;
+
+        return [
+            'type' => $type,
+            'title' => $title,
+            'message' => $message,
+            'details' => $this->warningDetailsFromConflict($faculty, $schedule, $conflict, $message),
+            'overridable' => false,
+        ];
+    }
+
+    private function warningDetails(Faculty $faculty, Schedule $schedule, ?Schedule $conflictingSchedule, string $reason): array
+    {
+        return [
+            'faculty_name' => $faculty->full_name,
+            'requested_subject' => $schedule->subject?->subject_code ?? 'Requested subject',
+            'conflicting_subject' => $conflictingSchedule?->subject?->subject_code ?? $schedule->subject?->subject_code ?? 'Subject',
+            'conflicting_subject_name' => $conflictingSchedule?->subject?->description ?? $schedule->subject?->description ?? null,
+            'day' => $conflictingSchedule?->day ?? $schedule->day,
+            'time' => $conflictingSchedule ? $this->formatScheduleTime($conflictingSchedule) : $this->formatScheduleTime($schedule),
+            'room' => $conflictingSchedule?->room?->room_name ?? $schedule->room?->room_name ?? 'Unassigned room',
+            'reason' => $reason,
+        ];
+    }
+
+    private function warningDetailsFromConflict(Faculty $faculty, Schedule $schedule, array $conflict, string $reason): array
+    {
+        $details = $conflict['details'] ?? [];
+        $summary = $conflict['conflicting_schedule'] ?? [];
+        $conflictingStart = $details['conflicting_start'] ?? null;
+        $conflictingEnd = $details['conflicting_end'] ?? null;
+        $conflictingTime = $summary['time'] ?? ($conflictingStart && $conflictingEnd ? "{$conflictingStart} - {$conflictingEnd}" : null);
+
+        return [
+            'faculty_name' => $faculty->full_name,
+            'requested_subject' => $schedule->subject?->subject_code ?? ($details['requested_subject'] ?? 'Requested subject'),
+            'conflicting_subject' => $summary['subject_code'] ?? $details['conflicting_subject'] ?? $schedule->subject?->subject_code ?? 'Subject',
+            'conflicting_subject_name' => $summary['subject_name'] ?? $details['conflicting_subject_name'] ?? null,
+            'day' => $summary['day'] ?? $details['conflicting_day'] ?? $details['requested_day'] ?? $schedule->day,
+            'time' => $conflictingTime ?? $details['requested_time'] ?? $this->formatScheduleTime($schedule),
+            'room' => $summary['room'] ?? $details['conflicting_room'] ?? $schedule->room?->room_name ?? 'Unassigned room',
+            'reason' => $reason,
+        ];
+    }
+
+    private function facultyConflictType(array $conflict, Schedule $schedule): string
+    {
+        $details = $conflict['details'] ?? [];
+        $requestedStart = Carbon::parse($schedule->start_time)->format('H:i:s');
+        $requestedEnd = Carbon::parse($schedule->end_time)->format('H:i:s');
+        $conflictingStart = $this->normalizeOptionalTime($details['conflicting_start'] ?? null);
+        $conflictingEnd = $this->normalizeOptionalTime($details['conflicting_end'] ?? null);
+
+        if ($conflictingStart === $requestedStart && $conflictingEnd === $requestedEnd) {
+            return 'SAME_TIME_CONFLICT';
+        }
+
+        return 'OVERLAPPING_TIME_CONFLICT';
+    }
+
+    private function formatScheduleTime(Schedule $schedule): string
+    {
+        return Carbon::parse($schedule->start_time)->format('h:i A').' - '.Carbon::parse($schedule->end_time)->format('h:i A');
+    }
+
+    private function normalizeOptionalTime(?string $time): ?string
+    {
+        if (! $time) {
+            return null;
+        }
+
+        try {
+            return Carbon::parse($time)->format('H:i:s');
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function openAssignmentFailure(Schedule $schedule, Faculty $faculty, array $warnings, array $groupIds = []): void
+    {
+        $this->pendingAssignmentScheduleId = $schedule->id;
+        $this->pendingAssignmentGroupIds = $groupIds;
+        $this->pendingAssignmentWarnings = $warnings;
+        $this->assignmentRecommendations = $this->buildAssignmentRecommendations($faculty, $schedule);
+        $this->conflictModalOpen = true;
+    }
+
+    private function eligibilityWarning(Faculty $faculty, ?Subject $subject, ?Schedule $schedule = null): array
+    {
+        $subjectCode = $subject?->subject_code ?? 'this subject';
+
+        if (! $subject) {
+            $message = 'Subject data is missing.';
+        } elseif ($this->subjectIsMinorOrGenEd($subject) && ! $faculty->canTeachMinorSubjects()) {
+            $message = "{$subjectCode} is a minor or GenEd subject. Only GenEd faculty or faculty marked Can Teach Minor can be assigned.";
+        } elseif ($faculty->isGenEd() && ! $this->subjectIsMinorOrGenEd($subject)) {
+            $message = "{$faculty->full_name} is a GenEd faculty member and cannot be assigned to major departmental subjects.";
+        } elseif (! $faculty->canTeachDepartment($subject->department)) {
+            $message = "{$faculty->full_name} is departmental faculty for {$faculty->displayDepartment()} and is not eligible for {$subject->department}.";
+        } else {
+            $message = "{$faculty->full_name} is not eligible for {$subjectCode} under the current role and department rules.";
+        }
+
+        return [
+            'type' => 'FACULTY_ELIGIBILITY',
+            'title' => 'Invalid Faculty Eligibility',
+            'message' => $message,
+            'details' => [
+                'faculty_name' => $faculty->full_name,
+                'requested_subject' => $subjectCode,
+                'conflicting_subject' => $subjectCode,
+                'conflicting_subject_name' => $subject?->description,
+                'day' => $schedule?->day,
+                'time' => $schedule ? $this->formatScheduleTime($schedule) : null,
+                'room' => $schedule?->room?->room_name,
+                'reason' => $message,
+            ],
+            'overridable' => false,
+        ];
+    }
+
+    private function buildAssignmentRecommendations(Faculty $faculty, Schedule $schedule): array
+    {
+        return [
+            'faculty' => $this->recommendedFaculty($faculty, $schedule),
+            'slots' => $this->recommendedSlots($faculty, $schedule),
+            'rooms' => $this->recommendedRooms($schedule),
+        ];
+    }
+
+    private function recommendedFaculty(Faculty $currentFaculty, Schedule $schedule): array
+    {
+        if (! $schedule->subject) {
+            return [];
+        }
+
+        $conflictService = app(ScheduleConflictService::class);
+        $start = Carbon::parse($schedule->start_time)->format('H:i:s');
+        $end = Carbon::parse($schedule->end_time)->format('H:i:s');
+        $user = Auth::user();
+
+        return Faculty::query()
+            ->approved()
+            ->with('schedules.subject')
+            ->whereKeyNot($currentFaculty->id)
+            ->orderBy('full_name')
+            ->get()
+            ->filter(fn (Faculty $candidate) => $this->canAssignSubject($user, $candidate, $schedule->subject))
+            ->filter(fn (Faculty $candidate) => ! $this->facultyWouldExceedLoad($candidate, $schedule))
+            ->filter(function (Faculty $candidate) use ($conflictService, $schedule, $start, $end) {
+                $conflict = $conflictService->checkFacultyConflict($candidate->id, $schedule->day, $start, $end, $schedule->id);
+                if (($conflict['status'] ?? true) === false) {
+                    return false;
+                }
+
+                $availability = $conflictService->checkFacultyAvailability($candidate, $schedule->day, $start, $end);
+
+                return ($availability['status'] ?? true) !== false;
+            })
+            ->map(function (Faculty $candidate) {
+                $assignedUnits = $candidate->schedules
+                    ->pluck('subject')
+                    ->filter()
+                    ->unique('id')
+                    ->sum('units');
+
+                return [
+                    'id' => $candidate->id,
+                    'name' => $candidate->full_name,
+                    'scope' => $candidate->scopeLabel(),
+                    'department' => $candidate->displayDepartment(),
+                    'remaining_units' => max(0, (int) ($candidate->max_units ?? 21) - (int) $assignedUnits),
+                ];
+            })
+            ->sortByDesc('remaining_units')
+            ->take(5)
+            ->values()
+            ->all();
+    }
+
+    private function facultyWouldExceedLoad(Faculty $faculty, Schedule $schedule): bool
+    {
+        $schedules = $faculty->relationLoaded('schedules')
+            ? $faculty->schedules
+            : $faculty->schedules()->with('subject')->get();
+        $currentSubjects = $schedules
+            ->pluck('subject')
+            ->filter()
+            ->unique('id')
+            ->values();
+        $alreadyHasSubject = $currentSubjects->contains('id', $schedule->subject_id);
+        $currentUnits = (int) $currentSubjects->sum('units');
+        $newUnits = $alreadyHasSubject ? 0 : (int) ($schedule->subject?->units ?? 0);
+
+        return ($currentUnits + $newUnits) > (int) ($faculty->max_units ?? 21);
+    }
+
+    private function recommendedSlots(Faculty $faculty, Schedule $schedule): array
+    {
+        if (! $schedule->subject || ! $schedule->room) {
+            return [];
+        }
+
+        $conflictService = app(ScheduleConflictService::class);
+        $settings = Setting::getScheduleSettings();
+        $durationMinutes = Carbon::parse($schedule->start_time)->diffInMinutes(Carbon::parse($schedule->end_time));
+        $boundsStart = Carbon::parse($settings['start_time']);
+        $latestStart = Carbon::parse($settings['end_time'])->subMinutes($durationMinutes);
+        $suggestions = [];
+
+        if ($latestStart->lt($boundsStart)) {
+            return [];
+        }
+
+        foreach ($settings['active_days'] as $day) {
+            foreach (CarbonPeriod::create($boundsStart->copy(), '30 minutes', $latestStart->copy()) as $slotStart) {
+                $slotEnd = $slotStart->copy()->addMinutes($durationMinutes);
+                $start = $slotStart->format('H:i:s');
+                $end = $slotEnd->format('H:i:s');
+
+                if ($day === $schedule->day && $start === Carbon::parse($schedule->start_time)->format('H:i:s')) {
+                    continue;
+                }
+
+                if ($conflictService->overlapsLunchBreak($start, $end)) {
+                    continue;
+                }
+
+                $checks = [
+                    $conflictService->checkRoomConflict($schedule->room_id, $day, $start, $end, $schedule->id),
+                    $conflictService->checkSectionConflict($schedule->subject, $day, $start, $end, $schedule->id, $schedule->room),
+                    $conflictService->checkFacultyConflict($faculty->id, $day, $start, $end, $schedule->id),
+                    $conflictService->checkFacultyAvailability($faculty, $day, $start, $end),
+                ];
+
+                if (collect($checks)->contains(fn (array $check) => ($check['status'] ?? true) === false)) {
+                    continue;
+                }
+
+                $suggestions[] = [
+                    'label' => "{$day} ".Carbon::parse($start)->format('h:i A').'-'.Carbon::parse($end)->format('h:i A'),
+                    'day' => $day,
+                    'start_time' => $start,
+                    'end_time' => $end,
+                    'time' => Carbon::parse($start)->format('h:i A').' - '.Carbon::parse($end)->format('h:i A'),
+                ];
+
+                if (count($suggestions) >= 4) {
+                    return $suggestions;
+                }
+            }
+        }
+
+        return $suggestions;
+    }
+
+    private function recommendedRooms(Schedule $schedule): array
+    {
+        if (! $schedule->subject || ! $schedule->room_id) {
+            return [];
+        }
+
+        $conflictService = app(ScheduleConflictService::class);
+        $start = Carbon::parse($schedule->start_time)->format('H:i:s');
+        $end = Carbon::parse($schedule->end_time)->format('H:i:s');
+
+        return Room::query()
+            ->available()
+            ->whereKeyNot($schedule->room_id)
+            ->orderBy('room_name')
+            ->get()
+            ->filter(function (Room $room) use ($schedule, $conflictService, $start, $end) {
+                try {
+                    if (! $room->isCompatibleWithSubject($schedule->subject)) {
+                        return false;
+                    }
+                } catch (\Throwable) {
+                    return false;
+                }
+
+                $conflict = $conflictService->checkRoomConflict($room->id, $schedule->day, $start, $end, $schedule->id, $schedule->subject, $room);
+
+                return ($conflict['status'] ?? true) !== false;
+            })
+            ->take(4)
+            ->map(fn (Room $room) => [
+                'id' => $room->id,
+                'name' => $room->room_name,
+                'type' => $room->type,
+            ])
+            ->values()
+            ->all();
+    }
+
     private function resetPendingAssignment(): void
     {
-        $this->conflictModalOpen           = false;
+        $this->conflictModalOpen = false;
         $this->pendingAssignmentScheduleId = null;
-        $this->pendingAssignmentWarnings   = [];
-        $this->pendingAssignmentGroupIds   = [];
+        $this->pendingAssignmentWarnings = [];
+        $this->pendingAssignmentGroupIds = [];
+        $this->assignmentRecommendations = [];
     }
 
     // ============================================================
@@ -564,11 +1159,13 @@ class FacultyLoading extends Component
 
         if (! $schedule || ! $schedule->subject) {
             $this->toast('error', 'Scheduled subject not found.');
+
             return;
         }
 
         if ($schedule->status === 'finalized') {
             $this->toast('error', 'Finalized schedules cannot be changed in Faculty Loading.');
+
             return;
         }
 
@@ -577,7 +1174,7 @@ class FacultyLoading extends Component
         try {
             $schedule->update([
                 'faculty_id' => null,
-                'status'     => Schedule::STATUS_PARTIAL,
+                'status' => Schedule::STATUS_PARTIAL,
             ]);
 
             unset($this->selectedFaculty);
@@ -596,6 +1193,7 @@ class FacultyLoading extends Component
     {
         if (empty($scheduleIds)) {
             $this->toast('error', 'No schedules provided.');
+
             return;
         }
 
@@ -603,11 +1201,13 @@ class FacultyLoading extends Component
 
         if ($schedules->isEmpty()) {
             $this->toast('error', 'Scheduled subjects not found.');
+
             return;
         }
 
         if ($schedules->contains(fn (Schedule $s) => $s->status === 'finalized')) {
             $this->toast('error', 'Finalized schedules cannot be changed in Faculty Loading.');
+
             return;
         }
 
@@ -617,7 +1217,7 @@ class FacultyLoading extends Component
             foreach ($schedules as $schedule) {
                 $schedule->update([
                     'faculty_id' => null,
-                    'status'     => Schedule::STATUS_PARTIAL,
+                    'status' => Schedule::STATUS_PARTIAL,
                 ]);
             }
 
@@ -635,7 +1235,7 @@ class FacultyLoading extends Component
 
     public function submitFacultyLoading(): void
     {
-        $user  = Auth::user();
+        $user = Auth::user();
         $query = Schedule::query()
             ->assignable()
             ->whereNotNull('faculty_id');
@@ -644,11 +1244,11 @@ class FacultyLoading extends Component
             $query->where(function (Builder $assignmentQuery) use ($user) {
                 $assignmentQuery->whereHas('subject', function (Builder $majorQuery) use ($user) {
                     $majorQuery->where('type', 'Major')
-                        ->where('department', $user->department);
+                        ->whereIn('department', Department::aliasesFor($user->department));
                 })->orWhere(function (Builder $minorQuery) use ($user) {
                     $minorQuery
                         ->whereHas('subject', fn (Builder $sq) => $sq->where('type', 'Minor'))
-                        ->whereHas('faculty',  fn (Builder $fq) => $fq->where('department', $user->department));
+                        ->whereHas('faculty', fn (Builder $fq) => $fq->whereIn('department', Department::aliasesFor($user->department)));
                 });
             });
         } elseif ($user->role === 'associate_dean') {
@@ -687,16 +1287,14 @@ class FacultyLoading extends Component
         }
 
         $subjectCode = $conflict->subject?->subject_code ?? 'another subject';
-        $roomName    = $conflict->room?->room_name       ?? 'Unknown Room';
+        $roomName = $conflict->room?->room_name ?? 'Unknown Room';
 
         return "Professor {$faculty->full_name} is already teaching {$subjectCode} in Room {$roomName} during this time.";
     }
 
     private function canAssignSubject($user, $faculty, $subject)
     {
-        $specialization = $faculty->teaching_specialization ?? 'Both';
-
-        if ($specialization !== 'Both' && $specialization !== $subject->type) {
+        if (! $user || ! $faculty || ! $subject || ! $faculty->isEligibleForSubject($subject)) {
             return false;
         }
 
@@ -705,28 +1303,69 @@ class FacultyLoading extends Component
         }
 
         if ($user->role === 'associate_dean') {
-            return $subject->type === 'Minor';
+            return $this->subjectIsMinorOrGenEd($subject);
         }
 
         if (in_array($user->role, ['dean', 'oic'])) {
-            if ($faculty->department !== $user->department) {
-                return false;
+            if ($faculty->isGenEd()) {
+                return $this->subjectIsMinorOrGenEd($subject);
             }
 
-            return $subject->type === 'Minor'
-                || ($subject->type === 'Major' && $user->department === $subject->department);
+            if ($this->subjectIsMinorOrGenEd($subject)) {
+                return $faculty->canTeachMinorSubjects();
+            }
+
+            return $this->departmentsMatch($subject->department, $user->department)
+                && $this->departmentsMatch($faculty->department, $subject->department);
         }
 
-        if ($subject->type === 'Minor') {
-            return true;
+        return $this->subjectIsMinorOrGenEd($subject)
+            || $this->departmentsMatch($subject->department, $user->department);
+    }
+
+    private function subjectIsMinorOrGenEd(?Subject $subject): bool
+    {
+        if (! $subject) {
+            return false;
         }
 
-        return $subject->type === 'Major' && $user->department === $subject->department;
+        $type = strtolower(trim((string) $subject->type));
+        $subjectType = strtolower(trim((string) ($subject->subject_type ?? '')));
+        $department = $this->normalizeDepartment($subject->department);
+        $major = $this->normalizeDepartment($subject->major);
+        $code = strtoupper((string) $subject->subject_code);
+
+        return $type === 'minor'
+            || $subjectType === 'minor'
+            || $department === 'GENED'
+            || $major === 'GENED'
+            || str_contains($code, 'NSTP')
+            || str_contains($code, 'PATHFIT');
+    }
+
+    private function normalizeDepartment(?string $department): string
+    {
+        return Department::normalizeCode($department) ?? '';
+    }
+
+    private function departmentsMatch(?string $first, ?string $second): bool
+    {
+        return Department::codesMatch($first, $second);
+    }
+
+    private function departmentAliases(?string $department): array
+    {
+        return Department::aliasesFor($department);
     }
 
     private function canOverrideAssignmentWarnings($user): bool
     {
-        return $user && in_array($user->role, ['admin', 'registrar'], true);
+        if (! $user || ! in_array($user->role, ['admin', 'registrar'], true)) {
+            return false;
+        }
+
+        return collect($this->pendingAssignmentWarnings)
+            ->every(fn (array $warning) => (bool) ($warning['overridable'] ?? false));
     }
 
     // ============================================================
@@ -735,21 +1374,39 @@ class FacultyLoading extends Component
 
     private function getFacultyQuery()
     {
-        $user  = Auth::user();
+        $user = Auth::user();
         $query = Faculty::query()
             ->approved()
             ->withCount('schedules');
 
         if (in_array($user->role, ['dean', 'oic'])) {
-            $query->where('department', $user->department);
+            $query->where(function (Builder $visibility) use ($user) {
+                $visibility->whereIn('department', $this->departmentAliases($user->department))
+                    ->orWhere('faculty_scope', Faculty::SCOPE_GENED)
+                    ->orWhere('faculty_scope', Faculty::SCOPE_CROSS_DEPARTMENT);
+            });
         } elseif ($user->role === 'associate_dean') {
-            $query->whereIn('teaching_specialization', ['Minor', 'Both']);
+            $query->eligibleForMinor();
+        }
+
+        if ($this->subjectTypeFilter === 'Minor') {
+            $query->eligibleForMinor();
+        }
+
+        if ($this->subjectTypeFilter === 'Major') {
+            $query->where('faculty_scope', '!=', Faculty::SCOPE_GENED);
+
+            if ($this->subjectDepartmentFilter !== 'all') {
+                $query->where(function (Builder $majorFaculty) {
+                    $majorFaculty->whereIn('department', $this->departmentAliases($this->subjectDepartmentFilter));
+                });
+            }
         }
 
         if ($this->search) {
             $query->where(function ($q) {
-                $q->where('full_name', 'like', '%' . $this->search . '%')
-                    ->orWhere('employee_id', 'like', '%' . $this->search . '%');
+                $q->where('full_name', 'like', '%'.$this->search.'%')
+                    ->orWhere('employee_id', 'like', '%'.$this->search.'%');
             });
         }
 
@@ -758,7 +1415,11 @@ class FacultyLoading extends Component
         }
 
         if ($this->departmentFilter !== 'all') {
-            $query->where('department', $this->departmentFilter);
+            $query->where(function (Builder $departmentQuery) {
+                $departmentQuery->whereIn('department', $this->departmentAliases($this->departmentFilter))
+                    ->orWhere('faculty_scope', Faculty::SCOPE_GENED)
+                    ->orWhere('faculty_scope', Faculty::SCOPE_CROSS_DEPARTMENT);
+            });
         }
 
         return $query;
@@ -784,6 +1445,7 @@ class FacultyLoading extends Component
         $query->whereHas('subject', function (Builder $subjectQuery) use ($user) {
             if ($user->role === 'associate_dean') {
                 $subjectQuery->where('type', 'Minor');
+
                 return;
             }
 
@@ -792,39 +1454,18 @@ class FacultyLoading extends Component
                     $visibility->where('type', 'Minor')
                         ->orWhere(function (Builder $majorQuery) use ($user) {
                             $majorQuery->where('type', 'Major')
-                                ->where('department', $user->department);
+                                ->whereIn('department', $this->departmentAliases($user->department));
                         });
                 });
             }
         });
 
-        if ($this->selectedFacultyId) {
-            $faculty = Faculty::find($this->selectedFacultyId);
-
-            if ($faculty) {
-                $query->whereHas('subject', function (Builder $subjectQuery) use ($faculty) {
-                    if ($faculty->teaching_specialization === 'Minor') {
-                        $subjectQuery->where('type', 'Minor');
-                    } elseif ($faculty->teaching_specialization === 'Major') {
-                        $subjectQuery->where('type', 'Major')
-                            ->where('department', $faculty->department);
-                    } else {
-                        $subjectQuery->where(function ($sub) use ($faculty) {
-                            $sub->where('type', 'Minor')
-                                ->orWhere(function ($inner) use ($faculty) {
-                                    $inner->where('type', 'Major')
-                                        ->where('department', $faculty->department);
-                                });
-                        });
-                    }
-                });
-            }
-        }
-
         if ($this->subjectDepartmentFilter !== 'all') {
             $query->where(function (Builder $filterQuery) {
-                $filterQuery->where('department', $this->subjectDepartmentFilter)
-                    ->orWhereHas('subject', fn (Builder $sq) => $sq->where('department', $this->subjectDepartmentFilter));
+                $aliases = $this->departmentAliases($this->subjectDepartmentFilter);
+
+                $filterQuery->whereIn('department', $aliases)
+                    ->orWhereHas('subject', fn (Builder $sq) => $sq->whereIn('department', $aliases));
             });
         }
 
@@ -855,7 +1496,8 @@ class FacultyLoading extends Component
 
         if (strlen($this->subjectSearch) > 1) {
             $term = $this->subjectSearch;
-            $query->where(function (Builder $searchQuery) use ($term) {
+            $departmentTerm = Department::normalizeCode($term);
+            $query->where(function (Builder $searchQuery) use ($term, $departmentTerm) {
                 $searchQuery->where('section', 'like', "%{$term}%")
                     ->orWhere('department', 'like', "%{$term}%")
                     ->orWhere('major', 'like', "%{$term}%")
@@ -867,13 +1509,32 @@ class FacultyLoading extends Component
                             ->orWhere('department', 'like', "%{$term}%")
                             ->orWhere('major', 'like', "%{$term}%");
                     });
+
+                if ($departmentTerm && $departmentTerm !== strtoupper(trim((string) $term))) {
+                    $searchQuery->orWhere('department', 'like', "%{$departmentTerm}%")
+                        ->orWhereHas('subject', fn (Builder $q) => $q->where('department', 'like', "%{$departmentTerm}%"));
+                }
             });
         }
 
-        return $query
+        $schedules = $query
             ->orderBy('start_time')
             ->get()
             ->pipe(fn (Collection $schedules) => $this->sortSchedules($schedules));
+
+        if ($this->selectedFacultyId) {
+            $faculty = Faculty::find($this->selectedFacultyId);
+
+            if ($faculty) {
+                $schedules = $schedules
+                    ->filter(fn (Schedule $schedule) => ((int) $schedule->faculty_id === (int) $faculty->id)
+                        || $this->canAssignSubject($user, $faculty, $schedule->subject)
+                    )
+                    ->values();
+            }
+        }
+
+        return $schedules;
     }
 
     /**
@@ -901,13 +1562,13 @@ class FacultyLoading extends Component
                 // Two schedules with the same subject/section/time on different days
                 // belong to the same "offering" and must share one faculty assignment.
                 $start = Carbon::parse($schedule->start_time)->format('H:i');
-                $end   = Carbon::parse($schedule->end_time)->format('H:i');
+                $end = Carbon::parse($schedule->end_time)->format('H:i');
 
                 return implode('::', [
                     $schedule->subject_id,
-                    $schedule->section   ?? 'none',
+                    $schedule->section ?? 'none',
                     $schedule->department ?? '',
-                    $schedule->major      ?? '',
+                    $schedule->major ?? '',
                     $schedule->year_level ?? '',
                     $start,
                     $end,
@@ -915,9 +1576,9 @@ class FacultyLoading extends Component
             })
             ->map(function (Collection $group) {
                 /** @var Schedule $first */
-                $first   = $group->first();
+                $first = $group->first();
                 $subject = $first->subject;
-                $room    = $first->room;
+                $room = $first->room;
 
                 $days = $group
                     ->map(fn (Schedule $s) => $s->day ?? 'N/A')
@@ -925,40 +1586,40 @@ class FacultyLoading extends Component
                     ->values()
                     ->implode(' / ');
 
-                $department = $first->department ?? $subject?->department ?? 'N/A';
-                $major      = $first->major      ?? $subject?->major      ?? 'N/A';
-                $year       = $first->year_level ?? $subject?->year_level ?? 'N/A';
-                $section    = $first->section    ?? $subject?->section    ?? 'N/A';
+                $department = Department::normalizeCode($first->department ?? $subject?->department) ?? 'N/A';
+                $major = $first->major ?? $subject?->major ?? 'N/A';
+                $year = $first->year_level ?? $subject?->year_level ?? 'N/A';
+                $section = $first->section ?? $subject?->section ?? 'N/A';
 
                 // Determine unified assignment state for the group:
                 // If ANY schedule in the group has a faculty_id, treat the whole group as assigned.
                 $assignedFacultyId = $group->first(fn (Schedule $s) => $s->faculty_id !== null)?->faculty_id;
-                $assignedFaculty   = $assignedFacultyId
+                $assignedFaculty = $assignedFacultyId
                     ? ($group->first(fn (Schedule $s) => $s->faculty_id !== null)?->faculty?->full_name ?? null)
                     : null;
 
                 $isFinalized = $group->contains(fn (Schedule $s) => $s->status === Schedule::STATUS_FINALIZED);
 
                 return [
-                    'schedule_ids'       => $group->pluck('id')->all(),
-                    'first_schedule_id'  => $first->id,
-                    'subject_code'       => $subject?->subject_code ?? 'N/A',
-                    'edp_code'           => $subject?->edp_code     ?? 'No EDP',
-                    'description'        => $subject?->description  ?? 'Untitled subject',
-                    'units'              => $subject?->units         ?? 0,
-                    'type'               => $subject?->type         ?? 'N/A',
-                    'department'         => $department,
-                    'major'              => $major,
-                    'year'               => $year,
-                    'section'            => $section,
-                    'room'               => $room?->room_name ?? 'No room',
-                    'days'               => $days,
-                    'time'               => Carbon::parse($first->start_time)->format('h:i A')
-                                           . ' - '
-                                           . Carbon::parse($first->end_time)->format('h:i A'),
-                    'faculty_id'         => $assignedFacultyId,
-                    'faculty_name'       => $assignedFaculty,
-                    'is_finalized'       => $isFinalized,
+                    'schedule_ids' => $group->pluck('id')->all(),
+                    'first_schedule_id' => $first->id,
+                    'subject_code' => $subject?->subject_code ?? 'N/A',
+                    'edp_code' => $subject?->edp_code ?? 'No EDP',
+                    'description' => $subject?->description ?? 'Untitled subject',
+                    'units' => $subject?->units ?? 0,
+                    'type' => $subject?->type ?? 'N/A',
+                    'department' => $department,
+                    'major' => $major,
+                    'year' => $year,
+                    'section' => $section,
+                    'room' => $room?->room_name ?? 'No room',
+                    'days' => $days,
+                    'time' => Carbon::parse($first->start_time)->format('h:i A')
+                                           .' - '
+                                           .Carbon::parse($first->end_time)->format('h:i A'),
+                    'faculty_id' => $assignedFacultyId,
+                    'faculty_name' => $assignedFaculty,
+                    'is_finalized' => $isFinalized,
                 ];
             })
             ->values();
@@ -973,11 +1634,13 @@ class FacultyLoading extends Component
     {
         if (! $this->selectedFacultyId) {
             $this->toast('error', 'Please select a faculty member first.');
+
             return;
         }
 
         if (empty($scheduleIds)) {
             $this->toast('error', 'No schedules provided.');
+
             return;
         }
 
@@ -985,6 +1648,7 @@ class FacultyLoading extends Component
 
         if (! $faculty) {
             $this->toast('error', 'Faculty not found.');
+
             return;
         }
 
@@ -992,6 +1656,7 @@ class FacultyLoading extends Component
 
         if ($schedules->isEmpty()) {
             $this->toast('error', 'Scheduled subjects not found.');
+
             return;
         }
 
@@ -1000,12 +1665,14 @@ class FacultyLoading extends Component
 
         if (! $first->subject) {
             $this->toast('error', 'Subject data missing.');
+
             return;
         }
 
         // Check none are finalized
         if ($schedules->contains(fn (Schedule $s) => $s->status === Schedule::STATUS_FINALIZED)) {
             $this->toast('error', 'Finalized schedules cannot be changed in Faculty Loading.');
+
             return;
         }
 
@@ -1016,17 +1683,23 @@ class FacultyLoading extends Component
 
         if ($assignedElsewhere) {
             $this->toast('warning', "{$first->subject->subject_code} is already assigned to another faculty member.");
+
             return;
         }
 
         // Check already all assigned to this faculty
         if ($schedules->every(fn (Schedule $s) => (int) $s->faculty_id === (int) $faculty->id)) {
             $this->toast('warning', "{$first->subject->subject_code} is already assigned to {$faculty->full_name}.");
+
             return;
         }
 
         if (! $this->canAssignSubject(Auth::user(), $faculty, $first->subject)) {
-            $this->toast('error', 'Unauthorized assignment.');
+            $this->openAssignmentFailure($first, $faculty, [
+                $this->eligibilityWarning($faculty, $first->subject, $first),
+            ], $scheduleIds);
+            $this->toast('error', 'Assignment blocked by faculty eligibility rules.');
+
             return;
         }
 
@@ -1034,8 +1707,8 @@ class FacultyLoading extends Component
         // time conflict on day 2 (e.g. Tuesday) is caught even when day 1
         // (Monday) is free.  Unit-overload only needs to be counted once, so
         // we skip it on subsequent schedules once it has already been flagged.
-        $warnings           = [];
-        $overloadFlagged    = false;
+        $warnings = [];
+        $overloadFlagged = false;
 
         foreach ($schedules as $scheduleItem) {
             $dayWarnings = $this->assignmentWarnings($faculty, $scheduleItem);
@@ -1064,15 +1737,17 @@ class FacultyLoading extends Component
             // Store only the first schedule ID for the conflict modal flow;
             // on override we will assign all IDs in the group.
             $this->pendingAssignmentScheduleId = $first->id;
-            $this->pendingAssignmentGroupIds   = $scheduleIds;
-            $this->pendingAssignmentWarnings   = $warnings;
-            $this->conflictModalOpen           = true;
+            $this->pendingAssignmentGroupIds = $scheduleIds;
+            $this->pendingAssignmentWarnings = $warnings;
+            $this->assignmentRecommendations = $this->buildAssignmentRecommendations($faculty, $first);
+            $this->conflictModalOpen = true;
             $this->toast(
                 $this->canOverrideAssignmentWarnings(Auth::user()) ? 'warning' : 'error',
                 $this->canOverrideAssignmentWarnings(Auth::user())
                     ? 'Assignment needs review before override.'
                     : 'Assignment blocked by load or conflict validation.'
             );
+
             return;
         }
 
@@ -1105,7 +1780,7 @@ class FacultyLoading extends Component
                 foreach ($fresh as $schedule) {
                     $schedule->update([
                         'faculty_id' => $faculty->id,
-                        'status'     => Schedule::STATUS_PARTIAL,
+                        'status' => Schedule::STATUS_PARTIAL,
                     ]);
                 }
             });
@@ -1130,14 +1805,14 @@ class FacultyLoading extends Component
 
     private function getFacultyConflicts(Collection $assignedSchedules): Collection
     {
-        $conflicts       = collect();
-        $schedules       = $assignedSchedules->values();
+        $conflicts = collect();
+        $schedules = $assignedSchedules->values();
         $conflictService = app(ScheduleConflictService::class);
 
         foreach ($schedules as $schedule) {
             if (! Setting::dayIsActive((string) $schedule->day)) {
                 $conflicts->push([
-                    'title'   => 'Inactive Schedule Day',
+                    'title' => 'Inactive Schedule Day',
                     'message' => "{$schedule->subject?->subject_code} is scheduled on {$schedule->day}, which is disabled in global settings.",
                 ]);
             }
@@ -1152,7 +1827,7 @@ class FacultyLoading extends Component
 
                 if (($availability['status'] ?? true) === false) {
                     $conflicts->push([
-                        'title'   => $availability['title']   ?? 'Faculty Availability Conflict',
+                        'title' => $availability['title'] ?? 'Faculty Availability Conflict',
                         'message' => $availability['message'] ?? 'Faculty availability conflict detected.',
                     ]);
                 }
@@ -1161,7 +1836,7 @@ class FacultyLoading extends Component
 
         for ($i = 0; $i < $schedules->count(); $i++) {
             for ($j = $i + 1; $j < $schedules->count(); $j++) {
-                $first  = $schedules[$i];
+                $first = $schedules[$i];
                 $second = $schedules[$j];
 
                 if ($first->day !== $second->day) {
@@ -1173,7 +1848,7 @@ class FacultyLoading extends Component
 
                 if ($overlaps) {
                     $conflicts->push([
-                        'title'   => 'Overlapping Faculty Schedule',
+                        'title' => 'Overlapping Faculty Schedule',
                         'message' => "{$first->subject?->subject_code} overlaps with {$second->subject?->subject_code} on {$first->day}.",
                     ]);
                 }
@@ -1186,7 +1861,7 @@ class FacultyLoading extends Component
     private function getScheduleGroups(Collection $assignedSchedules): Collection
     {
         $activeDays = Setting::getActiveDays();
-        $otherDays  = $assignedSchedules
+        $otherDays = $assignedSchedules
             ->pluck('day')
             ->filter()
             ->unique()
@@ -1211,7 +1886,7 @@ class FacultyLoading extends Component
         $user = Auth::user();
 
         if (in_array($user->role, ['dean', 'oic'])) {
-            return [$user->department];
+            return [Department::normalizeCode($user->department)];
         }
 
         return $this->collectDepartmentCodes(
@@ -1222,8 +1897,8 @@ class FacultyLoading extends Component
     private function getScheduleDepartments(): array
     {
         $scheduleDepartments = Schedule::query()->select('department')->distinct()->pluck('department');
-        $subjectDepartments  = Subject::query()->select('department')->distinct()->pluck('department');
-        $departmentCodes     = Department::query()->select('code')->distinct()->pluck('code');
+        $subjectDepartments = Subject::query()->select('department')->distinct()->pluck('department');
+        $departmentCodes = Department::query()->select('code')->distinct()->pluck('code');
 
         return $this->collectDepartmentCodes($scheduleDepartments, $subjectDepartments, $departmentCodes);
     }
@@ -1233,7 +1908,7 @@ class FacultyLoading extends Component
         $codes = collect($collections)
             ->flatMap(fn ($items) => collect($items))
             ->filter()
-            ->map(fn ($code) => trim((string) $code))
+            ->map(fn ($code) => Department::normalizeCode($code))
             ->filter()
             ->unique()
             ->sort()
@@ -1246,7 +1921,7 @@ class FacultyLoading extends Component
     private function getAvailableMajors()
     {
         $scheduleMajors = Schedule::query()->select('major')->distinct()->pluck('major');
-        $subjectMajors  = Subject::query()->select('major')->distinct()->pluck('major');
+        $subjectMajors = Subject::query()->select('major')->distinct()->pluck('major');
 
         return collect(self::DEFAULT_MAJOR_FILTERS)
             ->merge($scheduleMajors)
@@ -1263,7 +1938,7 @@ class FacultyLoading extends Component
     private function getAvailableYearLevels()
     {
         $scheduleYears = Schedule::query()->select('year_level')->distinct()->pluck('year_level');
-        $subjectYears  = Subject::query()->select('year_level')->distinct()->pluck('year_level');
+        $subjectYears = Subject::query()->select('year_level')->distinct()->pluck('year_level');
 
         $years = collect([1, 2, 3, 4])
             ->merge($scheduleYears)
@@ -1282,7 +1957,7 @@ class FacultyLoading extends Component
     private function getAvailableSections()
     {
         $scheduleSections = Schedule::query()->select('section')->distinct()->pluck('section');
-        $subjectSections  = Subject::query()->select('section')->distinct()->pluck('section');
+        $subjectSections = Subject::query()->select('section')->distinct()->pluck('section');
 
         return $scheduleSections
             ->merge($subjectSections)
@@ -1297,19 +1972,17 @@ class FacultyLoading extends Component
 
     private function getAvailableSubjectTypes()
     {
-        $user    = Auth::user();
+        $user = Auth::user();
         $faculty = $this->selectedFaculty;
 
         if ($faculty) {
-            if ($faculty->teaching_specialization === 'Minor') {
+            if ($faculty->isGenEd()) {
                 return ['Minor'];
             }
 
-            if ($faculty->teaching_specialization === 'Major') {
-                return ['Major'];
-            }
-
-            return ['Major', 'Minor'];
+            return $faculty->canTeachMinorSubjects()
+                ? ['Major', 'Minor']
+                : ['Major'];
         }
 
         if ($user->role === 'associate_dean') {
@@ -1317,7 +1990,7 @@ class FacultyLoading extends Component
         }
 
         if (in_array($user->role, ['dean', 'oic'])) {
-            return ['Major'];
+            return ['Major', 'Minor'];
         }
 
         return ['Major', 'Minor'];
@@ -1330,7 +2003,7 @@ class FacultyLoading extends Component
         return $schedules
             ->sortBy(function (Schedule $schedule) use ($dayOrder) {
                 $dayIndex = $dayOrder[$schedule->day] ?? 99;
-                $time     = Carbon::parse($schedule->start_time)->format('H:i:s');
+                $time = Carbon::parse($schedule->start_time)->format('H:i:s');
 
                 return sprintf('%02d-%s-%08d', $dayIndex, $time, $schedule->id);
             })
@@ -1343,7 +2016,7 @@ class FacultyLoading extends Component
 
     public function render()
     {
-        $user      = Auth::user();
+        $user = Auth::user();
         $faculties = $this->getFacultyQuery()
             ->with('schedules.subject')
             ->orderBy('full_name', 'asc')
@@ -1356,46 +2029,46 @@ class FacultyLoading extends Component
                     ->sum('units');
             });
 
-        $availableSubjects           = $this->getAvailableSubjects();
-        $groupedAvailableSubjects    = $this->getGroupedAvailableSubjects();
-        $currentFaculty         = $this->selectedFaculty;
-        $assignedSchedules      = $this->assignedSchedules();
-        $assignedSubjects       = $this->assignedSubjects();
+        $availableSubjects = $this->getAvailableSubjects();
+        $groupedAvailableSubjects = $this->getGroupedAvailableSubjects();
+        $currentFaculty = $this->selectedFaculty;
+        $assignedSchedules = $this->assignedSchedules();
+        $assignedSubjects = $this->assignedSubjects();
         $groupedAssignedSubjects = $this->groupedAssignedSubjects();
-        $facultySummary         = $this->getFacultySummary();
-        $facultyDepartments     = $this->getFacultyDepartments();
-        $scheduleDepartments    = $this->getScheduleDepartments();
-        $majors                 = $this->getAvailableMajors();
-        $yearLevels             = $this->getAvailableYearLevels();
-        $sections               = $this->getAvailableSections();
-        $subjectTypes           = $this->getAvailableSubjectTypes();
-        $employmentTypes        = ['Full-Time', 'Part-Time'];
-        $facultyConflicts       = $this->getFacultyConflicts($assignedSchedules);
-        $scheduleGroups         = $this->getScheduleGroups($assignedSchedules);
-        $activeDays             = Setting::getActiveDays();
+        $facultySummary = $this->getFacultySummary();
+        $facultyDepartments = $this->getFacultyDepartments();
+        $scheduleDepartments = $this->getScheduleDepartments();
+        $majors = $this->getAvailableMajors();
+        $yearLevels = $this->getAvailableYearLevels();
+        $sections = $this->getAvailableSections();
+        $subjectTypes = $this->getAvailableSubjectTypes();
+        $employmentTypes = ['Full-time', 'Part-time'];
+        $facultyConflicts = $this->getFacultyConflicts($assignedSchedules);
+        $scheduleGroups = $this->getScheduleGroups($assignedSchedules);
+        $activeDays = Setting::getActiveDays();
 
         return view('livewire.faculty-loading', [
-            'faculties'               => $faculties,
-            'availableSubjects'          => $availableSubjects,
-            'groupedAvailableSubjects'   => $groupedAvailableSubjects,
-            'assignedSchedules'       => $assignedSchedules,
-            'assignedSubjects'        => $assignedSubjects,
+            'faculties' => $faculties,
+            'availableSubjects' => $availableSubjects,
+            'groupedAvailableSubjects' => $groupedAvailableSubjects,
+            'assignedSchedules' => $assignedSchedules,
+            'assignedSubjects' => $assignedSubjects,
             'groupedAssignedSubjects' => $groupedAssignedSubjects,
-            'currentFaculty'          => $currentFaculty,
-            'facultySummary'          => $facultySummary,
-            'facultyDepartments'      => $facultyDepartments,
-            'scheduleDepartments'     => $scheduleDepartments,
-            'majors'                  => $majors,
-            'yearLevels'              => $yearLevels,
-            'sections'                => $sections,
-            'employmentTypes'         => $employmentTypes,
-            'subjectTypes'            => $subjectTypes,
-            'userRole'                => $user->role,
-            'activeTab'               => $this->activeTab,
-            'facultyConflicts'        => $facultyConflicts,
-            'scheduleGroups'          => $scheduleGroups,
-            'activeDays'              => $activeDays,
-            'canOverrideWarnings'     => $this->canOverrideAssignmentWarnings($user),
+            'currentFaculty' => $currentFaculty,
+            'facultySummary' => $facultySummary,
+            'facultyDepartments' => $facultyDepartments,
+            'scheduleDepartments' => $scheduleDepartments,
+            'majors' => $majors,
+            'yearLevels' => $yearLevels,
+            'sections' => $sections,
+            'employmentTypes' => $employmentTypes,
+            'subjectTypes' => $subjectTypes,
+            'userRole' => $user->role,
+            'activeTab' => $this->activeTab,
+            'facultyConflicts' => $facultyConflicts,
+            'scheduleGroups' => $scheduleGroups,
+            'activeDays' => $activeDays,
+            'canOverrideWarnings' => $this->canOverrideAssignmentWarnings($user),
         ])->layout('layouts.app');
     }
 }

@@ -2,1045 +2,543 @@
 
 namespace App\Livewire;
 
+use App\Models\Department;
 use App\Models\Faculty;
 use App\Models\FacultyLog;
 use App\Models\User;
-use Livewire\Component;
-use Livewire\WithPagination;
-use Livewire\WithFileUploads;
-use Illuminate\Validation\Rule;
-use Illuminate\Support\Facades\Notification;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use App\Notifications\FacultyRequestNotification;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\Rule;
+use Livewire\Component;
+use Livewire\WithFileUploads;
+use Livewire\WithPagination;
 
 class ManageFaculty extends Component
 {
-    use WithPagination, WithFileUploads;
+    use WithFileUploads, WithPagination;
 
-    // Filters & UI State
     public $search = '';
-    public $filterDepartment = ''; 
-    public $filterType = ''; 
-    public $filterSpecialization = '';
+
+    public $filterDepartment = '';
+
+    public $filterType = '';
+
+    public $filterScope = '';
+
     public $showModal = false;
+
     public $bulkOpen = false;
+
     public $isEditMode = false;
-    public $importFile;
-    public $importPreview = [];
-    public $bulk = false;
-    
-    // Form fields
-    public $faculty_id; 
-    public $employee_id, $full_name, $email, $department;
-    public $employment_type = 'Full-time';
-    public $teaching_specialization = 'Both';
-    public $max_units = 21;
-    
-    public $selectedFaculty = [];
-    public $selectAll = false;
+
     public $confirmingDeletion = false;
-    public $importSuccess = false;
+
+    public $importFile;
+
+    public $importPreview = [];
+
+    public $faculty_id;
+
+    public $employee_id;
+
+    public $full_name;
+
+    public $email;
+
+    public $department;
+
+    public $employment_type = 'Full-time';
+
+    public $faculty_scope = Faculty::SCOPE_DEPARTMENTAL;
+
+    public $can_teach_minor = false;
+
+    public $max_units = 21;
+
+    public $selectedFaculty = [];
+
+    public $selectAll = false;
 
     protected $queryString = [
         'search' => ['except' => ''],
         'filterDepartment' => ['except' => ''],
+        'filterScope' => ['except' => ''],
     ];
 
-    private function isGlobalViewer()
+    public function isGlobalViewer(): bool
     {
-        return in_array(auth()->user()->role, ['admin', 'registrar', 'associate_dean']);
+        return in_array(auth()->user()?->role, ['admin', 'registrar', 'associate_dean'], true);
     }
 
-    private function isAdminOrRegistrar()
+    public function isAdminOrRegistrar(): bool
     {
-        return in_array(auth()->user()->role, ['admin', 'registrar']);
+        return in_array(auth()->user()?->role, ['admin', 'registrar'], true);
     }
 
-    /**
-     * Generate next employee ID based on the last ID in database
-     */
-    private function generateNextEmployeeId()
+    public function updatedSelectAll($value): void
     {
-        try {
-            $lastFaculty = Faculty::orderBy('id', 'desc')->first();
-            
-            if (!$lastFaculty) {
-                return "2026-0001";
-            }
+        if (! $value) {
+            $this->selectedFaculty = [];
 
-            $lastId = $lastFaculty->employee_id;
-            
-            // Extract the number part from the ID (e.g., "2026-1005" -> 1005)
-            if (preg_match('/(\d+)-(\d+)$/', $lastId, $matches)) {
-                $year = $matches[1];
-                $number = (int)$matches[2];
-                $nextNumber = $number + 1;
-                return $year . "-" . str_pad($nextNumber, 4, '0', STR_PAD_LEFT);
-            } else {
-                // Fallback if format is different
-                $number = (int)filter_var($lastId, FILTER_SANITIZE_NUMBER_INT);
-                return "2026-" . str_pad($number + 1, 4, '0', STR_PAD_LEFT);
-            }
-        } catch (\Exception $e) {
-            Log::error('Error generating employee ID: ' . $e->getMessage());
-            return "2026-0001";
+            return;
         }
-    }
 
-    public function updatedSelectAll($value)
-{
-    if ($value) {
-        $user = auth()->user();
-        
-        // This query MUST match your render() query filters exactly
-        $this->selectedFaculty = Faculty::query()
-            ->approved()
-            ->when(!$this->isGlobalViewer(), function ($q) use ($user) {
-                return $q->where('department', $user->department);
-            })
-            ->when($this->filterDepartment && $this->isGlobalViewer(), function ($q) {
-                return $q->where('department', $this->filterDepartment);
-            })
-            // Add the new filters here too
-            ->when($this->filterType, fn($q) => $q->where('employment_type', $this->filterType))
-            ->when($this->filterSpecialization, fn($q) => $q->where('teaching_specialization', $this->filterSpecialization))
-            ->when($this->search, function ($q) {
-                $q->where(function ($sub) {
-                    $sub->where('full_name', 'like', "%{$this->search}%")
-                        ->orWhere('employee_id', 'like', "%{$this->search}%");
-                });
-            })
+        $this->selectedFaculty = $this->baseFacultyQuery()
             ->pluck('id')
-            ->map(fn($id) => (string) $id)
+            ->map(fn ($id) => (string) $id)
             ->toArray();
-    } else {
-        $this->selectedFaculty = [];
     }
-}
 
-    private function logAction($facultyId, $action, $description, $department = null) 
+    public function updatingSearch(): void
     {
-        try {
-            FacultyLog::create([
-                'faculty_id'  => $facultyId, 
-                'user_id'     => auth()->id(), 
-                'action'      => $action,      
-                'description' => $description,
-                'department'  => $department ?? (auth()->user()->role === 'dean' ? auth()->user()->department : null),
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Error creating faculty log: ' . $e->getMessage());
+        $this->resetPage();
+    }
+
+    public function updatingFilterDepartment(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatingFilterScope(): void
+    {
+        $this->resetPage();
+    }
+
+    public function updatedFacultyScope($value): void
+    {
+        if ($value === Faculty::SCOPE_GENED) {
+            $this->department = null;
+            $this->can_teach_minor = true;
+        }
+
+        if (in_array(auth()->user()?->role, ['dean', 'oic'], true)) {
+            $this->faculty_scope = Faculty::SCOPE_DEPARTMENTAL;
+            $this->department = Department::normalizeCode(auth()->user()->department);
         }
     }
 
-    public function updatingSearch() { $this->resetPage(); }
-    public function updatingFilterDepartment() { $this->resetPage(); }
-
-    public function openModal() 
+    public function openModal(): void
     {
-        $this->reset(['employee_id', 'full_name', 'email', 'department', 'faculty_id']);
-        $this->employment_type = 'Full-time';
-        $this->teaching_specialization = 'Both';
-        $this->max_units = 21;
-        $this->resetValidation();
-        $this->isEditMode = false;
-
-        // AUTO-GENERATE NEXT EMPLOYEE ID
+        $this->resetForm();
         $this->employee_id = $this->generateNextEmployeeId();
 
-        // Only lock department for dean/oic
         $user = auth()->user();
-        if (in_array($user->role, ['dean', 'oic']) && $user->department) {
-            $this->department = $user->department;
+        if (in_array($user?->role, ['dean', 'oic'], true) && $user->department) {
+            $this->faculty_scope = Faculty::SCOPE_DEPARTMENTAL;
+            $this->department = Department::normalizeCode($user->department);
         }
 
-        $this->showModal = true; 
+        $this->showModal = true;
     }
 
-    protected $rules = [
-        'employee_id' => 'required|unique:faculties,employee_id',
-        'full_name'   => 'required|min:5|regex:/(\s)/',
-        'email'       => 'required|email',
-        'department'  => 'required',
-        'employment_type' => 'required|string',
-        'teaching_specialization' => 'required|in:Major,Minor,Both',
-        'max_units' => 'required|numeric|min:1',
-    ];
-
-    public function saveFaculty() 
+    public function saveFaculty(): void
     {
         try {
-            $this->validate([
-                'employee_id' => 'required|unique:faculties,employee_id',
-                'full_name'   => 'required|unique:faculties,full_name|min:5|regex:/(\s)/', 
-                'email'       => 'required|unique:faculties,email|email', 
-                'department'  => 'required',
-                'employment_type' => 'required|in:Full-time,Part-time',
-                'teaching_specialization' => 'required|in:Major,Minor,Both',
-                'max_units' => 'required|integer|min:1|max:30',
-            ], [
-                'full_name.unique'   => '⚠️ This name is already being used.',
-                'email.unique'       => '⚠️ This email is already being used.',
-                'employee_id.unique' => '⚠️ This ID is already assigned.',
-                'full_name.regex'    => '⚠️ Please enter your complete full name.',
-                'email.email'        => "⚠️ Please enter a valid email.",
-                'full_name.min'      => '⚠️ Name is too short.',
-                'email.required'     => '⚠️ The email address is required.',
-                'employment_type.required' => '⚠️ Employment type is required.',
-                'teaching_specialization.required' => '⚠️ Teaching specialization is required.',
-                'max_units.required' => '⚠️ Max units is required.',
-                'max_units.integer' => '⚠️ Max units must be a number.',
-                'max_units.min' => '⚠️ Max units must be at least 1.',
-                'max_units.max' => '⚠️ Max units cannot exceed 30.',
-            ]);
+            $this->normalizeFormState();
+            $this->validate($this->facultyValidationRules(), $this->validationMessages());
 
             $status = $this->isAdminOrRegistrar() ? 'approved' : 'pending';
-
-            $newFaculty = Faculty::create([
-                'employee_id'  => $this->employee_id,
-                'full_name'    => $this->full_name,
-                'email'        => $this->email,
-                'department'   => $this->department,
-                'employment_type' => $this->employment_type,
-                'teaching_specialization' => $this->teaching_specialization,
-                'max_units' => (int)$this->max_units,
-                'status'       => $status,
+            $faculty = Faculty::create($this->facultyPayload([
+                'status' => $status,
                 'requested_by' => auth()->id(),
-            ]);
+            ]));
 
-            if (!$this->isAdminOrRegistrar()) {
-                $allRecipients = $this->getStakeholders($newFaculty->department);
-                foreach ($allRecipients as $recipient) {
-                    if ($recipient->id === auth()->id()) continue;
-                    try {
-                        $recipient->notify(new FacultyRequestNotification($newFaculty, auth()->user()->name, 'pending'));
-                    } catch (\Exception $e) {
-                        Log::error('Error sending notification: ' . $e->getMessage());
-                    }
-                }
-            }
-
+            $this->notifyStakeholders($faculty, 'pending');
             $this->logAction(
-                $newFaculty->id, 
-                'created', 
-                strtoupper(auth()->user()->role) . " added faculty: {$newFaculty->full_name} ({$newFaculty->employment_type}, {$newFaculty->teaching_specialization}, {$newFaculty->max_units} units)",
-                $newFaculty->department
-            );
-
-            $this->showModal = false;
-            $this->reset(['employee_id', 'full_name', 'email', 'department', 'faculty_id', 'employment_type', 'teaching_specialization', 'max_units']);
-            $this->employment_type = 'Full-time';
-            $this->teaching_specialization = 'Both';
-            $this->max_units = 21;
-
-            $this->dispatch('toast', [
-                'type' => 'success', 
-                'message' => 'Faculty Registered', 
-                'detail' => "{$this->full_name} has been added to the registry as " . strtoupper($status) . " ({$this->employment_type}, {$this->max_units} units)."
-            ]);
-
-            $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
-        } catch (\Exception $e) {
-            Log::error('Error saving faculty: ' . $e->getMessage());
-            $this->dispatch('toast', [
-                'type' => 'error', 
-                'message' => 'Error', 
-                'detail' => 'An error occurred while saving the faculty: ' . $e->getMessage()
-            ]);
-        }
-    }
-
-    public function deleteSelected()
-    {
-        if (empty($this->selectedFaculty)) return;
-
-        try {
-            $actor = auth()->user();
-            $faculties = Faculty::whereIn('id', $this->selectedFaculty)->get();
-            $count = 0;
-
-            foreach ($faculties as $faculty) {
-                $isAdminOrRegistrar = in_array($actor->role, ['admin', 'registrar']);
-                $isAssociateDean = ($actor->role === 'associate_dean');
-                $isDeptHead = in_array($actor->role, ['dean', 'oic']) && ($faculty->department === $actor->department);
-                $isRejected = ($faculty->status === 'rejected');
-
-                if (!$isAdminOrRegistrar && !(($isAssociateDean || $isDeptHead) && $isRejected)) {
-                    continue;
-                }
-
-                $name = $faculty->full_name;
-                $dept = $faculty->department;
-
-                $recipients = User::query()
-                    ->whereIn('role', ['admin', 'registrar', 'associate_dean'])
-                    ->orWhere(function($q) use ($dept) {
-                        $q->where('department', $dept)
-                          ->whereIn('role', ['dean', 'oic']);
-                    })
-                    ->get();
-
-                foreach ($recipients->unique('id') as $recipient) {
-                    if ($recipient->id === $actor->id) continue;
-
-                    try {
-                        $recipient->notify(new FacultyRequestNotification(
-                            $name, 
-                            $actor->name, 
-                            'deleted'
-                        ));
-                    } catch (\Exception $e) {
-                        Log::error('Error sending notification: ' . $e->getMessage());
-                    }
-                }
-
-                FacultyLog::where('faculty_id', $faculty->id)->delete();
-                
-                $this->logAction(
-                    null, 
-                    'deleted', 
-                    strtoupper($actor->role) . " ({$actor->name}) bulk-deleted faculty: {$name}",
-                    $dept
-                );
-
-                $faculty->delete();
-                $count++;
-            }
-
-            $this->reset(['selectedFaculty', 'selectAll', 'confirmingDeletion']);
-            
-            if ($count > 0) {
-                $this->dispatch('toast', [
-                    'type'    => 'warning', 
-                    'message' => 'Bulk Deletion Complete', 
-                    'detail'  => "$count records were removed. Relevant Department Heads notified."
-                ]);
-            } else {
-                $this->dispatch('toast', [
-                    'type'    => 'info', 
-                    'message' => 'No Records Deleted', 
-                    'detail'  => "No records were removed due to permission restrictions."
-                ]);
-            }
-
-            $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
-        } catch (\Exception $e) {
-            Log::error('Error deleting selected: ' . $e->getMessage());
-            $this->dispatch('toast', [
-                'type' => 'error', 
-                'message' => 'Error', 
-                'detail' => 'An error occurred during deletion.'
-            ]);
-        }
-    }
-
-    public function editFaculty($id) 
-    {
-        try {
-            $this->resetValidation();
-            $f = Faculty::findOrFail($id);
-            
-            $this->faculty_id  = $f->id;
-            $this->employee_id = $f->employee_id;
-            $this->full_name   = $f->full_name;
-            $this->email       = $f->email;
-            $this->department  = $f->department;
-            $this->employment_type = $f->employment_type ?? 'Full-time';
-            $this->teaching_specialization = $f->teaching_specialization ?? 'Both';
-            $this->max_units = $f->max_units ?? 21;
-            
-            $this->isEditMode = true;
-            $this->showModal  = true;
-        } catch (\Exception $e) {
-            Log::error('Error editing faculty: ' . $e->getMessage());
-            $this->dispatch('toast', [
-                'type' => 'error', 
-                'message' => 'Error', 
-                'detail' => 'Could not load faculty record.'
-            ]);
-        }
-    }
-
-    public function updateFaculty() 
-    {
-        try {
-            if (!$this->faculty_id) {
-                $this->dispatch('toast', ['type' => 'error', 'message' => 'Error', 'detail' => 'Record ID not found.']);
-                return;
-            }
-
-            $this->validate([
-                'employee_id' => [
-                    'required', 
-                    Rule::unique('faculties', 'employee_id')->ignore($this->faculty_id)
-                ],
-                'full_name' => [
-                    'required', 
-                    'min:5', 
-                    'regex:/(\s)/', 
-                    Rule::unique('faculties', 'full_name')->ignore($this->faculty_id)
-                ],
-                'email' => [
-                    'required', 
-                    'email', 
-                    Rule::unique('faculties', 'email')->ignore($this->faculty_id)
-                ],
-                'department' => 'required',
-                'employment_type' => 'required|in:Full-time,Part-time',
-                'teaching_specialization' => 'required|in:Major,Minor,Both',
-                'max_units' => 'required|integer|min:1|max:30',
-            ], [
-                'full_name.unique'   => '⚠️ That name is already being used by another record.',
-                'email.unique'       => '⚠️ That email address is already being used by another record.',
-                'employee_id.unique' => '⚠️ That Employee ID is already assigned.',
-                'full_name.regex'    => '⚠️ Please enter the complete full name (First and Last).',
-                'email.required'     => '⚠️ The email address is required.',
-                'max_units.integer' => '⚠️ Max units must be a number.',
-            ]);
-
-            $faculty = Faculty::findOrFail($this->faculty_id);
-            $actor = auth()->user();
-            
-            $faculty->update([
-                'employee_id' => $this->employee_id,
-                'full_name'   => $this->full_name,
-                'email'       => $this->email,
-                'department'  => $this->department,
-                'employment_type' => $this->employment_type,
-                'teaching_specialization' => $this->teaching_specialization,
-                'max_units' => (int)$this->max_units,
-            ]);
-
-            $this->logAction(
-                $faculty->id, 
-                'updated', 
-                strtoupper($actor->role) . " updated details for: {$faculty->full_name} ({$this->employment_type}, {$this->max_units} units)",
+                $faculty->id,
+                'created',
+                strtoupper(auth()->user()->role)." added faculty: {$faculty->full_name} ({$faculty->scopeLabel()}, {$faculty->employment_type}, {$faculty->max_units} units)",
                 $faculty->department
             );
 
-            if ($this->isAdminOrRegistrar()) {
-                $recipients = User::query()
-                    ->where('role', 'associate_dean')
-                    ->orWhere(function($query) use ($faculty) {
-                        $query->where('department', $faculty->department)
-                              ->whereIn('role', ['dean', 'oic']);
-                    })
-                    ->get();
-
-                foreach ($recipients->unique('id') as $recipient) {
-                    if ($recipient->id === $actor->id) continue;
-
-                    try {
-                        $recipient->notify(new FacultyRequestNotification(
-                            $faculty, 
-                            $actor->name, 
-                            'edited'
-                        ));
-                    } catch (\Exception $e) {
-                        Log::error('Error sending notification: ' . $e->getMessage());
-                    }
-                }
-            }
-
+            $facultyName = $faculty->full_name;
             $this->showModal = false;
-            $this->reset(['employee_id', 'full_name', 'email', 'department', 'faculty_id', 'employment_type', 'teaching_specialization', 'max_units']);
-            $this->employment_type = 'Full-time';
-            $this->teaching_specialization = 'Both';
-            $this->max_units = 21;
-            
-            $this->dispatch('toast', [
-                'type'    => 'success', 
-                'message' => 'Record Updated', 
-                'detail'  => "Details for {$this->full_name} have been updated successfully."
-            ]);
+            $this->resetForm();
 
+            $this->toast('success', 'Faculty Registered', "{$facultyName} has been added as ".strtoupper($status).'.');
             $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
-        } catch (\Exception $e) {
-            Log::error('Error updating faculty: ' . $e->getMessage());
-            $this->dispatch('toast', [
-                'type' => 'error', 
-                'message' => 'Error', 
-                'detail' => 'An error occurred while updating the faculty.'
-            ]);
+        } catch (\Throwable $exception) {
+            Log::error('Error saving faculty: '.$exception->getMessage());
+            $this->toast('error', 'Error', 'An error occurred while saving the faculty: '.$exception->getMessage());
         }
     }
 
-    public function deleteFaculty($id)
+    public function editFaculty($id): void
+    {
+        try {
+            if (! $this->isAdminOrRegistrar()) {
+                $this->toast('error', 'Access Denied', 'Only Admin or Registrar accounts can edit faculty records.');
+
+                return;
+            }
+
+            $faculty = Faculty::findOrFail($id);
+
+            $this->resetValidation();
+            $this->faculty_id = $faculty->id;
+            $this->employee_id = $faculty->employee_id;
+            $this->full_name = $faculty->full_name;
+            $this->email = $faculty->email;
+            $this->department = $faculty->department;
+            $this->employment_type = $faculty->employment_type ?? 'Full-time';
+            $this->faculty_scope = $faculty->faculty_scope ?? Faculty::SCOPE_DEPARTMENTAL;
+            $this->can_teach_minor = (bool) $faculty->can_teach_minor;
+            $this->max_units = $faculty->max_units ?? 21;
+            $this->isEditMode = true;
+            $this->showModal = true;
+        } catch (\Throwable $exception) {
+            Log::error('Error editing faculty: '.$exception->getMessage());
+            $this->toast('error', 'Error', 'Could not load faculty record.');
+        }
+    }
+
+    public function updateFaculty(): void
+    {
+        try {
+            if (! $this->faculty_id) {
+                $this->toast('error', 'Error', 'Record ID not found.');
+
+                return;
+            }
+
+            if (! $this->isAdminOrRegistrar()) {
+                $this->toast('error', 'Access Denied', 'Only Admin or Registrar accounts can update faculty records.');
+
+                return;
+            }
+
+            $this->normalizeFormState();
+            $this->validate($this->facultyValidationRules((int) $this->faculty_id), $this->validationMessages());
+
+            $faculty = Faculty::findOrFail($this->faculty_id);
+            $faculty->update($this->facultyPayload());
+
+            $this->logAction(
+                $faculty->id,
+                'updated',
+                strtoupper(auth()->user()->role)." updated details for: {$faculty->full_name} ({$faculty->scopeLabel()}, {$faculty->employment_type}, {$faculty->max_units} units)",
+                $faculty->department
+            );
+
+            $this->notifyStakeholders($faculty, 'edited');
+
+            $facultyName = $faculty->full_name;
+            $this->showModal = false;
+            $this->resetForm();
+
+            $this->toast('success', 'Record Updated', "Details for {$facultyName} have been updated successfully.");
+            $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
+        } catch (\Throwable $exception) {
+            Log::error('Error updating faculty: '.$exception->getMessage());
+            $this->toast('error', 'Error', 'An error occurred while updating the faculty: '.$exception->getMessage());
+        }
+    }
+
+    public function deleteSelected(): void
+    {
+        if (empty($this->selectedFaculty)) {
+            return;
+        }
+
+        try {
+            $actor = auth()->user();
+            $count = 0;
+
+            Faculty::whereIn('id', $this->selectedFaculty)->get()->each(function (Faculty $faculty) use ($actor, &$count) {
+                if (! $this->canDeleteFaculty($faculty, $actor)) {
+                    return;
+                }
+
+                $name = $faculty->full_name;
+                $department = $faculty->department;
+
+                FacultyLog::where('faculty_id', $faculty->id)->delete();
+                $faculty->delete();
+
+                $this->logAction(null, 'deleted', strtoupper($actor->role)." ({$actor->name}) bulk-deleted faculty: {$name}", $department);
+                $this->notifyFacultyDeletion($name, $department, $actor);
+                $count++;
+            });
+
+            $this->reset(['selectedFaculty', 'selectAll', 'confirmingDeletion']);
+
+            $count > 0
+                ? $this->toast('warning', 'Bulk Deletion Complete', "{$count} record(s) were removed.")
+                : $this->toast('info', 'No Records Deleted', 'No records were removed due to permission restrictions.');
+
+            $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
+        } catch (\Throwable $exception) {
+            Log::error('Error deleting selected faculty: '.$exception->getMessage());
+            $this->toast('error', 'Error', 'An error occurred during deletion.');
+        }
+    }
+
+    public function deleteFaculty($id): void
     {
         try {
             $faculty = Faculty::findOrFail($id);
             $actor = auth()->user();
-            
-            $isAdminOrRegistrar = in_array($actor->role, ['admin', 'registrar']);
-            $isAssociateDean = ($actor->role === 'associate_dean');
-            $isDeptHead = in_array($actor->role, ['dean', 'oic']) && ($faculty->department === $actor->department);
-            $isRejected = ($faculty->status === 'rejected');
 
-            $canDelete = false;
-            if ($isAdminOrRegistrar) {
-                $canDelete = true;
-            } elseif (($isAssociateDean || $isDeptHead) && $isRejected) {
-                $canDelete = true;
-            }
+            if (! $this->canDeleteFaculty($faculty, $actor)) {
+                $this->toast('error', 'Access Denied', 'You do not have permission to remove this record.');
 
-            if (!$canDelete) {
-                $this->dispatch('toast', [
-                    'type' => 'error', 
-                    'message' => 'Access Denied', 
-                    'detail' => 'You do not have permission to remove this specific record.'
-                ]);
                 return;
             }
 
             $facultyName = $faculty->full_name;
-            $facultyDept = $faculty->department;
+            $facultyDepartment = $faculty->department;
             $previousStatus = strtoupper($faculty->status);
-            $actorInfo = strtoupper($actor->role) . " ({$actor->name})";
 
-            FacultyLog::where('faculty_id', $id)->delete();
-
-            $this->logAction(
-                null, 
-                'deleted', 
-                "{$actorInfo} permanently removed the {$previousStatus} faculty record: {$facultyName}",
-                $facultyDept
-            );
-
-            $recipients = User::query()
-                ->whereIn('role', ['admin', 'registrar', 'associate_dean'])
-                ->orWhere(function($q) use ($facultyDept) {
-                    $q->where('department', $facultyDept)
-                      ->whereIn('role', ['dean', 'oic']);
-                })
-                ->get();
-
-            foreach ($recipients->unique('id') as $recipient) {
-                if ($recipient->id === $actor->id) continue;
-
-                try {
-                    $recipient->notify(new FacultyRequestNotification(
-                        $facultyName, 
-                        $actor->name, 
-                        'deleted'
-                    ));
-                } catch (\Exception $e) {
-                    Log::error('Error sending notification: ' . $e->getMessage());
-                }
-            }
-
+            FacultyLog::where('faculty_id', $faculty->id)->delete();
             $faculty->delete();
 
-            $this->dispatch('toast', [
-                'type' => 'warning', 
-                'message' => 'Record Deleted', 
-                'detail' => "{$facultyName} has been successfully removed."
-            ]);
+            $this->logAction(null, 'deleted', strtoupper($actor->role)." ({$actor->name}) removed the {$previousStatus} faculty record: {$facultyName}", $facultyDepartment);
+            $this->notifyFacultyDeletion($facultyName, $facultyDepartment, $actor);
 
+            $this->toast('warning', 'Record Deleted', "{$facultyName} has been removed.");
             $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
             $this->dispatch('$refresh');
-
-        } catch (\Exception $e) {
-            Log::error('Error deleting faculty: ' . $e->getMessage());
-            $this->dispatch('toast', [
-                'type' => 'error',
-                'message' => 'Action Failed',
-                'detail' => 'An error occurred while trying to delete the record.'
-            ]);
+        } catch (\Throwable $exception) {
+            Log::error('Error deleting faculty: '.$exception->getMessage());
+            $this->toast('error', 'Action Failed', 'An error occurred while trying to delete the record.');
         }
     }
 
-    /**
-     * Helper to find header index with flexible matching
-     */
-    private function findHeaderIndex($headers, $targetHeader)
-    {
-        $targetLower = strtolower(str_replace([' ', '_'], '', $targetHeader));
-        
-        foreach ($headers as $index => $header) {
-            $headerLower = strtolower(str_replace([' ', '_'], '', $header));
-            if ($headerLower === $targetLower) {
-                return $index;
-            }
-        }
-        return null;
-    }
-
-    public function updatedImportFile()
+    public function updatedImportFile(): void
     {
         try {
-            $this->validate([
-                'importFile' => 'required|mimes:csv,txt|max:10240',
-            ]);
-
-            $path = $this->importFile->getRealPath();
-            $data = array_map('str_getcsv', file($path));
-            
-            if (empty($data)) {
-                $this->dispatch('toast', [
-                    'type' => 'error',
-                    'message' => 'Invalid File',
-                    'detail' => 'The CSV file is empty.'
-                ]);
+            if (! $this->isAdminOrRegistrar()) {
+                $this->toast('error', 'Access Denied', 'Only Admin or Registrar accounts can import faculty records.');
                 $this->reset(['importFile', 'importPreview']);
+
                 return;
             }
 
-            $headers = array_map('trim', $data[0]);
+            $this->validate(['importFile' => 'required|mimes:csv,txt|max:10240']);
 
-            // Check for Subject or Room files
-            if (in_array('subject_code', $headers) || in_array('room_name', $headers)) {
-                $type = in_array('subject_code', $headers) ? 'SUBJECT' : 'ROOM';
-                $this->dispatch('toast', [
-                    'type'    => 'error', 
-                    'message' => 'Wrong File Type', 
-                    'detail'  => "🚨 This is a $type file. Please upload a Faculty CSV."
-                ]);
+            $rows = array_map('str_getcsv', file($this->importFile->getRealPath()));
+            if (empty($rows)) {
                 $this->reset(['importFile', 'importPreview']);
+                $this->toast('error', 'Invalid File', 'The CSV file is empty.');
+
                 return;
             }
 
-            // Required fields
-            $required = ['employee_id', 'full_name'];
-            foreach($required as $key) {
-                if ($this->findHeaderIndex($headers, $key) === null) {
-                    $this->dispatch('toast', [
-                        'type'    => 'error', 
-                        'message' => 'Invalid Format', 
-                        'detail'  => "The file is missing the '$key' column."
-                    ]);
+            $headers = array_map(fn ($header) => trim((string) preg_replace('/^\xEF\xBB\xBF/', '', $header)), $rows[0]);
+            if (in_array('subject_code', $headers, true) || in_array('room_name', $headers, true)) {
+                $this->reset(['importFile', 'importPreview']);
+                $this->toast('error', 'Wrong File Type', 'This appears to be a Subject or Room CSV. Please upload a Faculty CSV.');
+
+                return;
+            }
+
+            foreach (['employee_id', 'full_name', 'faculty_scope', 'can_teach_minor'] as $requiredHeader) {
+                if ($this->findHeaderIndex($headers, $requiredHeader) === null) {
                     $this->reset(['importFile', 'importPreview']);
+                    $this->toast('error', 'Invalid Format', "The file is missing the '{$requiredHeader}' column.");
+
                     return;
                 }
             }
 
-            // Find column indices
-            $colIndex = [
+            $columns = [
                 'employee_id' => $this->findHeaderIndex($headers, 'employee_id'),
                 'full_name' => $this->findHeaderIndex($headers, 'full_name'),
                 'email' => $this->findHeaderIndex($headers, 'email'),
                 'department' => $this->findHeaderIndex($headers, 'department'),
                 'employment_type' => $this->findHeaderIndex($headers, 'employment_type'),
-                'teaching_specialization' => $this->findHeaderIndex($headers, 'teaching_specialization'),
+                'faculty_scope' => $this->findHeaderIndex($headers, 'faculty_scope'),
+                'can_teach_minor' => $this->findHeaderIndex($headers, 'can_teach_minor'),
                 'max_units' => $this->findHeaderIndex($headers, 'max_units'),
             ];
 
             $this->importPreview = [];
-            foreach (array_slice($data, 1) as $row) {
-                // Skip completely empty rows
-                if (empty($row) || count(array_filter($row)) === 0) {
+
+            foreach (array_slice($rows, 1) as $rowNumber => $row) {
+                if (empty($row) || count(array_filter($row, fn ($value) => trim((string) $value) !== '')) === 0) {
                     continue;
                 }
 
-                // Parse required fields
-                $employeeId = trim($row[$colIndex['employee_id']] ?? '');
-                $fullName = trim($row[$colIndex['full_name']] ?? '');
-
-                // Skip if critical fields are missing
-                if (empty($employeeId) || empty($fullName)) {
-                    continue;
-                }
-
-                // Parse optional fields
-                $email = '';
-                if ($colIndex['email'] !== null && isset($row[$colIndex['email']])) {
-                    $email = trim($row[$colIndex['email']]);
-                }
-
-                $department = '';
-                if ($colIndex['department'] !== null && isset($row[$colIndex['department']])) {
-                    $department = strtoupper(trim($row[$colIndex['department']]));
-                }
-
-                $employmentType = 'Full-time';
-                if ($colIndex['employment_type'] !== null && isset($row[$colIndex['employment_type']])) {
-                    $rawType = strtolower(trim($row[$colIndex['employment_type']]));
-                    $employmentType = (strpos($rawType, 'part') !== false) ? 'Part-time' : 'Full-time';
-                }
-
-                $specialization = 'Both';
-                if ($colIndex['teaching_specialization'] !== null && isset($row[$colIndex['teaching_specialization']])) {
-                    $rawSpec = strtolower(trim($row[$colIndex['teaching_specialization']]));
-                    if (in_array($rawSpec, ['major', 'minor', 'both'])) {
-                        $specialization = ucfirst($rawSpec);
-                    }
-                }
-
-                $maxUnits = null;
-                if ($colIndex['max_units'] !== null && isset($row[$colIndex['max_units']])) {
-                    $rawUnits = trim($row[$colIndex['max_units']]);
-                    if (is_numeric($rawUnits)) {
-                        $maxUnits = (int)$rawUnits;
-                    }
-                }
-
-                // Auto-calculate max units if not provided
-                if ($maxUnits === null || $maxUnits < 1) {
-                    $maxUnits = ($employmentType === 'Part-time') ? 12 : 21;
-                } else {
-                    // Enforce limits
-                    $maxUnits = $employmentType === 'Part-time' 
-                        ? min($maxUnits, 18) 
-                        : min($maxUnits, 30);
-                }
-
-                // Check if record already exists
-                $exists = Faculty::where('employee_id', $employeeId)->exists();
-                
-                if (!$exists && !empty($email)) {
-                    $exists = Faculty::where('email', $email)->exists();
-                }
-
-                $this->importPreview[] = [
-                    'employee_id'                => $employeeId,
-                    'full_name'                  => $fullName,
-                    'email'                      => $email,
-                    'department'                 => $department,
-                    'employment_type'            => $employmentType,
-                    'teaching_specialization'    => $specialization,
-                    'max_units'                  => $maxUnits,
-                    'error'                      => $exists,
-                ];
+                $this->importPreview[] = $this->previewImportRow($row, $columns, $rowNumber + 2);
             }
 
             if (empty($this->importPreview)) {
-                $this->dispatch('toast', [
-                    'type'    => 'warning', 
-                    'message' => 'No Valid Records', 
-                    'detail'  => "The CSV file contains no valid faculty records to import."
-                ]);
                 $this->reset(['importFile', 'importPreview']);
+                $this->toast('warning', 'No Valid Records', 'The CSV file contains no valid faculty records to import.');
+
                 return;
             }
-            
-            $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
-        } catch (\Exception $e) {
-            Log::error('Error updating import file: ' . $e->getMessage());
-            $this->dispatch('toast', [
-                'type' => 'error',
-                'message' => 'Error Processing File',
-                'detail' => $e->getMessage()
-            ]);
+        } catch (\Throwable $exception) {
+            Log::error('Error processing faculty import file: '.$exception->getMessage());
             $this->reset(['importFile', 'importPreview']);
+            $this->toast('error', 'Error Processing File', $exception->getMessage());
         }
     }
 
-    public function processImport()
+    public function processImport(): void
     {
         try {
             if (empty($this->importPreview)) {
-                $this->dispatch('toast', [
-                    'type' => 'error',
-                    'message' => 'No Data',
-                    'detail' => 'Please upload a file first.'
-                ]);
+                $this->toast('error', 'No Data', 'Please upload a file first.');
+
+                return;
+            }
+
+            $invalidCount = collect($this->importPreview)->where('status', 'invalid')->count();
+            if ($invalidCount > 0) {
+                $this->toast('error', 'Import Blocked', "Fix {$invalidCount} invalid row(s) before importing.");
+
                 return;
             }
 
             $importCount = 0;
-            $importedDepartments = [];
             $skippedCount = 0;
+            $importedDepartments = [];
 
             foreach ($this->importPreview as $data) {
-                try {
-                    // Double-check existence
-                    $exists = Faculty::where('employee_id', $data['employee_id'])->exists();
-
-                    if (!$exists && !empty($data['email'])) {
-                        $exists = Faculty::where('email', $data['email'])->exists();
-                    }
-
-                    if ($exists) {
-                        $skippedCount++;
-                        continue;
-                    }
-
-                    // Final validation before insert
-                    $specialization = $data['teaching_specialization'];
-                    if (!in_array($specialization, ['Major', 'Minor', 'Both'])) {
-                        $specialization = 'Both';
-                    }
-
-                    $employmentType = $data['employment_type'];
-                    if (!in_array($employmentType, ['Full-time', 'Part-time'])) {
-                        $employmentType = 'Full-time';
-                    }
-
-                    $maxUnits = (int)$data['max_units'];
-                    if ($maxUnits < 1 || $maxUnits > 30) {
-                        $maxUnits = $employmentType === 'Part-time' ? 12 : 21;
-                    }
-
-                    // Create faculty - FIXED: use correct variables from $data
-                    $faculty = Faculty::create([
-                        'employee_id'                => $data['employee_id'],
-                        'full_name'                  => $data['full_name'],
-                        'email'                      => $data['email'] ?: null,
-                        'department'                 => $data['department'] ?: 'Unassigned',
-                        'employment_type'            => $employmentType,
-                        'teaching_specialization'    => $specialization,
-                        'max_units'                  => $maxUnits,
-                        'status'                     => 'approved', 
-                        'requested_by'               => auth()->id(),
-                    ]);
-
-                    $this->logAction(
-                        $faculty->id, 
-                        'created', 
-                        strtoupper(auth()->user()->role) . " imported faculty: {$faculty->full_name} ({$employmentType}, {$specialization}, {$maxUnits} units)",
-                        $faculty->department
-                    );
-
-                    if (!empty($data['department'])) {
-                        $importedDepartments[] = $data['department'];
-                    }
-
-                    $importCount++;
-                } catch (\Exception $e) {
-                    Log::error('Error importing individual record: ' . $e->getMessage() . ' | Data: ' . json_encode($data));
+                if (($data['status'] ?? null) !== 'ready') {
                     $skippedCount++;
+
                     continue;
                 }
-            }
 
-            if ($importCount > 0) {
-                $senderName = auth()->user()->name;
-                $uniqueDepts = array_unique($importedDepartments);
+                if (Faculty::where('employee_id', $data['employee_id'])->exists()
+                    || ($data['email'] && Faculty::where('email', $data['email'])->exists())) {
+                    $skippedCount++;
 
-                foreach ($uniqueDepts as $deptName) {
-                    $deptLeaders = User::where('department', $deptName)
-                        ->whereIn('role', ['dean', 'oic'])
-                        ->get();
-
-                    foreach ($deptLeaders as $leader) {
-                        if ($leader->id === auth()->id()) continue;
-
-                        try {
-                            $leader->notify(new FacultyRequestNotification(
-                                "the $deptName Department", 
-                                $senderName, 
-                                'bulk_added'
-                            ));
-                        } catch (\Exception $e) {
-                            Log::error('Error sending notification: ' . $e->getMessage());
-                        }
-                    }
+                    continue;
                 }
 
-                $globalLeaders = User::whereIn('role', ['admin', 'registrar', 'associate_dean'])->get();
-                foreach ($globalLeaders as $global) {
-                    if ($global->id === auth()->id()) continue;
+                $faculty = Faculty::create([
+                    'employee_id' => $data['employee_id'],
+                    'full_name' => $data['full_name'],
+                    'email' => $data['email'] ?: null,
+                    'department' => $data['department'] ?: null,
+                    'employment_type' => $data['employment_type'],
+                    'faculty_scope' => $data['faculty_scope'],
+                    'can_teach_minor' => (bool) $data['can_teach_minor'],
+                    'max_units' => (int) $data['max_units'],
+                    'status' => 'approved',
+                    'requested_by' => auth()->id(),
+                ]);
 
-                    try {
-                        $global->notify(new FacultyRequestNotification(
-                            "$importCount Faculty Members", 
-                            $senderName, 
-                            'bulk_added'
-                        ));
-                    } catch (\Exception $e) {
-                        Log::error('Error sending notification: ' . $e->getMessage());
-                    }
+                $this->logAction(
+                    $faculty->id,
+                    'created',
+                    strtoupper(auth()->user()->role)." imported faculty: {$faculty->full_name} ({$faculty->scopeLabel()}, {$faculty->employment_type}, {$faculty->max_units} units)",
+                    $faculty->department
+                );
+
+                if ($faculty->department) {
+                    $importedDepartments[] = $faculty->department;
                 }
+
+                $importCount++;
             }
 
-            $this->reset(['importFile', 'importPreview', 'bulkOpen']); 
-            $this->dispatch('close-import-modal'); 
-
-            $message = "✅ Successfully added $importCount faculty records with scheduling data";
-            if ($skippedCount > 0) {
-                $message .= " ($skippedCount skipped - already exist)";
-            }
-
-            $this->dispatch('toast', [
-                'type'    => 'success', 
-                'message' => 'Import Complete', 
-                'detail'  => $message
-            ]);
-
-            $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
-
-        } catch (\Exception $e) {
-            Log::error('Error processing import: ' . $e->getMessage());
+            $this->notifyBulkImport($importCount, array_unique($importedDepartments));
+            $this->reset(['importFile', 'importPreview', 'bulkOpen']);
             $this->dispatch('close-import-modal');
-            $this->dispatch('toast', [
-                'type'    => 'error', 
-                'message' => 'Import Failed', 
-                'detail'  => $e->getMessage()
-            ]);
-        }
-    }
 
-    public function approveFaculty($id) 
-    {
-        try {
-            if (!$this->isAdminOrRegistrar()) return;
-
-            $faculty = Faculty::findOrFail($id);
-            $actor = auth()->user();
-
-            $faculty->update(['status' => 'approved']);
-            
-            $this->logAction(
-                $faculty->id, 
-                'approved', 
-                strtoupper($actor->role) . " approved faculty: {$faculty->full_name} ({$faculty->employment_type}, {$faculty->max_units} units)",
-                $faculty->department
-            );
-
-            $recipients = User::query()
-                ->where('role', 'associate_dean')
-                ->orWhere(function($q) use ($faculty) {
-                    $q->where('department', $faculty->department)
-                      ->whereIn('role', ['dean', 'oic']);
-                })
-                ->orWhere('id', $faculty->requested_by)
-                ->get();
-
-            foreach ($recipients->unique('id') as $recipient) {
-                if ($recipient->id === $actor->id) continue;
-
-                try {
-                    $recipient->notify(new FacultyRequestNotification(
-                        $faculty, 
-                        $actor->name, 
-                        'approved'
-                    ));
-                } catch (\Exception $e) {
-                    Log::error('Error sending notification: ' . $e->getMessage());
-                }
+            $message = "Successfully added {$importCount} faculty record(s).";
+            if ($skippedCount > 0) {
+                $message .= " {$skippedCount} duplicate row(s) skipped.";
             }
 
-            $this->dispatch('toast', [
-                'type'    => 'success',
-                'message' => 'Request Approved',
-                'detail'  => "{$faculty->full_name} is now active."
-            ]);
-
+            $this->toast('success', 'Import Complete', $message);
             $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
-        } catch (\Exception $e) {
-            Log::error('Error approving faculty: ' . $e->getMessage());
-            $this->dispatch('toast', [
-                'type' => 'error',
-                'message' => 'Error',
-                'detail' => 'An error occurred while approving the faculty.'
-            ]);
+        } catch (\Throwable $exception) {
+            Log::error('Error processing faculty import: '.$exception->getMessage());
+            $this->dispatch('close-import-modal');
+            $this->toast('error', 'Import Failed', $exception->getMessage());
         }
     }
 
-    public function declineFaculty($id) 
+    public function approveFaculty($id): void
     {
         try {
-            if (!$this->isAdminOrRegistrar()) return;
+            if (! $this->isAdminOrRegistrar()) {
+                return;
+            }
 
             $faculty = Faculty::findOrFail($id);
-            $actor = auth()->user();
-            
+            $faculty->update(['status' => 'approved']);
+
+            $this->logAction($faculty->id, 'approved', strtoupper(auth()->user()->role)." approved faculty: {$faculty->full_name}", $faculty->department);
+            $this->notifyStakeholders($faculty, 'approved');
+            $this->toast('success', 'Request Approved', "{$faculty->full_name} is now active.");
+            $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
+        } catch (\Throwable $exception) {
+            Log::error('Error approving faculty: '.$exception->getMessage());
+            $this->toast('error', 'Error', 'An error occurred while approving the faculty.');
+        }
+    }
+
+    public function declineFaculty($id): void
+    {
+        try {
+            if (! $this->isAdminOrRegistrar()) {
+                return;
+            }
+
+            $faculty = Faculty::findOrFail($id);
             $faculty->update(['status' => 'rejected']);
 
-            $this->logAction(
-                $faculty->id, 
-                'rejected', 
-                strtoupper($actor->role) . " declined registration: {$faculty->full_name}",
-                $faculty->department
-            );
-            
-            $recipients = User::query()
-                ->where('role', 'associate_dean')
-                ->orWhere(function($q) use ($faculty) {
-                    $q->where('department', $faculty->department)
-                      ->whereIn('role', ['dean', 'oic']);
-                })
-                ->orWhere('id', $faculty->requested_by)
-                ->get();
-
-            foreach ($recipients->unique('id') as $recipient) {
-                if ($recipient->id === $actor->id) continue;
-
-                try {
-                    $recipient->notify(new FacultyRequestNotification(
-                        $faculty, 
-                        $actor->name, 
-                        'rejected'
-                    ));
-                } catch (\Exception $e) {
-                    Log::error('Error sending notification: ' . $e->getMessage());
-                }
-            }
-            
-            $this->dispatch('toast', [
-                'type'    => 'info',
-                'message' => 'Request Declined',
-                'detail'  => "Registration for {$faculty->full_name} rejected."
-            ]);
-
+            $this->logAction($faculty->id, 'rejected', strtoupper(auth()->user()->role)." declined registration: {$faculty->full_name}", $faculty->department);
+            $this->notifyStakeholders($faculty, 'rejected');
+            $this->toast('info', 'Request Declined', "Registration for {$faculty->full_name} was rejected.");
             $this->dispatch('facultyUpdated')->to(NotificationCenter::class);
-        } catch (\Exception $e) {
-            Log::error('Error declining faculty: ' . $e->getMessage());
-            $this->dispatch('toast', [
-                'type' => 'error',
-                'message' => 'Error',
-                'detail' => 'An error occurred while declining the faculty.'
-            ]);
+        } catch (\Throwable $exception) {
+            Log::error('Error declining faculty: '.$exception->getMessage());
+            $this->toast('error', 'Error', 'An error occurred while declining the faculty.');
         }
     }
 
-    public function exportCSV() 
+    public function exportCSV()
     {
         try {
+            $filename = 'faculty_list_'.now()->format('Y-m-d').'.csv';
+            $columns = ['employee_id', 'full_name', 'email', 'department', 'employment_type', 'faculty_scope', 'can_teach_minor', 'max_units', 'status'];
             $user = auth()->user();
-            $filename = "faculty_list_" . now()->format('Y-m-d') . ".csv";
-            $headers = [
-                "Content-type"        => "text/csv",
-                "Content-Disposition" => "attachment; filename=$filename",
-                "Pragma"              => "no-cache",
-                "Cache-Control"       => "must-revalidate, post-check=0, pre-check=0",
-                "Expires"             => "0"
-            ];
 
-            $columns = ['Employee ID', 'Full Name', 'Email', 'Department', 'Employment Type', 'Specialization', 'Max Units', 'Status'];
-
-            $callback = function() use ($columns, $user) {
+            $callback = function () use ($columns, $user) {
                 $file = fopen('php://output', 'w');
                 fputcsv($file, $columns);
-                $data = Faculty::whereIn('status', ['approved', 'rejected'])
-                    ->when(!$this->isAdminOrRegistrar(), function($query) use ($user) {
-                        return $query->where('department', $user->department);
-                    })->get();
-                foreach ($data as $row) {
-                    fputcsv($file, [
-                        $row->employee_id, 
-                        $row->full_name, 
-                        $row->email, 
-                        $row->department, 
-                        $row->employment_type ?? 'Full-time',
-                        $row->teaching_specialization ?? 'Both',
-                        $row->max_units ?? 21,
-                        ucfirst($row->status)
-                    ]);
-                }
+
+                Faculty::query()
+                    ->whereIn('status', ['approved', 'rejected'])
+                    ->when(! $this->isGlobalViewer(), fn (Builder $query) => $query->whereIn('department', Department::aliasesFor($user->department)))
+                    ->orderBy('employee_id')
+                    ->get()
+                    ->each(function (Faculty $faculty) use ($file) {
+                        fputcsv($file, [
+                            $faculty->employee_id,
+                            $faculty->full_name,
+                            $faculty->email,
+                            $faculty->department,
+                            $faculty->employment_type ?? 'Full-time',
+                            $faculty->faculty_scope ?? Faculty::SCOPE_DEPARTMENTAL,
+                            $faculty->can_teach_minor ? 'yes' : 'no',
+                            $faculty->max_units ?? 21,
+                            $faculty->status,
+                        ]);
+                    });
+
                 fclose($file);
             };
-            return response()->stream($callback, 200, $headers);
-        } catch (\Exception $e) {
-            Log::error('Error exporting CSV: ' . $e->getMessage());
+
+            return response()->stream($callback, 200, [
+                'Content-type' => 'text/csv',
+                'Content-Disposition' => "attachment; filename={$filename}",
+                'Pragma' => 'no-cache',
+                'Cache-Control' => 'must-revalidate, post-check=0, pre-check=0',
+                'Expires' => '0',
+            ]);
+        } catch (\Throwable $exception) {
+            Log::error('Error exporting faculty CSV: '.$exception->getMessage());
+
             return response()->json(['error' => 'Export failed'], 500);
-        }
-    }
-    
-    private function getStakeholders($department)
-    {
-        try {
-            return User::query()
-                ->whereIn('role', ['admin', 'registrar', 'associate_dean'])
-                ->orWhere(function($q) use ($department) {
-                    $q->where('department', $department)
-                      ->whereIn('role', ['dean', 'oic']);
-                })
-                ->get()
-                ->unique('id');
-        } catch (\Exception $e) {
-            Log::error('Error getting stakeholders: ' . $e->getMessage());
-            return collect();
         }
     }
 
@@ -1049,42 +547,25 @@ class ManageFaculty extends Component
         try {
             $user = auth()->user();
 
-            if (!$this->isGlobalViewer()) { 
-                $this->filterDepartment = $user->department; 
+            if (! $this->isGlobalViewer()) {
+                $this->filterDepartment = Department::normalizeCode($user->department);
             }
 
             $pendingRequests = Faculty::where('status', 'pending')
-                ->when(!$this->isAdminOrRegistrar(), function ($q) use ($user) {
-                    return $q->where('requested_by', $user->id);
-                })->orderBy('created_at', 'desc')->get();
+                ->when(! $this->isAdminOrRegistrar(), fn (Builder $query) => $query->where('requested_by', $user->id))
+                ->orderByDesc('created_at')
+                ->get();
 
-            $faculties = Faculty::query()
-                ->whereIn('status', ['approved', 'rejected']) 
-                ->when(!$this->isGlobalViewer(), function ($q) use ($user) {
-                    return $q->where('department', $user->department);
-                })
-                ->when($this->filterType, fn($q) => $q->where('employment_type', $this->filterType))
-                ->when($this->filterSpecialization, fn($q) => $q->where('teaching_specialization', $this->filterSpecialization))
-                ->when($this->filterDepartment && $this->isGlobalViewer(), function ($q) {
-                    return $q->where('department', $this->filterDepartment);
-                })
-                ->when($this->search, function ($q) {
-                    $q->where(function ($sub) {
-                        $sub->where('full_name', 'like', "%{$this->search}%")
-                            ->orWhere('employee_id', 'like', "%{$this->search}%");
-                    });
-                })->orderBy('employee_id', 'asc')->paginate(10);
+            $faculties = $this->baseFacultyQuery()
+                ->orderBy('employee_id')
+                ->paginate(10);
 
             $recentLogs = FacultyLog::with(['user', 'faculty'])
-                ->where(function ($q) use ($user) {
-                    if ($this->isGlobalViewer()) {
-                        $q->whereRaw('1=1'); 
-                    } else {
-                        $q->where('user_id', $user->id)
-                          ->orWhereHas('faculty', function ($f) use ($user) {
-                              $f->where('department', $user->department);
-                          });
-                    }
+                ->when(! $this->isGlobalViewer(), function (Builder $query) use ($user) {
+                    $query->where(function (Builder $visibility) use ($user) {
+                        $visibility->where('user_id', $user->id)
+                            ->orWhereHas('faculty', fn (Builder $facultyQuery) => $facultyQuery->whereIn('department', Department::aliasesFor($user->department)));
+                    });
                 })
                 ->latest()
                 ->take(15)
@@ -1093,15 +574,421 @@ class ManageFaculty extends Component
             return view('livewire.manage-faculty', [
                 'faculties' => $faculties,
                 'pendingRequests' => $pendingRequests,
-                'recentLogs' => $recentLogs
+                'recentLogs' => $recentLogs,
+                'departments' => $this->departmentOptions(),
+                'scopeOptions' => $this->scopeOptions(),
             ]);
-        } catch (\Exception $e) {
-            Log::error('Error rendering ManageFaculty: ' . $e->getMessage());
+        } catch (\Throwable $exception) {
+            Log::error('Error rendering ManageFaculty: '.$exception->getMessage());
+
             return view('livewire.manage-faculty', [
                 'faculties' => collect(),
                 'pendingRequests' => collect(),
-                'recentLogs' => collect()
+                'recentLogs' => collect(),
+                'departments' => ['CCS', 'CTE', 'COC', 'SHTM'],
+                'scopeOptions' => $this->scopeOptions(),
             ]);
         }
+    }
+
+    private function baseFacultyQuery(): Builder
+    {
+        $user = auth()->user();
+
+        return Faculty::query()
+            ->whereIn('status', ['approved', 'rejected'])
+            ->when(! $this->isGlobalViewer(), fn (Builder $query) => $query->whereIn('department', Department::aliasesFor($user->department)))
+            ->when($this->filterType, fn (Builder $query) => $query->where('employment_type', $this->filterType))
+            ->when($this->filterScope, fn (Builder $query) => $query->where('faculty_scope', $this->filterScope))
+            ->when($this->filterDepartment && $this->isGlobalViewer(), function (Builder $query) {
+                $query->whereIn('department', Department::aliasesFor($this->filterDepartment));
+            })
+            ->when($this->search, function (Builder $query) {
+                $query->where(function (Builder $searchQuery) {
+                    $searchQuery->where('full_name', 'like', "%{$this->search}%")
+                        ->orWhere('employee_id', 'like', "%{$this->search}%")
+                        ->orWhere('email', 'like', "%{$this->search}%");
+                });
+            });
+    }
+
+    private function generateNextEmployeeId(): string
+    {
+        try {
+            $lastFaculty = Faculty::orderByDesc('id')->first();
+            if (! $lastFaculty || ! preg_match('/(\d+)-(\d+)$/', (string) $lastFaculty->employee_id, $matches)) {
+                return '2026-0001';
+            }
+
+            return $matches[1].'-'.str_pad(((int) $matches[2]) + 1, 4, '0', STR_PAD_LEFT);
+        } catch (\Throwable $exception) {
+            Log::error('Error generating employee ID: '.$exception->getMessage());
+
+            return '2026-0001';
+        }
+    }
+
+    private function resetForm(): void
+    {
+        $this->reset(['employee_id', 'full_name', 'email', 'department', 'faculty_id']);
+        $this->employment_type = 'Full-time';
+        $this->faculty_scope = Faculty::SCOPE_DEPARTMENTAL;
+        $this->can_teach_minor = false;
+        $this->max_units = 21;
+        $this->isEditMode = false;
+        $this->resetValidation();
+    }
+
+    private function normalizeFormState(): void
+    {
+        $allowedScopes = array_keys($this->scopeOptions());
+        if (! in_array($this->faculty_scope, $allowedScopes, true)) {
+            $this->faculty_scope = $allowedScopes[0] ?? Faculty::SCOPE_DEPARTMENTAL;
+        }
+
+        if (in_array(auth()->user()?->role, ['dean', 'oic'], true)) {
+            $this->faculty_scope = Faculty::SCOPE_DEPARTMENTAL;
+            $this->department = Department::normalizeCode(auth()->user()->department);
+        }
+
+        $this->department = filled($this->department) ? Department::normalizeCode($this->department) : null;
+
+        if ($this->faculty_scope === Faculty::SCOPE_GENED) {
+            $this->department = null;
+            $this->can_teach_minor = true;
+        }
+    }
+
+    private function facultyValidationRules(?int $ignoreId = null): array
+    {
+        return [
+            'employee_id' => ['required', Rule::unique('faculties', 'employee_id')->ignore($ignoreId)],
+            'full_name' => ['required', 'min:5', 'regex:/(\s)/', Rule::unique('faculties', 'full_name')->ignore($ignoreId)],
+            'email' => ['required', 'email', Rule::unique('faculties', 'email')->ignore($ignoreId)],
+            'department' => [Rule::requiredIf(fn () => $this->faculty_scope !== Faculty::SCOPE_GENED), 'nullable', 'string', 'max:50'],
+            'employment_type' => ['required', Rule::in(['Full-time', 'Part-time'])],
+            'faculty_scope' => ['required', Rule::in(array_keys($this->scopeOptions()))],
+            'can_teach_minor' => ['boolean'],
+            'max_units' => ['required', 'integer', 'min:1', 'max:30'],
+        ];
+    }
+
+    private function validationMessages(): array
+    {
+        return [
+            'employee_id.unique' => 'This employee ID is already assigned.',
+            'full_name.unique' => 'This name is already being used.',
+            'full_name.regex' => 'Please enter a complete full name.',
+            'email.unique' => 'This email address is already being used.',
+            'department.required' => 'Department is required for departmental and cross-department faculty.',
+            'faculty_scope.in' => 'Choose a valid faculty scope.',
+            'max_units.max' => 'Max units cannot exceed 30.',
+        ];
+    }
+
+    private function facultyPayload(array $extra = []): array
+    {
+        return array_merge([
+            'employee_id' => $this->employee_id,
+            'full_name' => $this->full_name,
+            'email' => $this->email,
+            'department' => $this->department,
+            'employment_type' => $this->employment_type,
+            'faculty_scope' => $this->faculty_scope,
+            'can_teach_minor' => (bool) $this->can_teach_minor,
+            'max_units' => (int) $this->max_units,
+        ], $extra);
+    }
+
+    private function scopeOptions(): array
+    {
+        return match (auth()->user()?->role) {
+            'admin', 'registrar' => [
+                Faculty::SCOPE_DEPARTMENTAL => 'Departmental',
+                Faculty::SCOPE_CROSS_DEPARTMENT => 'Cross-department',
+                Faculty::SCOPE_GENED => 'GenEd',
+            ],
+            'associate_dean' => [
+                Faculty::SCOPE_DEPARTMENTAL => 'Departmental',
+                Faculty::SCOPE_GENED => 'GenEd',
+            ],
+            default => [
+                Faculty::SCOPE_DEPARTMENTAL => 'Departmental',
+            ],
+        };
+    }
+
+    private function departmentOptions(): array
+    {
+        return collect(['CCS', 'CTE', 'COC', 'SHTM'])
+            ->merge(Department::query()->pluck('code'))
+            ->merge(Faculty::query()->whereNotNull('department')->pluck('department'))
+            ->filter()
+            ->map(fn ($department) => Department::normalizeCode($department))
+            ->reject(fn ($department) => in_array($department, ['GENED', 'GENERAL EDUCATION'], true))
+            ->unique()
+            ->sort()
+            ->values()
+            ->all();
+    }
+
+    private function canDeleteFaculty(Faculty $faculty, ?User $actor): bool
+    {
+        if (! $actor) {
+            return false;
+        }
+
+        if (in_array($actor->role, ['admin', 'registrar'], true)) {
+            return true;
+        }
+
+        $isRejected = $faculty->status === 'rejected';
+        $isDeptHead = in_array($actor->role, ['dean', 'oic'], true)
+            && Department::codesMatch($faculty->department, $actor->department);
+        $isAssociateDean = $actor->role === 'associate_dean';
+
+        return $isRejected && ($isDeptHead || $isAssociateDean);
+    }
+
+    private function previewImportRow(array $row, array $columns, int $rowNumber): array
+    {
+        $employeeId = trim((string) ($row[$columns['employee_id']] ?? ''));
+        $fullName = trim((string) ($row[$columns['full_name']] ?? ''));
+        $email = $columns['email'] !== null ? trim((string) ($row[$columns['email']] ?? '')) : '';
+        $rawScope = trim((string) ($row[$columns['faculty_scope']] ?? ''));
+        $scope = $this->normalizeFacultyScope($rawScope);
+        $rawCanTeachMinor = trim((string) ($row[$columns['can_teach_minor']] ?? ''));
+        $canTeachMinor = $this->parseBoolean($rawCanTeachMinor);
+        $employmentType = $this->normalizeEmploymentType($columns['employment_type'] !== null ? ($row[$columns['employment_type']] ?? '') : '');
+        $department = $this->normalizeImportDepartment($columns['department'] !== null ? ($row[$columns['department']] ?? '') : '', $scope);
+        $maxUnits = $this->parseMaxUnits($columns['max_units'] !== null ? ($row[$columns['max_units']] ?? '') : null, $employmentType);
+        $errors = [];
+
+        if ($employeeId === '') {
+            $errors[] = 'Employee ID is required.';
+        }
+
+        if ($fullName === '') {
+            $errors[] = 'Full name is required.';
+        }
+
+        if ($email !== '' && ! filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $errors[] = 'Email is invalid.';
+        }
+
+        if (! $scope) {
+            $errors[] = 'Faculty scope must be gened, departmental, or cross_department.';
+            $scope = Faculty::SCOPE_DEPARTMENTAL;
+        }
+
+        if ($canTeachMinor === null) {
+            $errors[] = 'can_teach_minor must be yes/no, true/false, or 1/0.';
+            $canTeachMinor = false;
+        }
+
+        if ($scope === Faculty::SCOPE_GENED) {
+            $canTeachMinor = true;
+            $department = null;
+        } elseif (! $department) {
+            $errors[] = 'Department is required for departmental and cross-department faculty.';
+        }
+
+        $duplicate = ($employeeId !== '' && Faculty::where('employee_id', $employeeId)->exists())
+            || ($email !== '' && Faculty::where('email', $email)->exists());
+
+        $status = $errors !== [] ? 'invalid' : ($duplicate ? 'duplicate' : 'ready');
+
+        return [
+            'row' => $rowNumber,
+            'employee_id' => $employeeId,
+            'full_name' => $fullName,
+            'email' => $email,
+            'department' => $department,
+            'employment_type' => $employmentType,
+            'faculty_scope' => $scope,
+            'can_teach_minor' => (bool) $canTeachMinor,
+            'max_units' => $maxUnits,
+            'status' => $status,
+            'error' => $status !== 'ready',
+            'errors' => $duplicate && $errors === [] ? ['Duplicate faculty already exists.'] : $errors,
+        ];
+    }
+
+    private function normalizeFacultyScope(string $value): ?string
+    {
+        $value = strtolower(str_replace([' ', '-'], '_', trim($value)));
+
+        return match ($value) {
+            'gened', 'general_education', 'general_ed' => Faculty::SCOPE_GENED,
+            'departmental', 'department' => Faculty::SCOPE_DEPARTMENTAL,
+            'cross_department', 'cross' => Faculty::SCOPE_CROSS_DEPARTMENT,
+            default => null,
+        };
+    }
+
+    private function parseBoolean(string $value): ?bool
+    {
+        return match (strtolower(trim($value))) {
+            'yes', 'true', '1' => true,
+            'no', 'false', '0' => false,
+            default => null,
+        };
+    }
+
+    private function normalizeEmploymentType($value): string
+    {
+        return str_contains(strtolower(trim((string) $value)), 'part') ? 'Part-time' : 'Full-time';
+    }
+
+    private function normalizeImportDepartment($value, ?string $scope): ?string
+    {
+        $department = Department::normalizeCode($value);
+
+        if (! $department || ($scope === Faculty::SCOPE_GENED && in_array($department, ['GENED', 'GENERAL EDUCATION'], true))) {
+            return null;
+        }
+
+        return $department;
+    }
+
+    private function parseMaxUnits($value, string $employmentType): int
+    {
+        $maxUnits = is_numeric($value) ? (int) $value : ($employmentType === 'Part-time' ? 12 : 21);
+
+        return $employmentType === 'Part-time'
+            ? max(1, min($maxUnits, 18))
+            : max(1, min($maxUnits, 30));
+    }
+
+    private function findHeaderIndex(array $headers, string $targetHeader): ?int
+    {
+        $target = strtolower(str_replace([' ', '_', '-'], '', $targetHeader));
+
+        foreach ($headers as $index => $header) {
+            $candidate = strtolower(str_replace([' ', '_', '-'], '', (string) $header));
+            if ($candidate === $target) {
+                return $index;
+            }
+        }
+
+        return null;
+    }
+
+    private function logAction($facultyId, string $action, string $description, ?string $department = null): void
+    {
+        try {
+            FacultyLog::create([
+                'faculty_id' => $facultyId,
+                'user_id' => auth()->id(),
+                'action' => $action,
+                'description' => $description,
+                'department' => Department::normalizeCode($department ?? (auth()->user()?->role === 'dean' ? auth()->user()->department : null)),
+            ]);
+        } catch (\Throwable $exception) {
+            Log::error('Error creating faculty log: '.$exception->getMessage());
+        }
+    }
+
+    private function notifyStakeholders(Faculty $faculty, string $action): void
+    {
+        if ($this->isAdminOrRegistrar() && $action === 'pending') {
+            return;
+        }
+
+        $this->getStakeholders($faculty->department)
+            ->each(function (User $recipient) use ($faculty, $action) {
+                if ($recipient->id === auth()->id()) {
+                    return;
+                }
+
+                try {
+                    $recipient->notify(new FacultyRequestNotification($faculty, auth()->user()->name, $action));
+                } catch (\Throwable $exception) {
+                    Log::error('Error sending faculty notification: '.$exception->getMessage());
+                }
+            });
+    }
+
+    private function notifyFacultyDeletion(string $facultyName, ?string $department, User $actor): void
+    {
+        $this->getStakeholders($department)
+            ->each(function (User $recipient) use ($facultyName, $actor) {
+                if ($recipient->id === $actor->id) {
+                    return;
+                }
+
+                try {
+                    $recipient->notify(new FacultyRequestNotification($facultyName, $actor->name, 'deleted'));
+                } catch (\Throwable $exception) {
+                    Log::error('Error sending deletion notification: '.$exception->getMessage());
+                }
+            });
+    }
+
+    private function notifyBulkImport(int $importCount, array $departments): void
+    {
+        if ($importCount < 1) {
+            return;
+        }
+
+        $senderName = auth()->user()->name;
+
+        foreach ($departments as $department) {
+            $department = Department::normalizeCode($department);
+
+            User::whereIn('department', Department::aliasesFor($department))
+                ->whereIn('role', ['dean', 'oic'])
+                ->get()
+                ->each(function (User $leader) use ($department, $senderName) {
+                    if ($leader->id === auth()->id()) {
+                        return;
+                    }
+
+                    try {
+                        $leader->notify(new FacultyRequestNotification("the {$department} Department", $senderName, 'bulk_added'));
+                    } catch (\Throwable $exception) {
+                        Log::error('Error sending department bulk import notification: '.$exception->getMessage());
+                    }
+                });
+        }
+
+        User::whereIn('role', ['admin', 'registrar', 'associate_dean'])
+            ->get()
+            ->each(function (User $leader) use ($importCount, $senderName) {
+                if ($leader->id === auth()->id()) {
+                    return;
+                }
+
+                try {
+                    $leader->notify(new FacultyRequestNotification("{$importCount} Faculty Members", $senderName, 'bulk_added'));
+                } catch (\Throwable $exception) {
+                    Log::error('Error sending global bulk import notification: '.$exception->getMessage());
+                }
+            });
+    }
+
+    private function getStakeholders(?string $department)
+    {
+        $department = Department::normalizeCode($department);
+
+        return User::query()
+            ->whereIn('role', ['admin', 'registrar', 'associate_dean'])
+            ->when($department, function (Builder $query) use ($department) {
+                $query->orWhere(function (Builder $departmentQuery) use ($department) {
+                    $departmentQuery->whereIn('department', Department::aliasesFor($department))
+                        ->whereIn('role', ['dean', 'oic']);
+                });
+            })
+            ->get()
+            ->unique('id');
+    }
+
+    private function toast(string $type, string $message, string $detail = ''): void
+    {
+        $this->dispatch('toast', [
+            'type' => $type,
+            'message' => $message,
+            'detail' => $detail,
+        ]);
     }
 }

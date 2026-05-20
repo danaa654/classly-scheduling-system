@@ -4,6 +4,7 @@ namespace App\Livewire;
 
 use Livewire\Component;
 use Livewire\Attributes\Url;
+use App\Models\Department;
 use App\Models\Faculty;
 use App\Models\Subject;
 use App\Models\Room;
@@ -204,7 +205,7 @@ class MasterGrid extends Component
     public function getUserDepartment(): ?string
     {
         $user = auth()->user();
-        return $user->department ?? null;
+        return Department::normalizeCode($user->department ?? null);
     }
 
     public function canDeleteSchedule($scheduleId): bool
@@ -214,7 +215,7 @@ class MasterGrid extends Component
 
     public function getDepartmentColor($department): string
     {
-        return self::DEPARTMENT_COLORS[$department] ?? 'slate';
+        return self::DEPARTMENT_COLORS[Department::normalizeCode($department)] ?? 'slate';
     }
 
     public function formatTime12h($time): string
@@ -532,18 +533,16 @@ class MasterGrid extends Component
 
     private function findCompatibleFacultyForSubject(Subject $subject): array
     {
-        $department = $this->facultyDepartmentForSubject($subject);
-
         return Faculty::query()
             ->approved()
-            ->select('id', 'full_name', 'department')
-            ->when($department !== '', fn ($query) => $query->where('department', $department))
+            ->select('id', 'full_name', 'department', 'faculty_scope', 'can_teach_minor')
             ->orderBy('full_name')
             ->get()
+            ->filter(fn (Faculty $faculty) => $faculty->isEligibleForSubject($subject))
             ->map(fn (Faculty $faculty) => [
                 'id' => $faculty->id,
                 'full_name' => $this->cleanScheduleText($faculty->full_name),
-                'department' => $this->cleanScheduleText($faculty->department),
+                'department' => $this->cleanScheduleText($faculty->displayDepartment()),
             ])
             ->values()
             ->all();
@@ -551,7 +550,7 @@ class MasterGrid extends Component
 
     private function facultyDepartmentForSubject(Subject $subject): string
     {
-        $department = strtoupper(trim((string) $subject->department));
+        $department = Department::normalizeCode($subject->department) ?? '';
 
         if (in_array($department, ['CCS', 'COC', 'SHTM', 'CTE'], true)) {
             return $department;
@@ -621,7 +620,7 @@ class MasterGrid extends Component
             return;
         }
 
-        $this->generateDepartment = $this->selectedDept;
+        $this->generateDepartment = Department::normalizeCode($this->selectedDept);
         $this->generateMajor = $this->selectedMajor;
         $this->generateYearLevel = $this->selectedYear;
         $this->generateSection = $this->selectedSection;
@@ -838,7 +837,7 @@ class MasterGrid extends Component
         $saved = (int) ($result['saved'] ?? 0);
         $failed = (int) ($result['failed'] ?? 0);
         $filters = $this->generationSummary['filters'] ?? [
-            'department' => $this->generateDepartment,
+            'department' => Department::normalizeCode($this->generateDepartment),
             'major' => $this->generateMajor,
             'year_level' => $this->generateYearLevel,
             'section' => $this->generateSection,
@@ -1575,7 +1574,7 @@ class MasterGrid extends Component
 
     public function notifyScheduleStakeholders(array $filters, int $scheduledCount, int $failedCount): void
     {
-        $department = strtoupper((string) ($filters['department'] ?? ''));
+        $department = Department::normalizeCode($filters['department'] ?? null) ?? '';
         $major = strtoupper((string) ($filters['major'] ?? ''));
         $yearLevel = (string) ($filters['year_level'] ?? '');
         $section = strtoupper((string) ($filters['section'] ?? ''));
@@ -1585,7 +1584,7 @@ class MasterGrid extends Component
                 $query->whereIn('role', ['admin', 'associate_dean'])
                     ->orWhere(function ($inner) use ($department) {
                         $inner->whereIn('role', ['dean', 'oic'])
-                            ->when($department !== '', fn ($deptQuery) => $deptQuery->where('department', $department));
+                            ->when($department !== '', fn ($deptQuery) => $deptQuery->whereIn('department', Department::aliasesFor($department)));
                     });
             })
             ->get();
@@ -1982,7 +1981,7 @@ class MasterGrid extends Component
         if (!$this->hasFullAccess()) {
             $userDept = $this->getUserDepartment();
             if ($userDept) {
-                $query->where('department', $userDept);
+                $query->whereIn('department', Department::aliasesFor($userDept));
             }
         }
 
@@ -1997,7 +1996,7 @@ class MasterGrid extends Component
 
         // Department filter (case-insensitive)
         if ($this->selectedDept && $this->selectedDept !== '') {
-            $query->where('department', strtoupper($this->selectedDept));
+            $query->whereIn('department', Department::aliasesFor($this->selectedDept));
         }
 
         // Year level filter
@@ -2173,7 +2172,7 @@ class MasterGrid extends Component
         $availableFloors = $this->getAvailableFloors();
         $facultyOptions = Faculty::query()
             ->approved()
-            ->select('id', 'full_name', 'department')
+            ->select('id', 'full_name', 'department', 'faculty_scope', 'can_teach_minor')
             ->orderBy('full_name')
             ->get();
 

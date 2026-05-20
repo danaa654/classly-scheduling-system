@@ -32,7 +32,8 @@ class ScheduleService
 
         return [
             'room'    => $conflicts->where('room_id', $roomId)->first(),
-            'faculty' => $conflicts->where('user_id', $facultyId)->first(),
+            'faculty' => $conflicts->where('faculty_id', $facultyId)->first()
+                ?: $conflicts->where('user_id', $facultyId)->first(),
             'section' => $conflicts->where('section', $section)->first(),
         ];
     }

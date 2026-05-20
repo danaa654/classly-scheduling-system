@@ -10,9 +10,9 @@ return new class extends Migration
     {
         Schema::create('faculties', function (Blueprint $table) {
             $table->id();
-            
+
             // Status and Tracking
-            $table->string('status')->default('approved'); 
+            $table->string('status')->default('approved');
             $table->foreignId('requested_by')->nullable()->constrained('users')->onDelete('set null');
             $table->text('rejection_reason')->nullable();
 
@@ -20,13 +20,15 @@ return new class extends Migration
             $table->string('employee_id')->unique();
             $table->string('full_name');
             $table->string('email')->nullable();
-            $table->string('department');
-            
+            $table->string('department')->nullable();
+
             // Scheduling-Related Fields
             $table->string('employment_type')->default('Full-time');
-            $table->string('teaching_specialization')->default('Both');
+            $table->string('faculty_scope')->default('departmental');
+            $table->boolean('can_teach_minor')->default(false);
             $table->integer('max_units')->default(21);
-            
+            $table->json('availability')->nullable();
+
             $table->timestamps();
         });
     }

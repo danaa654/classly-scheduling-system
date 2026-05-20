@@ -116,6 +116,11 @@
                         $circumference   = 2 * 3.14159 * 18;
                         $strokeDashOffset = $circumference - ($percent / 100) * $circumference;
                         $isSelected      = (int) $selectedFacultyId === (int) $faculty->id;
+                        $scopeClass      = match($faculty->faculty_scope) {
+                            \App\Models\Faculty::SCOPE_GENED => 'border-sky-300/30 bg-sky-400/10 text-sky-200',
+                            \App\Models\Faculty::SCOPE_CROSS_DEPARTMENT => 'border-violet-300/30 bg-violet-400/10 text-violet-200',
+                            default => 'border-emerald-300/30 bg-emerald-400/10 text-emerald-200',
+                        };
                     @endphp
 
                     <div
@@ -136,10 +141,10 @@
                                         {{ $faculty->full_name }}
                                     </span>
                                     <span class="mt-0.5 block truncate text-[11px] font-semibold text-slate-400">
-                                        {{ $faculty->employee_id }} / {{ $faculty->department }} / {{ $faculty->employment_type ?? 'Faculty' }}
+                                        {{ $faculty->employee_id }} / {{ $faculty->displayDepartment() }} / {{ $faculty->employment_type ?? 'Faculty' }}
                                     </span>
-                                    <span class="mt-1 inline-flex rounded-md border border-white/10 bg-white/8 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-sky-200">
-                                        {{ $faculty->teaching_specialization ?? 'Both' }}
+                                    <span class="mt-1 inline-flex rounded-md border px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider {{ $scopeClass }}">
+                                        {{ $faculty->scopeLabel() }} / {{ $faculty->canTeachMinorSubjects() ? 'Minor OK' : 'Major Only' }}
                                     </span>
                                 </span>
                             </button>
@@ -228,14 +233,22 @@
                         <div class="min-w-0">
                             <div class="mb-3 flex flex-wrap items-center gap-2">
                                 <span class="rounded-full border border-sky-300/40 bg-sky-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-sky-200">Active Faculty</span>
-                                <span class="rounded-full border border-violet-300/30 bg-violet-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-violet-200">{{ $currentFaculty->teaching_specialization ?? 'Both' }}</span>
+                                @php
+                                    $currentScopeClass = match($currentFaculty->faculty_scope) {
+                                        \App\Models\Faculty::SCOPE_GENED => 'border-sky-300/30 bg-sky-400/10 text-sky-200',
+                                        \App\Models\Faculty::SCOPE_CROSS_DEPARTMENT => 'border-violet-300/30 bg-violet-400/10 text-violet-200',
+                                        default => 'border-emerald-300/30 bg-emerald-400/10 text-emerald-200',
+                                    };
+                                @endphp
+                                <span class="rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] {{ $currentScopeClass }}">{{ $currentFaculty->scopeLabel() }}</span>
+                                <span class="rounded-full border border-sky-300/30 bg-sky-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-sky-200">{{ $currentFaculty->canTeachMinorSubjects() ? 'Minor OK' : 'Major Only' }}</span>
                                 <span class="rounded-full border border-emerald-300/30 bg-emerald-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-emerald-200">{{ $currentFaculty->employment_type ?? 'Faculty' }}</span>
                             </div>
                             <h1 class="truncate text-2xl font-black uppercase tracking-tight text-white sm:text-4xl">
                                 {{ $currentFaculty->full_name }}
                             </h1>
                             <p class="mt-2 text-sm font-semibold text-slate-400">
-                                {{ $currentFaculty->employee_id }} / {{ $currentFaculty->department }} Department
+                                {{ $currentFaculty->employee_id }} / {{ $currentFaculty->displayDepartment() }}
                             </p>
                         </div>
 
@@ -592,7 +605,7 @@
                         <div class="min-w-0">
                             <p class="text-[10px] font-black uppercase tracking-[0.24em] text-sky-300">Assign Subject / Schedule</p>
                             <h2 class="mt-2 truncate text-2xl font-black uppercase tracking-tight text-white">{{ $currentFaculty->full_name }}</h2>
-                            <p class="mt-1 text-xs font-bold text-slate-400">{{ $currentFaculty->department }} / {{ $currentFaculty->employment_type ?? 'Faculty' }} / {{ $currentFaculty->teaching_specialization ?? 'Both' }}</p>
+                            <p class="mt-1 text-xs font-bold text-slate-400">{{ $currentFaculty->displayDepartment() }} / {{ $currentFaculty->employment_type ?? 'Faculty' }} / {{ $currentFaculty->scopeLabel() }} / {{ $currentFaculty->canTeachMinorSubjects() ? 'Minor OK' : 'Major Only' }}</p>
                         </div>
                         <button type="button" wire:click="closeAssignmentPanel" class="rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-white/12">
                             Close
@@ -772,22 +785,109 @@
     {{-- CONFLICT / OVERRIDE MODAL                                     --}}
     {{-- ============================================================ --}}
     @if($conflictModalOpen)
-        <div class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/75 p-4 backdrop-blur-sm" role="dialog" aria-modal="true">
-            <div class="w-full max-w-lg rounded-2xl border border-amber-300/30 bg-[#081a2d] p-5 shadow-2xl shadow-black/50">
+        <div class="fixed inset-0 z-[100] flex items-stretch justify-end bg-slate-950/75 backdrop-blur-sm" role="dialog" aria-modal="true">
+            <div class="custom-scrollbar h-full w-full max-w-xl overflow-y-auto border-l border-amber-300/30 bg-[#081a2d] p-5 shadow-2xl shadow-black/50">
                 <p class="text-[10px] font-black uppercase tracking-[0.24em] text-amber-200">Assignment Review</p>
-                <h2 class="mt-2 text-2xl font-black uppercase tracking-tight text-white">Conflict or overload detected</h2>
+                <h2 class="mt-2 text-2xl font-black uppercase tracking-tight text-white">Faculty Conflict Detected</h2>
                 <p class="mt-2 text-sm font-semibold text-slate-400">
-                    This schedule cannot be assigned until the warning is resolved, unless an authorized user overrides it.
+                    This schedule cannot be assigned until the conflict is resolved. Time, duplicate subject, load limit, and eligibility conflicts are blocked.
                 </p>
 
                 <div class="mt-4 space-y-3">
                     @foreach($pendingAssignmentWarnings as $warning)
-                        <div class="rounded-xl border border-amber-300/25 bg-amber-400/10 p-3">
-                            <p class="text-sm font-black uppercase tracking-wider text-amber-100">{{ $warning['title'] ?? 'Assignment Warning' }}</p>
-                            <p class="mt-1 text-sm font-semibold text-amber-100/80">{{ $warning['message'] ?? 'Review this assignment before continuing.' }}</p>
+                        @php
+                            $details = $warning['details'] ?? [];
+                        @endphp
+                        <div class="rounded-xl border border-amber-300/25 bg-amber-400/10 p-4">
+                            <div class="flex flex-wrap items-start justify-between gap-3">
+                                <div>
+                                    <p class="text-sm font-black uppercase tracking-wider text-amber-100">{{ $warning['title'] ?? 'Assignment Warning' }}</p>
+                                    <p class="mt-1 text-sm font-semibold text-amber-100/80">{{ $warning['message'] ?? 'Review this assignment before continuing.' }}</p>
+                                </div>
+                                <span class="rounded-md border border-amber-200/30 bg-amber-200/10 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-amber-100">
+                                    {{ str_replace('_', ' ', $warning['type'] ?? 'conflict') }}
+                                </span>
+                            </div>
+
+                            @if(!empty($details))
+                                <div class="mt-3 grid gap-2 rounded-lg border border-white/10 bg-slate-950/25 p-3 text-[11px] font-bold uppercase tracking-wider text-slate-400 sm:grid-cols-2">
+                                    @if(!empty($details['faculty_name']))
+                                        <p>Faculty: <span class="text-slate-100">{{ $details['faculty_name'] }}</span></p>
+                                    @endif
+                                    @if(!empty($details['conflicting_subject']))
+                                        <p>Subject: <span class="text-slate-100">{{ $details['conflicting_subject'] }}</span></p>
+                                    @endif
+                                    @if(!empty($details['day']))
+                                        <p>Day: <span class="text-slate-100">{{ $details['day'] }}</span></p>
+                                    @endif
+                                    @if(!empty($details['time']))
+                                        <p>Time: <span class="text-slate-100">{{ $details['time'] }}</span></p>
+                                    @endif
+                                    @if(!empty($details['room']))
+                                        <p>Room: <span class="text-slate-100">{{ $details['room'] }}</span></p>
+                                    @endif
+                                    @if(!empty($details['reason']))
+                                        <p class="sm:col-span-2">Reason: <span class="text-slate-100 normal-case tracking-normal">{{ $details['reason'] }}</span></p>
+                                    @endif
+                                </div>
+                            @endif
                         </div>
                     @endforeach
                 </div>
+
+                @if(!empty($assignmentRecommendations['faculty']) || !empty($assignmentRecommendations['slots']) || !empty($assignmentRecommendations['rooms']))
+                    <div class="mt-5 grid gap-3">
+                        @if(!empty($assignmentRecommendations['faculty']))
+                            <div class="rounded-xl border border-sky-300/25 bg-sky-400/10 p-3">
+                                <p class="text-[10px] font-black uppercase tracking-[0.18em] text-sky-100">Suggested Faculty</p>
+                                <div class="mt-2 grid gap-2">
+                                    @foreach($assignmentRecommendations['faculty'] as $suggestion)
+                                        <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/8 px-2.5 py-2">
+                                            <span class="text-[10px] font-black uppercase text-slate-100">
+                                                {{ $suggestion['name'] }} / {{ $suggestion['scope'] }} / {{ $suggestion['remaining_units'] }}u open
+                                            </span>
+                                            <button type="button" wire:click="useFacultySuggestion({{ (int) $suggestion['id'] }})" class="rounded-md bg-sky-300 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-slate-950 transition hover:bg-sky-200">
+                                                Use Suggestion
+                                            </button>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            </div>
+                        @endif
+
+                        @if(!empty($assignmentRecommendations['slots']))
+                            <div class="rounded-xl border border-emerald-300/25 bg-emerald-400/10 p-3">
+                                <p class="text-[10px] font-black uppercase tracking-[0.18em] text-emerald-100">Suggested Slots</p>
+                                <div class="mt-2 grid gap-2">
+                                    @foreach($assignmentRecommendations['slots'] as $suggestion)
+                                        <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/8 px-2.5 py-2">
+                                            <span class="text-[10px] font-black uppercase text-slate-100">{{ $suggestion['label'] }}</span>
+                                            <button type="button" wire:click="useSlotSuggestion(@js($suggestion['day']), @js($suggestion['start_time']), @js($suggestion['end_time']))" class="rounded-md bg-emerald-300 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-slate-950 transition hover:bg-emerald-200">
+                                                Use Suggestion
+                                            </button>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            </div>
+                        @endif
+
+                        @if(!empty($assignmentRecommendations['rooms']))
+                            <div class="rounded-xl border border-violet-300/25 bg-violet-400/10 p-3">
+                                <p class="text-[10px] font-black uppercase tracking-[0.18em] text-violet-100">Suggested Rooms</p>
+                                <div class="mt-2 grid gap-2">
+                                    @foreach($assignmentRecommendations['rooms'] as $suggestion)
+                                        <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/8 px-2.5 py-2">
+                                            <span class="text-[10px] font-black uppercase text-slate-100">{{ $suggestion['name'] }} / {{ $suggestion['type'] }}</span>
+                                            <button type="button" wire:click="useRoomSuggestion({{ (int) $suggestion['id'] }})" class="rounded-md bg-violet-300 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-slate-950 transition hover:bg-violet-200">
+                                                Use Suggestion
+                                            </button>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            </div>
+                        @endif
+                    </div>
+                @endif
 
                 <div class="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
                     <button type="button" wire:click="cancelAssignmentOverride" class="rounded-lg border border-white/10 bg-white/8 px-4 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-white/12">
@@ -800,7 +900,7 @@
                         </button>
                     @else
                         <div class="rounded-lg border border-white/10 bg-white/5 px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-400">
-                            Override requires admin or registrar
+                            Resolve conflict to assign
                         </div>
                     @endif
                 </div>
