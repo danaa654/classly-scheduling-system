@@ -308,5 +308,219 @@
                 @endforelse
             </div>
         </div>
-    </div>
-</div>
+        <!-- ARCHIVED HISTORY LOGS — full-width independent block, outside the settings cards column -->
+        {{-- NOTE: This closing tag ends the max-w-6xl space-y-6 cards column above. --}}
+    </div><!-- /.max-w-6xl.space-y-6 (settings cards column) -->
+
+    <!-- ═══════════════════════════════════════════════════════════════
+         ARCHIVED HISTORY LOGS
+         Independent full-width row — rendered outside the cards column
+         so it is never clipped, constrained, or nested inside a flex
+         sibling. Glassmorphism dark theme matching Classly's palette.
+    ════════════════════════════════════════════════════════════════════ -->
+    <div class="w-full mt-8 px-4 pb-8">
+        <div class="max-w-6xl mx-auto">
+        <div class="w-full p-6 bg-slate-900/40 backdrop-blur-md border border-white/10 rounded-2xl">
+
+            {{-- Section header --}}
+            <div class="flex items-center justify-between mb-5">
+                <div class="flex items-center gap-3">
+                    <div class="w-8 h-8 rounded-lg bg-indigo-500/20 border border-indigo-400/20 flex items-center justify-center flex-shrink-0">
+                        <span class="text-base leading-none">🗂️</span>
+                    </div>
+                    <div>
+                        <h3 class="text-xs font-black text-indigo-400 uppercase tracking-widest">Archived History Logs</h3>
+                        <p class="text-[10px] font-semibold text-slate-500 uppercase tracking-wider mt-0.5">Read-only audit view of past semester records</p>
+                    </div>
+                </div>
+
+                {{-- Record count badge: only shown when a semester is selected AND records were found --}}
+                @if($selectedHistoricalSemester && $archivedHistoryRecords->isNotEmpty())
+                    <span class="flex-shrink-0 px-3 py-1.5 bg-indigo-500/15 border border-indigo-400/25 text-indigo-300 text-[10px] font-black rounded-lg uppercase tracking-wide">
+                        {{ $archivedHistoryRecords->count() }} records
+                    </span>
+                @endif
+            </div>
+
+            {{-- Term selector dropdown --}}
+            <div class="mb-4">
+                <label class="text-[10px] font-black text-slate-400 uppercase tracking-widest block mb-2">
+                    Select Historical Semester to Audit
+                </label>
+                <select
+                    wire:model.live="selectedHistoricalSemester"
+                    class="w-full bg-slate-950 border border-white/10 text-slate-300 rounded-xl px-3 py-2.5 text-xs font-semibold focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500/30 transition-all">
+                    <option value="">— Select Past Semester to Audit —</option>
+                    @forelse($archivedSemesterOptions as $option)
+                        <option value="{{ $option->value }}">
+                            {{ $option->label }} · {{ $option->badge }}
+                            @if($option->date)
+                                · Archived {{ \Carbon\Carbon::parse($option->date)->format('M d, Y') }}
+                            @endif
+                        </option>
+                    @empty
+                        <option value="" disabled>No archived semesters available</option>
+                    @endforelse
+                </select>
+            </div>
+
+            {{-- Empty state: no semester selected --}}
+            @if(! $selectedHistoricalSemester)
+                <div class="flex flex-col items-center justify-center py-12 border border-dashed border-white/10 rounded-xl">
+                    <span class="text-3xl mb-3 opacity-40">🗄️</span>
+                    <p class="text-xs font-bold text-slate-500 uppercase tracking-wider">No semester selected</p>
+                    <p class="text-[10px] font-medium text-slate-600 mt-1">Choose a historical period from the dropdown above to audit its records.</p>
+                </div>
+
+            {{-- Empty state: semester selected but no records found --}}
+            @elseif($selectedHistoricalSemester && $archivedHistoryRecords->isEmpty())
+                <div class="flex flex-col items-center justify-center py-12 border border-dashed border-white/10 rounded-xl">
+                    <span class="text-3xl mb-3 opacity-40">📭</span>
+                    <p class="text-xs font-bold text-slate-500 uppercase tracking-wider">No records found</p>
+                    <p class="text-[10px] font-medium text-slate-600 mt-1">This archive period contains no schedule data.</p>
+                </div>
+
+            @else
+                {{-- Read-only status banner --}}
+                <div class="flex items-center gap-3 p-3 bg-amber-500/8 border border-amber-400/20 rounded-xl mb-4">
+                    <span class="text-sm flex-shrink-0">🔒</span>
+                    <p class="text-[10px] font-black text-amber-300 uppercase tracking-wider">
+                        Viewing Historical Records — These records are completely locked and read-only.
+                    </p>
+                </div>
+
+                {{-- Data table --}}
+                <div class="overflow-hidden rounded-xl border border-white/8">
+
+                    {{-- Scrollable wrapper — horizontal scroll only; no height cap so the full table is always visible --}}
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse min-w-[640px]">
+
+                            {{-- Sticky header --}}
+                            <thead class="sticky top-0 z-10">
+                                <tr class="bg-slate-950/90 backdrop-blur-sm border-b border-white/10">
+                                    <th class="px-4 py-3 text-[10px] font-black text-indigo-400 uppercase tracking-widest whitespace-nowrap w-28">
+                                        EDP Code
+                                    </th>
+                                    <th class="px-4 py-3 text-[10px] font-black text-indigo-400 uppercase tracking-widest">
+                                        Subject
+                                    </th>
+                                    <th class="px-4 py-3 text-[10px] font-black text-indigo-400 uppercase tracking-widest whitespace-nowrap w-20 text-center">
+                                        Section
+                                    </th>
+                                    <th class="px-4 py-3 text-[10px] font-black text-indigo-400 uppercase tracking-widest">
+                                        Assigned Instructor
+                                    </th>
+                                    <th class="px-4 py-3 text-[10px] font-black text-indigo-400 uppercase tracking-widest whitespace-nowrap w-16 text-center">
+                                        Units
+                                    </th>
+                                    <th class="px-4 py-3 text-[10px] font-black text-indigo-400 uppercase tracking-widest whitespace-nowrap w-32 text-center">
+                                        Schedule
+                                    </th>
+                                    <th class="px-4 py-3 text-[10px] font-black text-indigo-400 uppercase tracking-widest whitespace-nowrap w-28 text-center">
+                                        Status
+                                    </th>
+                                </tr>
+                            </thead>
+
+                            <tbody class="divide-y divide-white/5">
+                                @foreach($archivedHistoryRecords as $index => $record)
+                                    <tr class="group transition-colors duration-100 hover:bg-white/4 {{ $index % 2 === 0 ? 'bg-transparent' : 'bg-white/2' }}">
+
+                                        {{-- EDP Code --}}
+                                        <td class="px-4 py-3 whitespace-nowrap">
+                                            <span class="inline-block px-2 py-0.5 bg-indigo-500/15 border border-indigo-400/20 text-indigo-300 text-[10px] font-black rounded-md uppercase tracking-wide">
+                                                {{ $record->edp_code }}
+                                            </span>
+                                        </td>
+
+                                        {{-- Subject code + title --}}
+                                        <td class="px-4 py-3">
+                                            <p class="text-xs font-black text-slate-200 uppercase leading-tight">
+                                                {{ $record->subject_code }}
+                                            </p>
+                                            @if($record->descriptive_title && $record->descriptive_title !== '—')
+                                                <p class="text-[10px] font-medium text-slate-500 mt-0.5 leading-tight max-w-xs truncate">
+                                                    {{ $record->descriptive_title }}
+                                                </p>
+                                            @endif
+                                        </td>
+
+                                        {{-- Section --}}
+                                        <td class="px-4 py-3 text-center">
+                                            <span class="inline-block px-2 py-0.5 bg-white/8 border border-white/10 text-slate-300 text-[10px] font-black rounded-md uppercase">
+                                                {{ $record->section }}
+                                            </span>
+                                        </td>
+
+                                        {{-- Instructor name --}}
+                                        <td class="px-4 py-3">
+                                            @if($record->instructor_name === 'Unassigned')
+                                                <span class="text-[10px] font-bold text-slate-600 uppercase italic">Unassigned</span>
+                                            @else
+                                                <p class="text-xs font-semibold text-slate-300 leading-tight">
+                                                    {{ $record->instructor_name }}
+                                                </p>
+                                            @endif
+                                        </td>
+
+                                        {{-- Units --}}
+                                        <td class="px-4 py-3 text-center">
+                                            <span class="text-xs font-black text-slate-300">
+                                                {{ $record->units !== '—' ? $record->units . ' u' : '—' }}
+                                            </span>
+                                        </td>
+
+                                        {{-- Day + time --}}
+                                        <td class="px-4 py-3 text-center">
+                                            <p class="text-[10px] font-bold text-slate-400 uppercase">{{ $record->day }}</p>
+                                            @if($record->start_time && $record->end_time)
+                                                <p class="text-[9px] font-medium text-slate-600 mt-0.5">
+                                                    {{ \Carbon\Carbon::parse($record->start_time)->format('h:i A') }}
+                                                    –
+                                                    {{ \Carbon\Carbon::parse($record->end_time)->format('h:i A') }}
+                                                </p>
+                                            @endif
+                                        </td>
+
+                                        {{-- Status chip --}}
+                                        <td class="px-4 py-3 text-center">
+                                            @php
+                                                $chipClass = match($record->status) {
+                                                    'finalized'        => 'bg-emerald-500/15 border-emerald-400/25 text-emerald-300',
+                                                    'faculty_assigned' => 'bg-blue-500/15 border-blue-400/25 text-blue-300',
+                                                    'partial'          => 'bg-amber-500/15 border-amber-400/25 text-amber-300',
+                                                    'draft'            => 'bg-slate-500/15 border-slate-400/25 text-slate-400',
+                                                    default            => 'bg-white/8 border-white/10 text-slate-500',
+                                                };
+                                            @endphp
+                                            <span class="inline-block px-2 py-0.5 border text-[9px] font-black rounded-md uppercase tracking-wide {{ $chipClass }}">
+                                                {{ str_replace('_', ' ', $record->status) }}
+                                            </span>
+                                        </td>
+
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {{-- Table footer summary row --}}
+                    <div class="flex items-center justify-between px-4 py-3 bg-slate-950/60 border-t border-white/8">
+                        <p class="text-[10px] font-bold text-slate-500 uppercase tracking-wide">
+                            {{ $archivedHistoryRecords->count() }} total records
+                        </p>
+                        <p class="text-[10px] font-bold text-slate-600 uppercase tracking-wide">
+                            Total units:
+                            <span class="text-slate-400">
+                                {{ $archivedHistoryRecords->sum(fn($r) => is_numeric($r->units) ? $r->units : 0) }}
+                            </span>
+                        </p>
+                    </div>
+                </div>
+            @endif
+        </div><!-- /.archived-history-card -->
+        </div><!-- /.max-w-6xl (centering wrapper) -->
+    </div><!-- /.w-full.mt-8.px-4.pb-8 (history logs row) -->
+
+</div><!-- /.min-h-screen (page wrapper) -->
