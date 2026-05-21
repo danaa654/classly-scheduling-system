@@ -9,9 +9,19 @@
         'minorCount'         => 0,
         'majorUnits'         => 0,
         'minorUnits'         => 0,
+        'majorPercent'       => 0,
+        'minorPercent'       => 0,
         'averageMajorUnits'  => 0,
         'averageMinorUnits'  => 0,
         'scheduleCount'      => 0,
+    ];
+
+    $deptSummary = $departmentSummary ?? [
+        'totalSubjects'    => 0,
+        'assignedSubjects' => 0,
+        'subjectsLeft'     => 0,
+        'facultyProcessed' => 0,
+        'activeDepartment' => 'All',
     ];
 @endphp
 
@@ -95,11 +105,11 @@
                             </select>
                         @endif
 
-                        <select wire:model.live="statusFilter" class="h-9 rounded-lg border border-white/10 bg-[#0b1b30] px-2 text-xs font-bold text-slate-200 outline-none transition focus:border-sky-300 {{ count($facultyDepartments) > 1 ? '' : 'col-span-2' }}">
-                            <option value="all">All Types</option>
-                            @foreach($employmentTypes as $type)
-                                <option value="{{ $type }}">{{ $type }}</option>
-                            @endforeach
+                        <select wire:model.live="selectedScope" class="h-9 rounded-lg border border-white/10 bg-[#0b1b30] px-2 text-xs font-bold text-slate-200 outline-none transition focus:border-sky-300 {{ count($facultyDepartments) > 1 ? '' : 'col-span-2' }}">
+                            <option value="all">All Scopes</option>
+                            <option value="departmental">Departmental</option>
+                            <option value="gened">Gen-Ed</option>
+                            <option value="cross_department">Cross-Departmental</option>
                         </select>
                     </div>
                 </div>
@@ -109,17 +119,17 @@
             <div class="custom-scrollbar flex-1 space-y-2 overflow-y-auto p-3">
                 @forelse($faculties as $faculty)
                     @php
-                        $units           = (int) ($faculty->assigned_units ?? 0);
-                        $max             = max(1, (int) ($faculty->max_units ?? 21));
-                        $percent         = min(100, round(($units / $max) * 100));
-                        $ringColor       = $percent >= 100 ? '#f43f5e' : ($percent >= 85 ? '#f59e0b' : '#38bdf8');
-                        $circumference   = 2 * 3.14159 * 18;
+                        $units            = (int) ($faculty->assigned_units ?? 0);
+                        $max              = max(1, (int) ($faculty->max_units ?? 21));
+                        $percent          = min(100, round(($units / $max) * 100));
+                        $ringColor        = $percent >= 100 ? '#f43f5e' : ($percent >= 85 ? '#f59e0b' : '#38bdf8');
+                        $circumference    = 2 * 3.14159 * 18;
                         $strokeDashOffset = $circumference - ($percent / 100) * $circumference;
-                        $isSelected      = (int) $selectedFacultyId === (int) $faculty->id;
-                        $scopeClass      = match($faculty->faculty_scope) {
-                            \App\Models\Faculty::SCOPE_GENED => 'border-sky-300/30 bg-sky-400/10 text-sky-200',
+                        $isSelected       = (int) $selectedFacultyId === (int) $faculty->id;
+                        $scopeClass       = match($faculty->faculty_scope) {
+                            \App\Models\Faculty::SCOPE_GENED            => 'border-sky-300/30 bg-sky-400/10 text-sky-200',
                             \App\Models\Faculty::SCOPE_CROSS_DEPARTMENT => 'border-violet-300/30 bg-violet-400/10 text-violet-200',
-                            default => 'border-emerald-300/30 bg-emerald-400/10 text-emerald-200',
+                            default                                      => 'border-emerald-300/30 bg-emerald-400/10 text-emerald-200',
                         };
                     @endphp
 
@@ -227,7 +237,46 @@
 
             @if($currentFaculty)
 
-                {{-- Faculty Header + KPI cards --}}
+                {{-- ========================================================
+                     STATE B — FACULTY SELECTED
+                     ======================================================== --}}
+
+                {{-- Compact department overview mini-cards (top row) --}}
+                <div class="summary-mini-bar no-print shrink-0 border-b border-white/[0.07] bg-white/[0.025] px-4 py-2 backdrop-blur-xl sm:px-6">
+                    <div class="flex flex-wrap items-center gap-2">
+                        <span class="mr-1 text-[9px] font-black uppercase tracking-[0.22em] text-slate-500">Dept Overview</span>
+
+                        {{-- Mini card: Total Subjects --}}
+                        <div class="mini-stat-card flex items-center gap-2 rounded-xl border border-white/5 bg-white/[0.04] px-3 py-1.5 text-sm">
+                            <span class="text-[9px] font-black uppercase tracking-wider text-slate-400">Total</span>
+                            <span class="font-black text-white">{{ $deptSummary['totalSubjects'] }}</span>
+                        </div>
+
+                        {{-- Mini card: Assigned --}}
+                        <div class="mini-stat-card flex items-center gap-2 rounded-xl border border-emerald-300/15 bg-emerald-400/[0.07] px-3 py-1.5 text-sm">
+                            <span class="text-[9px] font-black uppercase tracking-wider text-emerald-300/70">Assigned</span>
+                            <span class="font-black text-emerald-200">{{ $deptSummary['assignedSubjects'] }}</span>
+                        </div>
+
+                        {{-- Mini card: Subjects Left --}}
+                        <div class="mini-stat-card flex items-center gap-2 rounded-xl border border-amber-300/15 bg-amber-400/[0.07] px-3 py-1.5 text-sm">
+                            <span class="text-[9px] font-black uppercase tracking-wider text-amber-300/70">Left</span>
+                            <span class="font-black text-amber-200">{{ $deptSummary['subjectsLeft'] }}</span>
+                        </div>
+
+                        {{-- Mini card: Faculty Processed --}}
+                        <div class="mini-stat-card flex items-center gap-2 rounded-xl border border-sky-300/15 bg-sky-400/[0.07] px-3 py-1.5 text-sm">
+                            <span class="text-[9px] font-black uppercase tracking-wider text-sky-300/70">Processed</span>
+                            <span class="font-black text-sky-200">{{ $deptSummary['facultyProcessed'] }}</span>
+                        </div>
+
+                        <span class="ml-auto text-[9px] font-bold text-slate-600">
+                            Dept: {{ $deptSummary['activeDepartment'] }}
+                        </span>
+                    </div>
+                </div>
+
+                {{-- Faculty Header + Specialized Load Cards --}}
                 <section class="border-b border-white/10 bg-white/[0.045] p-4 backdrop-blur-xl sm:p-6">
                     <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                         <div class="min-w-0">
@@ -235,9 +284,9 @@
                                 <span class="rounded-full border border-sky-300/40 bg-sky-400/10 px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-sky-200">Active Faculty</span>
                                 @php
                                     $currentScopeClass = match($currentFaculty->faculty_scope) {
-                                        \App\Models\Faculty::SCOPE_GENED => 'border-sky-300/30 bg-sky-400/10 text-sky-200',
+                                        \App\Models\Faculty::SCOPE_GENED            => 'border-sky-300/30 bg-sky-400/10 text-sky-200',
                                         \App\Models\Faculty::SCOPE_CROSS_DEPARTMENT => 'border-violet-300/30 bg-violet-400/10 text-violet-200',
-                                        default => 'border-emerald-300/30 bg-emerald-400/10 text-emerald-200',
+                                        default                                      => 'border-emerald-300/30 bg-emerald-400/10 text-emerald-200',
                                     };
                                 @endphp
                                 <span class="rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.18em] {{ $currentScopeClass }}">{{ $currentFaculty->scopeLabel() }}</span>
@@ -265,43 +314,133 @@
                         </div>
                     </div>
 
-                    {{-- KPI Cards --}}
-                    <div class="mt-5 grid gap-3 md:grid-cols-4">
-                        <div class="rounded-xl border border-sky-300/20 bg-sky-400/10 p-4 shadow-xl shadow-sky-950/20">
-                            <p class="text-[10px] font-black uppercase tracking-[0.2em] text-sky-200">Current Units</p>
-                            <div class="mt-2 flex items-end gap-1">
-                                <span class="text-3xl font-black text-white">{{ $summary['totalUnits'] }}</span>
-                                <span class="pb-1 text-sm font-bold text-sky-200">/ {{ $summary['maxUnits'] }}</span>
+                    {{-- ── Specialized Faculty Load Cards (State B) ── --}}
+                    <div class="mt-5 grid gap-4 md:grid-cols-2">
+
+                        {{-- ── MAJOR LOAD CARD ── --}}
+                        @if(!$currentFaculty->isGenEd())
+                        <div class="load-card rounded-2xl border border-amber-300/20 bg-slate-900/40 p-6 shadow-xl shadow-amber-950/10 backdrop-blur-md">
+                            <div class="mb-4 flex items-center justify-between">
+                                <div>
+                                    <p class="text-[10px] font-black uppercase tracking-[0.22em] text-amber-300/80">Major Load</p>
+                                    <p class="mt-1 text-xs font-semibold text-slate-400">Departmental subject assignments</p>
+                                </div>
+                                <span class="rounded-xl border border-amber-300/25 bg-amber-400/12 px-3 py-1.5 text-xs font-black uppercase tracking-wider text-amber-200">
+                                    {{ $summary['majorCount'] }} subject(s)
+                                </span>
                             </div>
-                            <div class="mt-3 h-1.5 overflow-hidden rounded-full bg-white/10">
-                                <div class="h-full rounded-full bg-sky-300 transition-all duration-700" style="width: {{ min(100, $summary['utilizationPercent']) }}%"></div>
+
+                            <div class="flex items-end gap-2">
+                                <span class="text-5xl font-black leading-none text-white">{{ $summary['majorUnits'] }}</span>
+                                <span class="pb-1 text-lg font-bold text-amber-200/60">/ {{ $summary['maxUnits'] }} units</span>
+                            </div>
+
+                            {{-- Progress bar --}}
+                            <div class="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+                                <div
+                                    class="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-400 transition-all duration-700"
+                                    style="width: {{ $summary['majorPercent'] }}%">
+                                </div>
+                            </div>
+                            <p class="mt-2 text-[11px] font-bold text-amber-200/60">{{ $summary['majorPercent'] }}% of max load</p>
+
+                            @if($summary['majorCount'] > 0)
+                                <div class="mt-4 grid grid-cols-2 gap-2">
+                                    <div class="rounded-lg border border-white/5 bg-white/[0.04] px-3 py-2">
+                                        <p class="text-[9px] font-black uppercase tracking-wider text-slate-500">Avg Units</p>
+                                        <p class="mt-0.5 text-lg font-black text-white">{{ $summary['averageMajorUnits'] }}</p>
+                                    </div>
+                                    <div class="rounded-lg border border-white/5 bg-white/[0.04] px-3 py-2">
+                                        <p class="text-[9px] font-black uppercase tracking-wider text-slate-500">Offerings</p>
+                                        <p class="mt-0.5 text-lg font-black text-white">{{ $summary['majorCount'] }}</p>
+                                    </div>
+                                </div>
+                            @endif
+                        </div>
+                        @endif
+
+                        {{-- ── MINOR / GENED LOAD CARD ── --}}
+                        <div class="load-card rounded-2xl border {{ $currentFaculty->isGenEd() ? 'border-sky-300/25 bg-slate-900/40' : 'border-violet-300/20 bg-slate-900/40' }} p-6 shadow-xl {{ $currentFaculty->isGenEd() ? 'shadow-sky-950/10' : 'shadow-violet-950/10' }} backdrop-blur-md {{ $currentFaculty->isGenEd() ? 'md:col-span-2' : '' }}">
+                            <div class="mb-4 flex items-center justify-between">
+                                <div>
+                                    @if($currentFaculty->isGenEd())
+                                        <p class="text-[10px] font-black uppercase tracking-[0.22em] text-sky-300/80">GenEd / Minor Load</p>
+                                        <p class="mt-1 text-xs font-semibold text-slate-400">Institution-wide subject assignments</p>
+                                    @else
+                                        <p class="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300/80">Minor Load</p>
+                                        <p class="mt-1 text-xs font-semibold text-slate-400">Cross-department minor subject assignments</p>
+                                    @endif
+                                </div>
+                                <span class="rounded-xl border {{ $currentFaculty->isGenEd() ? 'border-sky-300/25 bg-sky-400/12 text-sky-200' : 'border-violet-300/25 bg-violet-400/12 text-violet-200' }} px-3 py-1.5 text-xs font-black uppercase tracking-wider">
+                                    {{ $summary['minorCount'] }} subject(s)
+                                </span>
+                            </div>
+
+                            <div class="flex items-end gap-2">
+                                <span class="text-5xl font-black leading-none text-white">{{ $summary['minorUnits'] }}</span>
+                                <span class="pb-1 text-lg font-bold {{ $currentFaculty->isGenEd() ? 'text-sky-200/60' : 'text-violet-200/60' }}">/ {{ $summary['maxUnits'] }} units</span>
+                            </div>
+
+                            {{-- Progress bar --}}
+                            <div class="mt-4 h-2 overflow-hidden rounded-full bg-white/10">
+                                <div
+                                    class="h-full rounded-full {{ $currentFaculty->isGenEd() ? 'bg-gradient-to-r from-sky-500 to-blue-400' : 'bg-gradient-to-r from-violet-500 to-purple-400' }} transition-all duration-700"
+                                    style="width: {{ $summary['minorPercent'] }}%">
+                                </div>
+                            </div>
+                            <p class="mt-2 text-[11px] font-bold {{ $currentFaculty->isGenEd() ? 'text-sky-200/60' : 'text-violet-200/60' }}">{{ $summary['minorPercent'] }}% of max load</p>
+
+                            @if($summary['minorCount'] > 0)
+                                <div class="mt-4 grid grid-cols-2 gap-2 {{ $currentFaculty->isGenEd() ? 'md:grid-cols-4' : '' }}">
+                                    <div class="rounded-lg border border-white/5 bg-white/[0.04] px-3 py-2">
+                                        <p class="text-[9px] font-black uppercase tracking-wider text-slate-500">Avg Units</p>
+                                        <p class="mt-0.5 text-lg font-black text-white">{{ $summary['averageMinorUnits'] }}</p>
+                                    </div>
+                                    <div class="rounded-lg border border-white/5 bg-white/[0.04] px-3 py-2">
+                                        <p class="text-[9px] font-black uppercase tracking-wider text-slate-500">Offerings</p>
+                                        <p class="mt-0.5 text-lg font-black text-white">{{ $summary['minorCount'] }}</p>
+                                    </div>
+                                    @if($currentFaculty->isGenEd())
+                                        <div class="rounded-lg border border-white/5 bg-white/[0.04] px-3 py-2">
+                                            <p class="text-[9px] font-black uppercase tracking-wider text-slate-500">Total Units</p>
+                                            <p class="mt-0.5 text-lg font-black text-white">{{ $summary['totalUnits'] }}</p>
+                                        </div>
+                                        <div class="rounded-lg border border-white/5 bg-white/[0.04] px-3 py-2">
+                                            <p class="text-[9px] font-black uppercase tracking-wider text-slate-500">Utilization</p>
+                                            <p class="mt-0.5 text-lg font-black text-white">{{ $summary['utilizationPercent'] }}%</p>
+                                        </div>
+                                    @endif
+                                </div>
+                            @endif
+                        </div>
+
+                    </div>
+
+                    {{-- Total load progress bar (always visible) --}}
+                    <div class="mt-4 rounded-xl border border-white/10 bg-white/[0.03] p-4">
+                        <div class="mb-2 flex items-center justify-between">
+                            <p class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Total Load Utilization</p>
+                            <div class="flex items-baseline gap-1">
+                                <span class="text-xl font-black text-white">{{ $summary['totalUnits'] }}</span>
+                                <span class="text-sm font-bold text-slate-400">/ {{ $summary['maxUnits'] }} units</span>
+                                <span class="ml-2 text-xs font-bold {{ $summary['utilizationPercent'] >= 100 ? 'text-red-300' : ($summary['utilizationPercent'] >= 85 ? 'text-amber-300' : 'text-sky-300') }}">
+                                    {{ $summary['utilizationPercent'] }}%
+                                </span>
                             </div>
                         </div>
-
-                        <div class="rounded-xl border border-white/10 bg-white/[0.055] p-4">
-                            <p class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400">Load Usage</p>
-                            <p class="mt-2 text-3xl font-black text-white">{{ $summary['utilizationPercent'] }}%</p>
-                            <p class="mt-1 text-xs font-bold text-slate-400">{{ $summary['remainingUnits'] }} units remaining</p>
-                        </div>
-
-                        <div class="rounded-xl border border-amber-300/20 bg-amber-400/10 p-4">
-                            <p class="text-[10px] font-black uppercase tracking-[0.2em] text-amber-200">Major Load</p>
-                            <p class="mt-2 text-3xl font-black text-white">{{ $summary['majorUnits'] }}</p>
-                            <p class="mt-1 text-xs font-bold text-amber-100/80">{{ $summary['majorCount'] }} subject offering(s)</p>
-                        </div>
-
-                        <div class="rounded-xl border border-violet-300/20 bg-violet-400/10 p-4">
-                            <p class="text-[10px] font-black uppercase tracking-[0.2em] text-violet-200">Minor Load</p>
-                            <p class="mt-2 text-3xl font-black text-white">{{ $summary['minorUnits'] }}</p>
-                            <p class="mt-1 text-xs font-bold text-violet-100/80">{{ $summary['minorCount'] }} subject offering(s)</p>
+                        <div class="h-2 overflow-hidden rounded-full bg-white/10">
+                            <div
+                                class="h-full rounded-full transition-all duration-700 {{ $summary['utilizationPercent'] >= 100 ? 'bg-gradient-to-r from-red-500 to-rose-400' : ($summary['utilizationPercent'] >= 85 ? 'bg-gradient-to-r from-amber-500 to-yellow-400' : 'bg-gradient-to-r from-sky-500 to-blue-400') }}"
+                                style="width: {{ min(100, $summary['utilizationPercent']) }}%">
+                            </div>
                         </div>
                     </div>
 
                     @if($summary['overloadUnits'] > 0)
                         <div class="mt-4 rounded-xl border border-red-400/40 bg-red-500/12 p-4">
-                            <p class="text-sm font-black uppercase tracking-wider text-red-100">Overload warning</p>
+                            <p class="text-sm font-black uppercase tracking-wider text-red-100">Overload Warning</p>
                             <p class="mt-1 text-sm font-semibold text-red-100/80">
-                                This faculty load is {{ $summary['overloadUnits'] }} unit(s) over the configured maximum.
+                                This faculty load is {{ $summary['overloadUnits'] }} unit(s) over the configured maximum of {{ $summary['maxUnits'] }} units.
                             </p>
                         </div>
                     @endif
@@ -310,10 +449,6 @@
                 {{-- Tab navigation --}}
                 <section class="no-print shrink-0 border-b border-white/10 bg-[#071526]/80 px-4 pt-4 backdrop-blur-xl sm:px-6">
                     <div class="flex gap-5 overflow-x-auto">
-                        {{--
-                            Tab counter shows grouped row count so it matches
-                            the visible table rows instead of raw DB schedule count.
-                        --}}
                         <button type="button" wire:click="toggleTab('subjects')" class="whitespace-nowrap border-b-2 px-1 pb-3 text-xs font-black uppercase tracking-widest transition {{ $activeTab === 'subjects' ? 'border-sky-300 text-sky-200' : 'border-transparent text-slate-500 hover:text-slate-200' }}">
                             Assigned Subjects ({{ $groupedAssignedSubjects->count() }})
                         </button>
@@ -353,53 +488,36 @@
                                             </tr>
                                         </thead>
                                         <tbody class="divide-y divide-white/10">
-                                            {{--
-                                                Each $assignedSubject is one grouped offering.
-                                                Multi-day subjects appear as a SINGLE row with
-                                                all meeting days stacked in the Schedule cell.
-                                            --}}
                                             @foreach($groupedAssignedSubjects as $assignedSubject)
                                                 <tr
                                                     wire:key="assigned-row-{{ $assignedSubject['first_schedule_id'] }}"
                                                     class="transition hover:bg-sky-400/5">
 
-                                                    {{-- Code + EDP --}}
                                                     <td class="px-4 py-3">
                                                         <p class="font-black uppercase text-sky-200">{{ $assignedSubject['subject_code'] }}</p>
                                                         <p class="mt-1 text-[10px] font-bold uppercase text-amber-200/80">{{ $assignedSubject['edp_code'] }}</p>
                                                     </td>
 
-                                                    {{-- Subject description --}}
                                                     <td class="max-w-sm px-4 py-3">
                                                         <p class="line-clamp-2 font-bold text-white">{{ $assignedSubject['description'] }}</p>
                                                     </td>
 
-                                                    {{-- Group label --}}
                                                     <td class="px-4 py-3 font-bold text-slate-300">
                                                         {{ $assignedSubject['group'] }}
                                                     </td>
 
-                                                    {{-- Room --}}
                                                     <td class="px-4 py-3 font-bold text-slate-300">
                                                         {{ $assignedSubject['room'] }}
                                                     </td>
 
-                                                    {{--
-                                                        Schedule — unescaped so the <br> between
-                                                        meeting days renders correctly in one cell.
-                                                        The string is built from Carbon-formatted
-                                                        DB values only; no user HTML is involved.
-                                                    --}}
                                                     <td class="px-4 py-3 font-bold leading-6 text-slate-300">
                                                         {!! $assignedSubject['schedule'] !!}
                                                     </td>
 
-                                                    {{-- Units --}}
                                                     <td class="px-4 py-3 text-center font-black text-white">
                                                         {{ $assignedSubject['units'] }}
                                                     </td>
 
-                                                    {{-- Type badge --}}
                                                     <td class="px-4 py-3 text-center">
                                                         <span class="rounded-full border px-2 py-1 text-[10px] font-black uppercase
                                                             {{ $assignedSubject['type'] === 'Major'
@@ -409,14 +527,6 @@
                                                         </span>
                                                     </td>
 
-                                                    {{--
-                                                        Remove — targets the first schedule ID in the
-                                                        group. The removeSubject() action clears
-                                                        faculty_id on that specific schedule row.
-                                                        To remove ALL days at once, use
-                                                        removeSubjectGroup(array $ids) and pass
-                                                        $assignedSubject['schedule_ids'].
-                                                    --}}
                                                     <td class="px-4 py-3 text-right">
                                                         <button
                                                             type="button"
@@ -532,20 +642,30 @@
                             <div class="rounded-xl border border-white/10 bg-white/[0.045] p-5 shadow-xl shadow-black/20 backdrop-blur-xl">
                                 <h3 class="text-sm font-black uppercase tracking-[0.18em] text-white">Subject Type Mix</h3>
                                 <div class="mt-5 space-y-3">
+                                    @if(!$currentFaculty->isGenEd())
                                     <div class="rounded-lg border border-amber-300/20 bg-amber-400/10 p-4">
                                         <div class="flex items-center justify-between">
                                             <p class="text-sm font-black uppercase text-amber-100">Major</p>
                                             <p class="text-sm font-black text-white">{{ $summary['majorUnits'] }} units</p>
                                         </div>
-                                        <p class="mt-1 text-xs font-semibold text-amber-100/75">{{ $summary['majorCount'] }} subject offering(s), {{ $summary['averageMajorUnits'] }} average units</p>
+                                        <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                                            <div class="h-full rounded-full bg-amber-400 transition-all duration-500" style="width: {{ $summary['majorPercent'] }}%"></div>
+                                        </div>
+                                        <p class="mt-1.5 text-xs font-semibold text-amber-100/75">{{ $summary['majorCount'] }} subject offering(s) &bull; {{ $summary['averageMajorUnits'] }} avg units</p>
                                     </div>
+                                    @endif
 
-                                    <div class="rounded-lg border border-violet-300/20 bg-violet-400/10 p-4">
+                                    <div class="rounded-lg border {{ $currentFaculty->isGenEd() ? 'border-sky-300/20 bg-sky-400/10' : 'border-violet-300/20 bg-violet-400/10' }} p-4">
                                         <div class="flex items-center justify-between">
-                                            <p class="text-sm font-black uppercase text-violet-100">Minor</p>
+                                            <p class="text-sm font-black uppercase {{ $currentFaculty->isGenEd() ? 'text-sky-100' : 'text-violet-100' }}">
+                                                {{ $currentFaculty->isGenEd() ? 'GenEd / Minor' : 'Minor' }}
+                                            </p>
                                             <p class="text-sm font-black text-white">{{ $summary['minorUnits'] }} units</p>
                                         </div>
-                                        <p class="mt-1 text-xs font-semibold text-violet-100/75">{{ $summary['minorCount'] }} subject offering(s), {{ $summary['averageMinorUnits'] }} average units</p>
+                                        <div class="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10">
+                                            <div class="h-full rounded-full {{ $currentFaculty->isGenEd() ? 'bg-sky-400' : 'bg-violet-400' }} transition-all duration-500" style="width: {{ $summary['minorPercent'] }}%"></div>
+                                        </div>
+                                        <p class="mt-1.5 text-xs font-semibold {{ $currentFaculty->isGenEd() ? 'text-sky-100/75' : 'text-violet-100/75' }}">{{ $summary['minorCount'] }} subject offering(s) &bull; {{ $summary['averageMinorUnits'] }} avg units</p>
                                     </div>
                                 </div>
                             </div>
@@ -555,16 +675,134 @@
                 </section>
 
             @else
-                {{-- No faculty selected --}}
-                <div class="flex h-full min-h-0 flex-col items-center justify-center p-8 text-center">
-                    <div class="rounded-2xl border border-white/10 bg-white/[0.045] p-8 shadow-2xl shadow-black/20 backdrop-blur-xl">
-                        <p class="text-xs font-black uppercase tracking-[0.24em] text-sky-300">Faculty Loading</p>
-                        <h1 class="mt-3 text-3xl font-black uppercase tracking-tight text-white">Select Faculty First</h1>
-                        <p class="mt-3 max-w-md text-sm font-semibold text-slate-400">
-                            Choose a faculty member from the roster, then use the action menu to assign generated schedules.
+
+                {{-- ========================================================
+                     STATE A — NO FACULTY SELECTED
+                     Four large department-level overview cards
+                     ======================================================== --}}
+                <div class="flex h-full min-h-0 flex-col gap-6 overflow-y-auto p-6 sm:p-8">
+
+                    {{-- Department label / context --}}
+                    <div class="flex items-center gap-3">
+                        <div>
+                            <p class="text-[10px] font-black uppercase tracking-[0.26em] text-sky-300">Faculty Loading</p>
+                            <h1 class="mt-1 text-2xl font-black uppercase tracking-tight text-white sm:text-3xl">Department Overview</h1>
+                            <p class="mt-1 text-sm font-semibold text-slate-400">
+                                Select a faculty member from the roster to begin assignment.
+                                @if($deptSummary['activeDepartment'] !== 'All')
+                                    Showing data for <span class="font-black text-sky-300">{{ $deptSummary['activeDepartment'] }}</span>.
+                                @endif
+                            </p>
+                        </div>
+                    </div>
+
+                    {{-- 4 large glassmorphism overview cards --}}
+                    <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+
+                        {{-- Card 1: Total Subjects --}}
+                        <div class="dept-card group relative overflow-hidden rounded-2xl border border-white/10 bg-slate-900/40 p-6 shadow-2xl shadow-black/30 backdrop-blur-md transition duration-300 hover:border-sky-300/30 hover:bg-slate-900/55">
+                            <div class="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-sky-400/8 blur-2xl transition duration-500 group-hover:bg-sky-400/15"></div>
+                            <div class="relative">
+                                <div class="mb-4 flex items-center justify-between">
+                                    <p class="text-[10px] font-black uppercase tracking-[0.22em] text-sky-300/80">Total Subjects</p>
+                                    <div class="rounded-lg border border-sky-300/20 bg-sky-400/10 p-2">
+                                        <svg class="h-4 w-4 text-sky-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25"/>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <p class="text-6xl font-black leading-none text-white">{{ $deptSummary['totalSubjects'] }}</p>
+                                <p class="mt-3 text-xs font-semibold text-slate-400">Total class offerings in the active scope</p>
+                                <div class="mt-4 h-1 overflow-hidden rounded-full bg-white/10">
+                                    <div class="h-full w-full rounded-full bg-gradient-to-r from-sky-500/60 to-sky-300/40"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        {{-- Card 2: Subjects Assigned --}}
+                        <div class="dept-card group relative overflow-hidden rounded-2xl border border-emerald-300/15 bg-slate-900/40 p-6 shadow-2xl shadow-black/30 backdrop-blur-md transition duration-300 hover:border-emerald-300/35 hover:bg-slate-900/55">
+                            <div class="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-emerald-400/8 blur-2xl transition duration-500 group-hover:bg-emerald-400/15"></div>
+                            <div class="relative">
+                                <div class="mb-4 flex items-center justify-between">
+                                    <p class="text-[10px] font-black uppercase tracking-[0.22em] text-emerald-300/80">Assigned</p>
+                                    <div class="rounded-lg border border-emerald-300/20 bg-emerald-400/10 p-2">
+                                        <svg class="h-4 w-4 text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z"/>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <p class="text-6xl font-black leading-none text-white">{{ $deptSummary['assignedSubjects'] }}</p>
+                                <p class="mt-3 text-xs font-semibold text-slate-400">Class blocks with an instructor attached</p>
+                                @if($deptSummary['totalSubjects'] > 0)
+                                    @php $assignedPct = round(($deptSummary['assignedSubjects'] / $deptSummary['totalSubjects']) * 100); @endphp
+                                    <div class="mt-4 h-1 overflow-hidden rounded-full bg-white/10">
+                                        <div class="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-300 transition-all duration-700" style="width: {{ $assignedPct }}%"></div>
+                                    </div>
+                                    <p class="mt-1.5 text-[10px] font-bold text-emerald-300/60">{{ $assignedPct }}% of total</p>
+                                @else
+                                    <div class="mt-4 h-1 rounded-full bg-white/10"></div>
+                                @endif
+                            </div>
+                        </div>
+
+                        {{-- Card 3: Subjects Left --}}
+                        <div class="dept-card group relative overflow-hidden rounded-2xl border border-amber-300/15 bg-slate-900/40 p-6 shadow-2xl shadow-black/30 backdrop-blur-md transition duration-300 hover:border-amber-300/35 hover:bg-slate-900/55">
+                            <div class="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-amber-400/8 blur-2xl transition duration-500 group-hover:bg-amber-400/15"></div>
+                            <div class="relative">
+                                <div class="mb-4 flex items-center justify-between">
+                                    <p class="text-[10px] font-black uppercase tracking-[0.22em] text-amber-300/80">Subjects Left</p>
+                                    <div class="rounded-lg border border-amber-300/20 bg-amber-400/10 p-2">
+                                        <svg class="h-4 w-4 text-amber-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"/>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <p class="text-6xl font-black leading-none {{ $deptSummary['subjectsLeft'] > 0 ? 'text-amber-200' : 'text-white' }}">{{ $deptSummary['subjectsLeft'] }}</p>
+                                <p class="mt-3 text-xs font-semibold text-slate-400">Remaining unassigned class blocks</p>
+                                @if($deptSummary['totalSubjects'] > 0)
+                                    @php $leftPct = round(($deptSummary['subjectsLeft'] / $deptSummary['totalSubjects']) * 100); @endphp
+                                    <div class="mt-4 h-1 overflow-hidden rounded-full bg-white/10">
+                                        <div class="h-full rounded-full bg-gradient-to-r from-amber-500 to-yellow-300 transition-all duration-700" style="width: {{ $leftPct }}%"></div>
+                                    </div>
+                                    <p class="mt-1.5 text-[10px] font-bold text-amber-300/60">{{ $leftPct }}% unassigned</p>
+                                @else
+                                    <div class="mt-4 h-1 rounded-full bg-white/10"></div>
+                                @endif
+                            </div>
+                        </div>
+
+                        {{-- Card 4: Faculty Processed --}}
+                        <div class="dept-card group relative overflow-hidden rounded-2xl border border-violet-300/15 bg-slate-900/40 p-6 shadow-2xl shadow-black/30 backdrop-blur-md transition duration-300 hover:border-violet-300/35 hover:bg-slate-900/55">
+                            <div class="absolute -right-6 -top-6 h-24 w-24 rounded-full bg-violet-400/8 blur-2xl transition duration-500 group-hover:bg-violet-400/15"></div>
+                            <div class="relative">
+                                <div class="mb-4 flex items-center justify-between">
+                                    <p class="text-[10px] font-black uppercase tracking-[0.22em] text-violet-300/80">Faculty Processed</p>
+                                    <div class="rounded-lg border border-violet-300/20 bg-violet-400/10 p-2">
+                                        <svg class="h-4 w-4 text-violet-300" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2.5">
+                                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19.128a9.38 9.38 0 0 0 2.625.372 9.337 9.337 0 0 0 4.121-.952 4.125 4.125 0 0 0-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 0 1 8.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0 1 11.964-3.07M12 6.375a3.375 3.375 0 1 1-6.75 0 3.375 3.375 0 0 1 6.75 0Zm8.25 2.25a2.625 2.625 0 1 1-5.25 0 2.625 2.625 0 0 1 5.25 0Z"/>
+                                        </svg>
+                                    </div>
+                                </div>
+                                <p class="text-6xl font-black leading-none text-white">{{ $deptSummary['facultyProcessed'] }}</p>
+                                <p class="mt-3 text-xs font-semibold text-slate-400">Unique faculty with ≥1 subject assigned here</p>
+                                <div class="mt-4 h-1 overflow-hidden rounded-full bg-white/10">
+                                    <div class="h-full w-full rounded-full bg-gradient-to-r from-violet-500/60 to-violet-300/40"></div>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div>
+
+                    {{-- Prompt to select a faculty --}}
+                    <div class="rounded-2xl border border-white/10 bg-white/[0.03] p-6 text-center backdrop-blur-xl">
+                        <p class="text-[10px] font-black uppercase tracking-[0.24em] text-slate-500">Ready to Assign</p>
+                        <p class="mt-2 text-sm font-semibold text-slate-400">
+                            Pick a faculty member from the roster on the left to view their detailed load and begin assigning subjects.
                         </p>
                     </div>
+
                 </div>
+
             @endif
         </main>
     </div>
@@ -603,45 +841,25 @@
                 <div class="shrink-0 border-b border-white/10 p-5">
                     <div class="flex items-start justify-between gap-4">
                         <div class="min-w-0">
-                            <p class="text-[10px] font-black uppercase tracking-[0.24em] text-sky-300">Assign Subject / Schedule</p>
-                            <h2 class="mt-2 truncate text-2xl font-black uppercase tracking-tight text-white">{{ $currentFaculty->full_name }}</h2>
-                            <p class="mt-1 text-xs font-bold text-slate-400">{{ $currentFaculty->displayDepartment() }} / {{ $currentFaculty->employment_type ?? 'Faculty' }} / {{ $currentFaculty->scopeLabel() }} / {{ $currentFaculty->canTeachMinorSubjects() ? 'Minor OK' : 'Major Only' }}</p>
+                            <p class="text-[10px] font-black uppercase tracking-[0.24em] text-sky-300">Assignment Panel</p>
+                            <h2 class="mt-1 truncate text-xl font-black uppercase tracking-tight text-white">
+                                {{ $currentFaculty->full_name }}
+                            </h2>
+                            <p class="mt-1 text-xs font-semibold text-slate-400">
+                                {{ $currentFaculty->displayDepartment() }} &bull; {{ $summary['totalUnits'] }}/{{ $summary['maxUnits'] }} units used
+                            </p>
                         </div>
-                        <button type="button" wire:click="closeAssignmentPanel" class="rounded-lg border border-white/10 bg-white/8 px-3 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-white/12">
+                        <button
+                            type="button"
+                            wire:click="closeAssignmentPanel"
+                            class="shrink-0 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-xs font-black uppercase tracking-wider text-slate-300 transition hover:bg-white/10 hover:text-white">
                             Close
                         </button>
                     </div>
-
-                    <div class="mt-4 grid gap-3 sm:grid-cols-4">
-                        <div class="rounded-lg border border-sky-300/20 bg-sky-400/10 p-3">
-                            <p class="text-[9px] font-black uppercase tracking-wider text-sky-200">Current Units</p>
-                            <p class="mt-1 text-xl font-black text-white">{{ $summary['totalUnits'] }} / {{ $summary['maxUnits'] }}</p>
-                        </div>
-                        <div class="rounded-lg border border-white/10 bg-white/8 p-3">
-                            <p class="text-[9px] font-black uppercase tracking-wider text-slate-400">Load Usage</p>
-                            <p class="mt-1 text-xl font-black text-white">{{ $summary['utilizationPercent'] }}%</p>
-                        </div>
-                        <div class="rounded-lg border border-white/10 bg-white/8 p-3">
-                            <p class="text-[9px] font-black uppercase tracking-wider text-slate-400">Remaining</p>
-                            <p class="mt-1 text-xl font-black text-white">{{ $summary['remainingUnits'] }}</p>
-                        </div>
-                        <div class="rounded-lg border {{ $summary['overloadUnits'] > 0 ? 'border-red-300/40 bg-red-400/10' : 'border-emerald-300/20 bg-emerald-400/10' }} p-3">
-                            <p class="text-[9px] font-black uppercase tracking-wider {{ $summary['overloadUnits'] > 0 ? 'text-red-100' : 'text-emerald-100' }}">State</p>
-                            <p class="mt-1 text-sm font-black uppercase {{ $summary['overloadUnits'] > 0 ? 'text-red-100' : 'text-emerald-100' }}">
-                                {{ $summary['overloadUnits'] > 0 ? 'Overload' : 'Available' }}
-                            </p>
-                        </div>
-                    </div>
-
-                    @if($summary['overloadUnits'] > 0)
-                        <div class="mt-3 rounded-lg border border-red-300/30 bg-red-400/10 p-3 text-sm font-semibold text-red-100">
-                            Current load is already {{ $summary['overloadUnits'] }} unit(s) over capacity.
-                        </div>
-                    @endif
                 </div>
 
-                {{-- Search & filters --}}
-                <div class="sticky top-0 z-10 shrink-0 border-b border-white/10 bg-[#071526]/95 p-4 backdrop-blur-2xl">
+                {{-- Filters --}}
+                <div class="shrink-0 border-b border-white/10 p-4">
                     <div class="grid gap-3">
                         <input
                             type="search"
@@ -740,7 +958,6 @@
 
                                 <div class="flex shrink-0 flex-col gap-2 sm:w-40">
                                     @if($assignedToCurrent)
-                                        {{-- Remove all days in this group at once --}}
                                         <button
                                             type="button"
                                             wire:click="removeSubjectGroup({{ json_encode($group['schedule_ids']) }})"
@@ -756,7 +973,6 @@
                                             Finalized
                                         </button>
                                     @else
-                                        {{-- Assign all days in this group at once --}}
                                         <button
                                             type="button"
                                             wire:click="assignSubjectGroup({{ json_encode($group['schedule_ids']) }})"
@@ -795,9 +1011,7 @@
 
                 <div class="mt-4 space-y-3">
                     @foreach($pendingAssignmentWarnings as $warning)
-                        @php
-                            $details = $warning['details'] ?? [];
-                        @endphp
+                        @php $details = $warning['details'] ?? []; @endphp
                         <div class="rounded-xl border border-amber-300/25 bg-amber-400/10 p-4">
                             <div class="flex flex-wrap items-start justify-between gap-3">
                                 <div>
@@ -875,10 +1089,10 @@
                             <div class="rounded-xl border border-violet-300/25 bg-violet-400/10 p-3">
                                 <p class="text-[10px] font-black uppercase tracking-[0.18em] text-violet-100">Suggested Rooms</p>
                                 <div class="mt-2 grid gap-2">
-                                    @foreach($assignmentRecommendations['rooms'] as $suggestion)
+                                    @foreach($assignmentRecommendations['rooms'] as $room)
                                         <div class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-white/10 bg-white/8 px-2.5 py-2">
-                                            <span class="text-[10px] font-black uppercase text-slate-100">{{ $suggestion['name'] }} / {{ $suggestion['type'] }}</span>
-                                            <button type="button" wire:click="useRoomSuggestion({{ (int) $suggestion['id'] }})" class="rounded-md bg-violet-300 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-slate-950 transition hover:bg-violet-200">
+                                            <span class="text-[10px] font-black uppercase text-slate-100">{{ $room['name'] }} / {{ $room['type'] }}</span>
+                                            <button type="button" wire:click="useRoomSuggestion({{ (int) $room['id'] }})" class="rounded-md bg-violet-300 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-slate-950 transition hover:bg-violet-200">
                                                 Use Suggestion
                                             </button>
                                         </div>
@@ -889,7 +1103,7 @@
                     </div>
                 @endif
 
-                <div class="mt-5 flex flex-col gap-2 sm:flex-row sm:justify-end">
+                <div class="mt-5 flex gap-3">
                     <button type="button" wire:click="cancelAssignmentOverride" class="rounded-lg border border-white/10 bg-white/8 px-4 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-white/12">
                         Cancel
                     </button>
@@ -955,7 +1169,37 @@
             overflow: hidden;
         }
 
-        /* Light-mode overrides */
+        /* ── Department overview card entrance animation ── */
+        .dept-card {
+            animation: cardSlideUp 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .dept-card:nth-child(1) { animation-delay: 0.04s; }
+        .dept-card:nth-child(2) { animation-delay: 0.10s; }
+        .dept-card:nth-child(3) { animation-delay: 0.16s; }
+        .dept-card:nth-child(4) { animation-delay: 0.22s; }
+
+        @keyframes cardSlideUp {
+            from { opacity: 0; transform: translateY(18px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ── Mini bar entrance when faculty is selected ── */
+        .summary-mini-bar {
+            animation: miniBarSlide 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        @keyframes miniBarSlide {
+            from { opacity: 0; transform: translateY(-8px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+
+        /* ── Load cards entrance animation ── */
+        .load-card {
+            animation: cardSlideUp 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+        }
+        .load-card:nth-child(1) { animation-delay: 0.06s; }
+        .load-card:nth-child(2) { animation-delay: 0.14s; }
+
+        /* ── Light-mode overrides ── */
         body:not(.dark) .faculty-loading-shell [class*="bg-[#071526]"],
         body:not(.dark) .faculty-loading-shell [class*="bg-[#081a2d]"],
         body:not(.dark) .faculty-loading-shell [class*="bg-[#0b1b30]"] { background-color: rgba(255,255,255,0.92) !important; }

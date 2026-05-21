@@ -30,6 +30,9 @@ class FacultyLoading extends Component
 
     public $statusFilter = 'all';
 
+    /** Filters the faculty roster by faculty_scope track (departmental / gened / cross_department). */
+    public string $selectedScope = 'all';
+
     public $subjectDepartmentFilter = 'all';
 
     public $subjectMajorFilter = 'all';
@@ -197,19 +200,6 @@ class FacultyLoading extends Component
 
     /**
      * Groups multi-day schedule rows into a single display row per subject-section offering.
-     *
-     * Grouping key: subject_id + section
-     * Each resulting array item contains:
-     *   - subject_code, edp_code, description  – from the subject
-     *   - group                                 – dept / major / year / section label
-     *   - room                                  – room name
-     *   - schedule                              – all meeting days joined with <br>
-     *   - units, type                           – from the subject
-     *   - schedule_ids                          – all raw schedule IDs in the group
-     *   - first_schedule_id                     – used as the wire:key and remove target
-     *
-     * This prevents duplicate unit counting and duplicate table rows for the same
-     * subject offering that meets on multiple days.
      */
     private function groupedAssignedSubjects(): Collection
     {
@@ -222,7 +212,6 @@ class FacultyLoading extends Component
                 $subject = $first->subject;
                 $room = $first->room;
 
-                // Build one schedule line per distinct day+time in this group
                 $scheduleLines = $group
                     ->map(fn (Schedule $s) => trim(
                         ($s->day ?? 'N/A')
@@ -258,7 +247,95 @@ class FacultyLoading extends Component
     }
 
     // ============================================================
-    // FACULTY SUMMARY
+    // DEPARTMENT-LEVEL SUMMARY (State A — no faculty selected)
+    // ============================================================
+
+    /**
+     * Computes the four department-level overview metrics shown when no faculty is selected.
+     *
+     * - totalSubjects    : All schedule rows in the active department filter that have a subject.
+     * - assignedSubjects : Schedule rows with a faculty_id set.
+     * - subjectsLeft     : Unassigned schedule rows.
+     * - facultyProcessed : Unique faculty members who hold ≥1 subject inside this department
+     *                      (includes departmental staff AND GenEd staff assigned here).
+     */
+    public function getDepartmentSummary(): array
+    {
+        $user = Auth::user();
+
+        // Resolve the active department scope for the filter.
+        // When the user is a dean/oic we scope to their department automatically.
+        $activeDepartment = null;
+
+        if ($this->departmentFilter !== 'all') {
+            $activeDepartment = $this->departmentFilter;
+        } elseif (in_array($user->role, ['dean', 'oic'], true) && $user->department) {
+            $activeDepartment = Department::normalizeCode($user->department);
+        }
+
+        // ── Total schedule rows (each unique subject-section-day slot counts as one) ──
+        $baseQuery = Schedule::query()
+            ->whereIn('status', [
+                Schedule::STATUS_PARTIAL,
+                Schedule::STATUS_FACULTY_ASSIGNED,
+                Schedule::STATUS_FINALIZED,
+            ])
+            ->whereHas('subject');
+
+        if ($activeDepartment) {
+            $aliases = $this->departmentAliases($activeDepartment);
+            $baseQuery->where(function (Builder $q) use ($aliases) {
+                $q->whereIn('department', $aliases)
+                    ->orWhereHas('subject', fn (Builder $sq) => $sq->whereIn('department', $aliases));
+            });
+        } elseif ($user->role === 'associate_dean') {
+            $baseQuery->whereHas('subject', fn (Builder $sq) => $sq->where('type', 'Minor'));
+        }
+
+        $totalSubjects = (clone $baseQuery)->count();
+
+        // ── Assigned (has a faculty_id) ──
+        $assignedSubjects = (clone $baseQuery)->whereNotNull('faculty_id')->count();
+
+        // ── Left (no faculty_id) ──
+        $subjectsLeft = $totalSubjects - $assignedSubjects;
+
+        // ── Faculty Processed ──
+        // Departmental staff assigned here OR GenEd/Cross-dept staff assigned here.
+        $assignedFacultyIds = (clone $baseQuery)
+            ->whereNotNull('faculty_id')
+            ->pluck('faculty_id')
+            ->filter()
+            ->unique()
+            ->values();
+
+        // Count of distinct faculty in that id set who are either:
+        //   (a) from the active department, OR
+        //   (b) GenEd / Cross-Department scope (institution-wide)
+        $facultyProcessedQuery = Faculty::query()
+            ->whereIn('id', $assignedFacultyIds);
+
+        if ($activeDepartment) {
+            $aliases = $this->departmentAliases($activeDepartment);
+            $facultyProcessedQuery->where(function (Builder $q) use ($aliases) {
+                $q->whereIn('department', $aliases)
+                    ->orWhereIn('faculty_scope', [Faculty::SCOPE_GENED, Faculty::SCOPE_CROSS_DEPARTMENT]);
+            });
+        }
+
+        $facultyProcessed = $facultyProcessedQuery->count();
+
+        return [
+            'totalSubjects'    => $totalSubjects,
+            'assignedSubjects' => $assignedSubjects,
+            'subjectsLeft'     => $subjectsLeft,
+            'facultyProcessed' => $facultyProcessed,
+            'activeDepartment' => $activeDepartment ?? 'All',
+        ];
+    }
+
+    // ============================================================
+    // FACULTY SUMMARY (State B — faculty selected)
     // ============================================================
 
     public function getFacultySummary()
@@ -268,30 +345,46 @@ class FacultyLoading extends Component
         }
 
         $subjects = $this->assignedSubjects();
-        $totalUnits = $subjects->sum('units') ?? 0;
-        $maxUnits = $this->selectedFaculty->max_units ?? 21;
+        $faculty  = $this->selectedFaculty;
+
+        $totalUnits       = $subjects->sum('units') ?? 0;
+        $maxUnits         = $faculty->max_units ?? 21;
         $utilizationPercent = $maxUnits > 0 ? round(($totalUnits / $maxUnits) * 100) : 0;
 
-        $majorSubjects = $subjects->where('type', 'Major');
-        $minorSubjects = $subjects->where('type', 'Minor');
+        // For GenEd faculty: everything they teach is "minor/gened" — treat all as minor load.
+        // For departmental / cross-department: split by subject type field.
+        if ($faculty->isGenEd()) {
+            $majorSubjects = collect();
+            $minorSubjects = $subjects;
+        } else {
+            $majorSubjects = $subjects->filter(fn ($s) => strtolower(trim((string) ($s->type ?? ''))) === 'major');
+            $minorSubjects = $subjects->filter(fn ($s) => strtolower(trim((string) ($s->type ?? ''))) !== 'major');
+        }
+
         $majorCount = $majorSubjects->count();
         $minorCount = $minorSubjects->count();
-        $majorUnits = $majorSubjects->sum('units') ?? 0;
-        $minorUnits = $minorSubjects->sum('units') ?? 0;
+        $majorUnits = (int) $majorSubjects->sum('units');
+        $minorUnits = (int) $minorSubjects->sum('units');
+
+        // Progress percentages relative to max_units cap.
+        $majorPercent = $maxUnits > 0 ? min(100, round(($majorUnits / $maxUnits) * 100)) : 0;
+        $minorPercent = $maxUnits > 0 ? min(100, round(($minorUnits / $maxUnits) * 100)) : 0;
 
         return [
-            'totalUnits' => $totalUnits,
-            'maxUnits' => $maxUnits,
-            'remainingUnits' => max(0, $maxUnits - $totalUnits),
-            'overloadUnits' => max(0, $totalUnits - $maxUnits),
+            'totalUnits'         => $totalUnits,
+            'maxUnits'           => $maxUnits,
+            'remainingUnits'     => max(0, $maxUnits - $totalUnits),
+            'overloadUnits'      => max(0, $totalUnits - $maxUnits),
             'utilizationPercent' => $utilizationPercent,
-            'majorCount' => $majorCount,
-            'minorCount' => $minorCount,
-            'majorUnits' => $majorUnits,
-            'minorUnits' => $minorUnits,
-            'averageMajorUnits' => $majorCount > 0 ? round($majorUnits / $majorCount, 2) : 0,
-            'averageMinorUnits' => $minorCount > 0 ? round($minorUnits / $minorCount, 2) : 0,
-            'scheduleCount' => $this->assignedSchedules()->count(),
+            'majorCount'         => $majorCount,
+            'minorCount'         => $minorCount,
+            'majorUnits'         => $majorUnits,
+            'minorUnits'         => $minorUnits,
+            'majorPercent'       => $majorPercent,
+            'minorPercent'       => $minorPercent,
+            'averageMajorUnits'  => $majorCount > 0 ? round($majorUnits / $majorCount, 2) : 0,
+            'averageMinorUnits'  => $minorCount > 0 ? round($minorUnits / $minorCount, 2) : 0,
+            'scheduleCount'      => $this->assignedSchedules()->count(),
         ];
     }
 
@@ -395,7 +488,6 @@ class FacultyLoading extends Component
             return;
         }
 
-        // If this was a group assignment (multiple days), handle all of them
         $groupIds = $this->pendingAssignmentGroupIds;
 
         if (! empty($groupIds)) {
@@ -431,7 +523,6 @@ class FacultyLoading extends Component
             return;
         }
 
-        // Fallback: single schedule assignment (original behaviour)
         $schedule = Schedule::with(['subject', 'room'])->find($this->pendingAssignmentScheduleId);
 
         if (! $schedule || ! $schedule->subject) {
@@ -529,9 +620,9 @@ class FacultyLoading extends Component
                 foreach ($fresh as $schedule) {
                     $payload = [
                         'start_time' => Carbon::parse($startTime)->format('H:i:s'),
-                        'end_time' => Carbon::parse($endTime)->format('H:i:s'),
+                        'end_time'   => Carbon::parse($endTime)->format('H:i:s'),
                         'faculty_id' => $faculty->id,
-                        'status' => Schedule::STATUS_PARTIAL,
+                        'status'     => Schedule::STATUS_PARTIAL,
                     ];
 
                     if ($singleSchedule) {
@@ -542,7 +633,6 @@ class FacultyLoading extends Component
                 }
             });
 
-            $this->subjectSearch = '';
             $this->resetPendingAssignment();
             unset($this->selectedFaculty);
             $this->toast('success', 'Suggested timeslot applied and faculty assigned.');
@@ -584,14 +674,13 @@ class FacultyLoading extends Component
 
                 foreach ($fresh as $schedule) {
                     $schedule->update([
-                        'room_id' => $room->id,
+                        'room_id'    => $room->id,
                         'faculty_id' => $faculty->id,
-                        'status' => Schedule::STATUS_PARTIAL,
+                        'status'     => Schedule::STATUS_PARTIAL,
                     ]);
                 }
             });
 
-            $this->subjectSearch = '';
             $this->resetPendingAssignment();
             unset($this->selectedFaculty);
             $this->toast('success', 'Suggested room applied and faculty assigned.');
@@ -686,11 +775,10 @@ class FacultyLoading extends Component
 
                 $fresh->update([
                     'faculty_id' => $faculty->id,
-                    'status' => Schedule::STATUS_PARTIAL,
+                    'status'     => Schedule::STATUS_PARTIAL,
                 ]);
             });
 
-            $this->subjectSearch = '';
             $this->resetPendingAssignment();
             unset($this->selectedFaculty);
 
@@ -729,10 +817,10 @@ class FacultyLoading extends Component
 
         if ($subjectAlreadyAssigned) {
             $warnings[] = [
-                'type' => 'DUPLICATE_SUBJECT',
-                'title' => 'Duplicate Subject Assignment',
-                'message' => "{$faculty->full_name} is already assigned to {$schedule->subject->subject_code}.",
-                'details' => $this->warningDetails(
+                'type'       => 'DUPLICATE_SUBJECT',
+                'title'      => 'Duplicate Subject Assignment',
+                'message'    => "{$faculty->full_name} is already assigned to {$schedule->subject->subject_code}.",
+                'details'    => $this->warningDetails(
                     $faculty,
                     $schedule,
                     $duplicateSubject,
@@ -744,10 +832,10 @@ class FacultyLoading extends Component
 
         if ($newTotal > $maxUnits) {
             $warnings[] = [
-                'type' => 'OVERLOAD',
-                'title' => 'Faculty Load Limit Exceeded',
-                'message' => "{$schedule->subject->subject_code} would bring {$faculty->full_name} to {$newTotal}/{$maxUnits} units.",
-                'details' => $this->warningDetails(
+                'type'       => 'OVERLOAD',
+                'title'      => 'Faculty Load Limit Exceeded',
+                'message'    => "{$schedule->subject->subject_code} would bring {$faculty->full_name} to {$newTotal}/{$maxUnits} units.",
+                'details'    => $this->warningDetails(
                     $faculty,
                     $schedule,
                     null,
@@ -849,10 +937,10 @@ class FacultyLoading extends Component
         $message = $conflict['message'] ?? $fallbackMessage;
 
         return [
-            'type' => $type,
-            'title' => $title,
-            'message' => $message,
-            'details' => $this->warningDetailsFromConflict($faculty, $schedule, $conflict, $message),
+            'type'       => $type,
+            'title'      => $title,
+            'message'    => $message,
+            'details'    => $this->warningDetailsFromConflict($faculty, $schedule, $conflict, $message),
             'overridable' => false,
         ];
     }
@@ -860,14 +948,14 @@ class FacultyLoading extends Component
     private function warningDetails(Faculty $faculty, Schedule $schedule, ?Schedule $conflictingSchedule, string $reason): array
     {
         return [
-            'faculty_name' => $faculty->full_name,
-            'requested_subject' => $schedule->subject?->subject_code ?? 'Requested subject',
-            'conflicting_subject' => $conflictingSchedule?->subject?->subject_code ?? $schedule->subject?->subject_code ?? 'Subject',
+            'faculty_name'             => $faculty->full_name,
+            'requested_subject'        => $schedule->subject?->subject_code ?? 'Requested subject',
+            'conflicting_subject'      => $conflictingSchedule?->subject?->subject_code ?? $schedule->subject?->subject_code ?? 'Subject',
             'conflicting_subject_name' => $conflictingSchedule?->subject?->description ?? $schedule->subject?->description ?? null,
-            'day' => $conflictingSchedule?->day ?? $schedule->day,
-            'time' => $conflictingSchedule ? $this->formatScheduleTime($conflictingSchedule) : $this->formatScheduleTime($schedule),
-            'room' => $conflictingSchedule?->room?->room_name ?? $schedule->room?->room_name ?? 'Unassigned room',
-            'reason' => $reason,
+            'day'                      => $conflictingSchedule?->day ?? $schedule->day,
+            'time'                     => $conflictingSchedule ? $this->formatScheduleTime($conflictingSchedule) : $this->formatScheduleTime($schedule),
+            'room'                     => $conflictingSchedule?->room?->room_name ?? $schedule->room?->room_name ?? 'Unassigned room',
+            'reason'                   => $reason,
         ];
     }
 
@@ -876,42 +964,53 @@ class FacultyLoading extends Component
         $details = $conflict['details'] ?? [];
         $summary = $conflict['conflicting_schedule'] ?? [];
         $conflictingStart = $details['conflicting_start'] ?? null;
-        $conflictingEnd = $details['conflicting_end'] ?? null;
-        $conflictingTime = $summary['time'] ?? ($conflictingStart && $conflictingEnd ? "{$conflictingStart} - {$conflictingEnd}" : null);
+        $conflictingEnd   = $details['conflicting_end'] ?? null;
+        $conflictingTime  = $summary['time'] ?? ($conflictingStart && $conflictingEnd ? "{$conflictingStart} - {$conflictingEnd}" : null);
 
         return [
-            'faculty_name' => $faculty->full_name,
-            'requested_subject' => $schedule->subject?->subject_code ?? ($details['requested_subject'] ?? 'Requested subject'),
-            'conflicting_subject' => $summary['subject_code'] ?? $details['conflicting_subject'] ?? $schedule->subject?->subject_code ?? 'Subject',
+            'faculty_name'             => $faculty->full_name,
+            'requested_subject'        => $schedule->subject?->subject_code ?? ($details['requested_subject'] ?? 'Requested subject'),
+            'conflicting_subject'      => $summary['subject_code'] ?? $details['conflicting_subject'] ?? $schedule->subject?->subject_code ?? 'Subject',
             'conflicting_subject_name' => $summary['subject_name'] ?? $details['conflicting_subject_name'] ?? null,
-            'day' => $summary['day'] ?? $details['conflicting_day'] ?? $details['requested_day'] ?? $schedule->day,
-            'time' => $conflictingTime ?? $details['requested_time'] ?? $this->formatScheduleTime($schedule),
-            'room' => $summary['room'] ?? $details['conflicting_room'] ?? $schedule->room?->room_name ?? 'Unassigned room',
-            'reason' => $reason,
+            'day'                      => $summary['day'] ?? $details['day'] ?? $schedule->day,
+            'time'                     => $conflictingTime ?? $this->formatScheduleTime($schedule),
+            'room'                     => $summary['room'] ?? $details['room'] ?? $schedule->room?->room_name ?? 'Unassigned room',
+            'reason'                   => $reason,
         ];
     }
 
     private function facultyConflictType(array $conflict, Schedule $schedule): string
     {
-        $details = $conflict['details'] ?? [];
-        $requestedStart = Carbon::parse($schedule->start_time)->format('H:i:s');
-        $requestedEnd = Carbon::parse($schedule->end_time)->format('H:i:s');
-        $conflictingStart = $this->normalizeOptionalTime($details['conflicting_start'] ?? null);
-        $conflictingEnd = $this->normalizeOptionalTime($details['conflicting_end'] ?? null);
+        $conflictingStart = $conflict['details']['conflicting_start'] ?? null;
+        $conflictingEnd   = $conflict['details']['conflicting_end'] ?? null;
 
-        if ($conflictingStart === $requestedStart && $conflictingEnd === $requestedEnd) {
-            return 'SAME_TIME_CONFLICT';
+        if (! $conflictingStart || ! $conflictingEnd) {
+            return 'OVERLAPPING_TIME_CONFLICT';
         }
 
-        return 'OVERLAPPING_TIME_CONFLICT';
+        $scheduleStart = $this->parseTimeOrNull($conflict['details']['requested_start'] ?? null)
+            ?? Carbon::parse($schedule->start_time)->format('H:i:s');
+        $scheduleEnd   = $this->parseTimeOrNull($conflict['details']['requested_end'] ?? null)
+            ?? Carbon::parse($schedule->end_time)->format('H:i:s');
+
+        return ($scheduleStart === $conflictingStart && $scheduleEnd === $conflictingEnd)
+            ? 'SAME_TIME_CONFLICT'
+            : 'OVERLAPPING_TIME_CONFLICT';
     }
 
-    private function formatScheduleTime(Schedule $schedule): string
+    private function formatScheduleTime(Schedule $schedule): ?string
     {
-        return Carbon::parse($schedule->start_time)->format('h:i A').' - '.Carbon::parse($schedule->end_time)->format('h:i A');
+        try {
+            $start = Carbon::parse($schedule->start_time)->format('H:i:s');
+            $end   = Carbon::parse($schedule->end_time)->format('H:i:s');
+
+            return "{$start} - {$end}";
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
-    private function normalizeOptionalTime(?string $time): ?string
+    private function parseTimeOrNull(?string $time): ?string
     {
         if (! $time) {
             return null;
@@ -927,10 +1026,10 @@ class FacultyLoading extends Component
     private function openAssignmentFailure(Schedule $schedule, Faculty $faculty, array $warnings, array $groupIds = []): void
     {
         $this->pendingAssignmentScheduleId = $schedule->id;
-        $this->pendingAssignmentGroupIds = $groupIds;
-        $this->pendingAssignmentWarnings = $warnings;
-        $this->assignmentRecommendations = $this->buildAssignmentRecommendations($faculty, $schedule);
-        $this->conflictModalOpen = true;
+        $this->pendingAssignmentGroupIds   = $groupIds;
+        $this->pendingAssignmentWarnings   = $warnings;
+        $this->assignmentRecommendations   = $this->buildAssignmentRecommendations($faculty, $schedule);
+        $this->conflictModalOpen           = true;
     }
 
     private function eligibilityWarning(Faculty $faculty, ?Subject $subject, ?Schedule $schedule = null): array
@@ -950,18 +1049,18 @@ class FacultyLoading extends Component
         }
 
         return [
-            'type' => 'FACULTY_ELIGIBILITY',
-            'title' => 'Invalid Faculty Eligibility',
+            'type'    => 'FACULTY_ELIGIBILITY',
+            'title'   => 'Invalid Faculty Eligibility',
             'message' => $message,
             'details' => [
-                'faculty_name' => $faculty->full_name,
-                'requested_subject' => $subjectCode,
-                'conflicting_subject' => $subjectCode,
+                'faculty_name'             => $faculty->full_name,
+                'requested_subject'        => $subjectCode,
+                'conflicting_subject'      => $subjectCode,
                 'conflicting_subject_name' => $subject?->description,
-                'day' => $schedule?->day,
-                'time' => $schedule ? $this->formatScheduleTime($schedule) : null,
-                'room' => $schedule?->room?->room_name,
-                'reason' => $message,
+                'day'                      => $schedule?->day,
+                'time'                     => $schedule ? $this->formatScheduleTime($schedule) : null,
+                'room'                     => $schedule?->room?->room_name,
+                'reason'                   => $message,
             ],
             'overridable' => false,
         ];
@@ -971,8 +1070,8 @@ class FacultyLoading extends Component
     {
         return [
             'faculty' => $this->recommendedFaculty($faculty, $schedule),
-            'slots' => $this->recommendedSlots($faculty, $schedule),
-            'rooms' => $this->recommendedRooms($schedule),
+            'slots'   => $this->recommendedSlots($faculty, $schedule),
+            'rooms'   => $this->recommendedRooms($schedule),
         ];
     }
 
@@ -984,8 +1083,8 @@ class FacultyLoading extends Component
 
         $conflictService = app(ScheduleConflictService::class);
         $start = Carbon::parse($schedule->start_time)->format('H:i:s');
-        $end = Carbon::parse($schedule->end_time)->format('H:i:s');
-        $user = Auth::user();
+        $end   = Carbon::parse($schedule->end_time)->format('H:i:s');
+        $user  = Auth::user();
 
         return Faculty::query()
             ->approved()
@@ -1013,10 +1112,10 @@ class FacultyLoading extends Component
                     ->sum('units');
 
                 return [
-                    'id' => $candidate->id,
-                    'name' => $candidate->full_name,
-                    'scope' => $candidate->scopeLabel(),
-                    'department' => $candidate->displayDepartment(),
+                    'id'              => $candidate->id,
+                    'name'            => $candidate->full_name,
+                    'scope'           => $candidate->scopeLabel(),
+                    'department'      => $candidate->displayDepartment(),
                     'remaining_units' => max(0, (int) ($candidate->max_units ?? 21) - (int) $assignedUnits),
                 ];
             })
@@ -1038,7 +1137,7 @@ class FacultyLoading extends Component
             ->values();
         $alreadyHasSubject = $currentSubjects->contains('id', $schedule->subject_id);
         $currentUnits = (int) $currentSubjects->sum('units');
-        $newUnits = $alreadyHasSubject ? 0 : (int) ($schedule->subject?->units ?? 0);
+        $newUnits     = $alreadyHasSubject ? 0 : (int) ($schedule->subject?->units ?? 0);
 
         return ($currentUnits + $newUnits) > (int) ($faculty->max_units ?? 21);
     }
@@ -1049,12 +1148,12 @@ class FacultyLoading extends Component
             return [];
         }
 
-        $conflictService = app(ScheduleConflictService::class);
-        $settings = Setting::getScheduleSettings();
-        $durationMinutes = Carbon::parse($schedule->start_time)->diffInMinutes(Carbon::parse($schedule->end_time));
-        $boundsStart = Carbon::parse($settings['start_time']);
-        $latestStart = Carbon::parse($settings['end_time'])->subMinutes($durationMinutes);
-        $suggestions = [];
+        $conflictService  = app(ScheduleConflictService::class);
+        $settings         = Setting::getScheduleSettings();
+        $durationMinutes  = Carbon::parse($schedule->start_time)->diffInMinutes(Carbon::parse($schedule->end_time));
+        $boundsStart      = Carbon::parse($settings['start_time']);
+        $latestStart      = Carbon::parse($settings['end_time'])->subMinutes($durationMinutes);
+        $suggestions      = [];
 
         if ($latestStart->lt($boundsStart)) {
             return [];
@@ -1063,8 +1162,8 @@ class FacultyLoading extends Component
         foreach ($settings['active_days'] as $day) {
             foreach (CarbonPeriod::create($boundsStart->copy(), '30 minutes', $latestStart->copy()) as $slotStart) {
                 $slotEnd = $slotStart->copy()->addMinutes($durationMinutes);
-                $start = $slotStart->format('H:i:s');
-                $end = $slotEnd->format('H:i:s');
+                $start   = $slotStart->format('H:i:s');
+                $end     = $slotEnd->format('H:i:s');
 
                 if ($day === $schedule->day && $start === Carbon::parse($schedule->start_time)->format('H:i:s')) {
                     continue;
@@ -1086,11 +1185,11 @@ class FacultyLoading extends Component
                 }
 
                 $suggestions[] = [
-                    'label' => "{$day} ".Carbon::parse($start)->format('h:i A').'-'.Carbon::parse($end)->format('h:i A'),
-                    'day' => $day,
+                    'label'      => "{$day} ".Carbon::parse($start)->format('h:i A').'-'.Carbon::parse($end)->format('h:i A'),
+                    'day'        => $day,
                     'start_time' => $start,
-                    'end_time' => $end,
-                    'time' => Carbon::parse($start)->format('h:i A').' - '.Carbon::parse($end)->format('h:i A'),
+                    'end_time'   => $end,
+                    'time'       => Carbon::parse($start)->format('h:i A').' - '.Carbon::parse($end)->format('h:i A'),
                 ];
 
                 if (count($suggestions) >= 4) {
@@ -1109,8 +1208,8 @@ class FacultyLoading extends Component
         }
 
         $conflictService = app(ScheduleConflictService::class);
-        $start = Carbon::parse($schedule->start_time)->format('H:i:s');
-        $end = Carbon::parse($schedule->end_time)->format('H:i:s');
+        $start           = Carbon::parse($schedule->start_time)->format('H:i:s');
+        $end             = Carbon::parse($schedule->end_time)->format('H:i:s');
 
         return Room::query()
             ->available()
@@ -1132,7 +1231,7 @@ class FacultyLoading extends Component
             })
             ->take(4)
             ->map(fn (Room $room) => [
-                'id' => $room->id,
+                'id'   => $room->id,
                 'name' => $room->room_name,
                 'type' => $room->type,
             ])
@@ -1142,11 +1241,11 @@ class FacultyLoading extends Component
 
     private function resetPendingAssignment(): void
     {
-        $this->conflictModalOpen = false;
+        $this->conflictModalOpen          = false;
         $this->pendingAssignmentScheduleId = null;
-        $this->pendingAssignmentWarnings = [];
-        $this->pendingAssignmentGroupIds = [];
-        $this->assignmentRecommendations = [];
+        $this->pendingAssignmentWarnings  = [];
+        $this->pendingAssignmentGroupIds  = [];
+        $this->assignmentRecommendations  = [];
     }
 
     // ============================================================
@@ -1174,7 +1273,7 @@ class FacultyLoading extends Component
         try {
             $schedule->update([
                 'faculty_id' => null,
-                'status' => Schedule::STATUS_PARTIAL,
+                'status'     => Schedule::STATUS_PARTIAL,
             ]);
 
             unset($this->selectedFaculty);
@@ -1185,10 +1284,6 @@ class FacultyLoading extends Component
         }
     }
 
-    /**
-     * Removes the faculty assignment from ALL schedules in a group at once.
-     * This is the counterpart to assignSubjectGroup().
-     */
     public function removeSubjectGroup(array $scheduleIds): void
     {
         if (empty($scheduleIds)) {
@@ -1217,7 +1312,7 @@ class FacultyLoading extends Component
             foreach ($schedules as $schedule) {
                 $schedule->update([
                     'faculty_id' => null,
-                    'status' => Schedule::STATUS_PARTIAL,
+                    'status'     => Schedule::STATUS_PARTIAL,
                 ]);
             }
 
@@ -1235,7 +1330,7 @@ class FacultyLoading extends Component
 
     public function submitFacultyLoading(): void
     {
-        $user = Auth::user();
+        $user  = Auth::user();
         $query = Schedule::query()
             ->assignable()
             ->whereNotNull('faculty_id');
@@ -1287,7 +1382,7 @@ class FacultyLoading extends Component
         }
 
         $subjectCode = $conflict->subject?->subject_code ?? 'another subject';
-        $roomName = $conflict->room?->room_name ?? 'Unknown Room';
+        $roomName    = $conflict->room?->room_name ?? 'Unknown Room';
 
         return "Professor {$faculty->full_name} is already teaching {$subjectCode} in Room {$roomName} during this time.";
     }
@@ -1329,11 +1424,11 @@ class FacultyLoading extends Component
             return false;
         }
 
-        $type = strtolower(trim((string) $subject->type));
+        $type        = strtolower(trim((string) $subject->type));
         $subjectType = strtolower(trim((string) ($subject->subject_type ?? '')));
-        $department = $this->normalizeDepartment($subject->department);
-        $major = $this->normalizeDepartment($subject->major);
-        $code = strtoupper((string) $subject->subject_code);
+        $department  = $this->normalizeDepartment($subject->department);
+        $major       = $this->normalizeDepartment($subject->major);
+        $code        = strtoupper((string) $subject->subject_code);
 
         return $type === 'minor'
             || $subjectType === 'minor'
@@ -1374,7 +1469,7 @@ class FacultyLoading extends Component
 
     private function getFacultyQuery()
     {
-        $user = Auth::user();
+        $user  = Auth::user();
         $query = Faculty::query()
             ->approved()
             ->withCount('schedules');
@@ -1410,9 +1505,53 @@ class FacultyLoading extends Component
             });
         }
 
-        if ($this->statusFilter !== 'all') {
-            $query->where('employment_type', $this->statusFilter);
+        // ── Scope filter ──────────────────────────────────────────────────
+        // 'departmental'     → ALL faculty whose home department matches the active
+        //                      context, regardless of their faculty_scope value.
+        //                      This is the correct rule: membership is determined by
+        //                      department, not by the scope tag. A faculty member like
+        //                      Villacorta (dept=CCS, scope=cross_department) is still a
+        //                      core CCS asset and must appear here.
+        //
+        // 'gened'            → Institution-wide GenEd-scoped faculty (scope = gened).
+        //
+        // 'cross_department' → GUEST faculty who (a) carry the cross_department scope
+        //                      tag AND (b) belong to a DIFFERENT department than the
+        //                      active context. Home-department cross_department faculty
+        //                      (e.g. Villacorta for CCS) are excluded here because they
+        //                      are already surfaced under "Departmental".
+        //
+        // 'all'              → No additional restriction (default).
+        if ($this->selectedScope === Faculty::SCOPE_DEPARTMENTAL) {
+            // Rule: show every faculty member whose home department is the active one.
+            // Do NOT filter on faculty_scope — a cross_department or gened tag does
+            // not remove someone from their own department's roster.
+            $dept = $this->departmentFilter !== 'all'
+                ? $this->departmentFilter
+                : (isset($user->department) ? $user->department : null);
+
+            if ($dept) {
+                $query->whereIn('department', $this->departmentAliases($dept));
+            }
+        } elseif ($this->selectedScope === Faculty::SCOPE_GENED) {
+            $query->where('faculty_scope', Faculty::SCOPE_GENED);
+        } elseif ($this->selectedScope === Faculty::SCOPE_CROSS_DEPARTMENT) {
+            // Rule: show GUEST cross-department faculty from OTHER departments only.
+            // Home-department faculty (even if tagged cross_department) belong to the
+            // "Departmental" view and must be excluded here to prevent duplication and
+            // the "invisible in both views" trap.
+            $query->where('faculty_scope', Faculty::SCOPE_CROSS_DEPARTMENT);
+
+            $dept = $this->departmentFilter !== 'all'
+                ? $this->departmentFilter
+                : (isset($user->department) ? $user->department : null);
+
+            if ($dept) {
+                // Exclude faculty whose home department IS the active department.
+                $query->whereNotIn('department', $this->departmentAliases($dept));
+            }
         }
+        // ('all' → no scope restriction; the role-based gate above already applies)
 
         if ($this->departmentFilter !== 'all') {
             $query->where(function (Builder $departmentQuery) {
@@ -1495,7 +1634,7 @@ class FacultyLoading extends Component
         }
 
         if (strlen($this->subjectSearch) > 1) {
-            $term = $this->subjectSearch;
+            $term           = $this->subjectSearch;
             $departmentTerm = Department::normalizeCode($term);
             $query->where(function (Builder $searchQuery) use ($term, $departmentTerm) {
                 $searchQuery->where('section', 'like', "%{$term}%")
@@ -1537,32 +1676,12 @@ class FacultyLoading extends Component
         return $schedules;
     }
 
-    /**
-     * Groups the flat availableSubjects collection into one card per subject-section offering.
-     *
-     * Grouping key: subject_id + section + start_time + end_time
-     * (Same subject, same section, same time slot but different days → one group.)
-     *
-     * Each resulting array contains:
-     *   - schedule_ids        – all schedule IDs in this group (used for bulk assign)
-     *   - first_schedule_id   – wire:key and fallback single-assign reference
-     *   - subject_code, edp_code, description, units, type
-     *   - department, major, year, section, room
-     *   - days                – comma-joined day list  e.g. "Monday / Tuesday"
-     *   - time                – formatted time range
-     *   - faculty_id          – null if unassigned, int if assigned
-     *   - faculty_name        – assigned faculty name or null
-     *   - status              – schedule status of the first record
-     */
     private function getGroupedAvailableSubjects(): Collection
     {
         return $this->getAvailableSubjects()
             ->groupBy(function (Schedule $schedule) {
-                // Group by: subject + section + time window
-                // Two schedules with the same subject/section/time on different days
-                // belong to the same "offering" and must share one faculty assignment.
                 $start = Carbon::parse($schedule->start_time)->format('H:i');
-                $end = Carbon::parse($schedule->end_time)->format('H:i');
+                $end   = Carbon::parse($schedule->end_time)->format('H:i');
 
                 return implode('::', [
                     $schedule->subject_id,
@@ -1576,9 +1695,9 @@ class FacultyLoading extends Component
             })
             ->map(function (Collection $group) {
                 /** @var Schedule $first */
-                $first = $group->first();
+                $first   = $group->first();
                 $subject = $first->subject;
-                $room = $first->room;
+                $room    = $first->room;
 
                 $days = $group
                     ->map(fn (Schedule $s) => $s->day ?? 'N/A')
@@ -1587,49 +1706,42 @@ class FacultyLoading extends Component
                     ->implode(' / ');
 
                 $department = Department::normalizeCode($first->department ?? $subject?->department) ?? 'N/A';
-                $major = $first->major ?? $subject?->major ?? 'N/A';
-                $year = $first->year_level ?? $subject?->year_level ?? 'N/A';
-                $section = $first->section ?? $subject?->section ?? 'N/A';
+                $major      = $first->major ?? $subject?->major ?? 'N/A';
+                $year       = $first->year_level ?? $subject?->year_level ?? 'N/A';
+                $section    = $first->section ?? $subject?->section ?? 'N/A';
 
-                // Determine unified assignment state for the group:
-                // If ANY schedule in the group has a faculty_id, treat the whole group as assigned.
                 $assignedFacultyId = $group->first(fn (Schedule $s) => $s->faculty_id !== null)?->faculty_id;
-                $assignedFaculty = $assignedFacultyId
+                $assignedFaculty   = $assignedFacultyId
                     ? ($group->first(fn (Schedule $s) => $s->faculty_id !== null)?->faculty?->full_name ?? null)
                     : null;
 
                 $isFinalized = $group->contains(fn (Schedule $s) => $s->status === Schedule::STATUS_FINALIZED);
 
                 return [
-                    'schedule_ids' => $group->pluck('id')->all(),
+                    'schedule_ids'     => $group->pluck('id')->all(),
                     'first_schedule_id' => $first->id,
-                    'subject_code' => $subject?->subject_code ?? 'N/A',
-                    'edp_code' => $subject?->edp_code ?? 'No EDP',
-                    'description' => $subject?->description ?? 'Untitled subject',
-                    'units' => $subject?->units ?? 0,
-                    'type' => $subject?->type ?? 'N/A',
-                    'department' => $department,
-                    'major' => $major,
-                    'year' => $year,
-                    'section' => $section,
-                    'room' => $room?->room_name ?? 'No room',
-                    'days' => $days,
-                    'time' => Carbon::parse($first->start_time)->format('h:i A')
-                                           .' - '
-                                           .Carbon::parse($first->end_time)->format('h:i A'),
-                    'faculty_id' => $assignedFacultyId,
-                    'faculty_name' => $assignedFaculty,
-                    'is_finalized' => $isFinalized,
+                    'subject_code'     => $subject?->subject_code ?? 'N/A',
+                    'edp_code'         => $subject?->edp_code ?? 'No EDP',
+                    'description'      => $subject?->description ?? 'Untitled subject',
+                    'units'            => $subject?->units ?? 0,
+                    'type'             => $subject?->type ?? 'N/A',
+                    'department'       => $department,
+                    'major'            => $major,
+                    'year'             => $year,
+                    'section'          => $section,
+                    'room'             => $room?->room_name ?? 'No room',
+                    'days'             => $days,
+                    'time'             => Carbon::parse($first->start_time)->format('h:i A')
+                                         .' - '
+                                         .Carbon::parse($first->end_time)->format('h:i A'),
+                    'faculty_id'       => $assignedFacultyId,
+                    'faculty_name'     => $assignedFaculty,
+                    'is_finalized'     => $isFinalized,
                 ];
             })
             ->values();
     }
 
-    /**
-     * Assigns ALL schedule rows in a group to the selected faculty in one action.
-     * This prevents a split where Mon is assigned to Faculty A and Tue to Faculty B
-     * for the same subject offering.
-     */
     public function assignSubjectGroup(array $scheduleIds): void
     {
         if (! $this->selectedFacultyId) {
@@ -1660,7 +1772,6 @@ class FacultyLoading extends Component
             return;
         }
 
-        // Use the first schedule for subject/validation checks (all share the same subject)
         $first = $schedules->first();
 
         if (! $first->subject) {
@@ -1669,14 +1780,12 @@ class FacultyLoading extends Component
             return;
         }
 
-        // Check none are finalized
         if ($schedules->contains(fn (Schedule $s) => $s->status === Schedule::STATUS_FINALIZED)) {
             $this->toast('error', 'Finalized schedules cannot be changed in Faculty Loading.');
 
             return;
         }
 
-        // Check none are already assigned to a DIFFERENT faculty
         $assignedElsewhere = $schedules->first(
             fn (Schedule $s) => $s->faculty_id !== null && (int) $s->faculty_id !== (int) $faculty->id
         );
@@ -1687,7 +1796,6 @@ class FacultyLoading extends Component
             return;
         }
 
-        // Check already all assigned to this faculty
         if ($schedules->every(fn (Schedule $s) => (int) $s->faculty_id === (int) $faculty->id)) {
             $this->toast('warning', "{$first->subject->subject_code} is already assigned to {$faculty->full_name}.");
 
@@ -1703,18 +1811,13 @@ class FacultyLoading extends Component
             return;
         }
 
-        // Run conflict/load checks across EVERY day in the group so that a
-        // time conflict on day 2 (e.g. Tuesday) is caught even when day 1
-        // (Monday) is free.  Unit-overload only needs to be counted once, so
-        // we skip it on subsequent schedules once it has already been flagged.
-        $warnings = [];
+        $warnings       = [];
         $overloadFlagged = false;
 
         foreach ($schedules as $scheduleItem) {
             $dayWarnings = $this->assignmentWarnings($faculty, $scheduleItem);
 
             foreach ($dayWarnings as $warning) {
-                // De-duplicate overload warning — same unit total for every day
                 if (($warning['type'] ?? '') === 'OVERLOAD') {
                     if ($overloadFlagged) {
                         continue;
@@ -1722,7 +1825,6 @@ class FacultyLoading extends Component
                     $overloadFlagged = true;
                 }
 
-                // De-duplicate any other warning by its message text
                 $isDuplicate = collect($warnings)->contains(
                     fn (array $existing) => ($existing['message'] ?? '') === ($warning['message'] ?? '')
                 );
@@ -1734,13 +1836,11 @@ class FacultyLoading extends Component
         }
 
         if ($warnings !== []) {
-            // Store only the first schedule ID for the conflict modal flow;
-            // on override we will assign all IDs in the group.
             $this->pendingAssignmentScheduleId = $first->id;
-            $this->pendingAssignmentGroupIds = $scheduleIds;
-            $this->pendingAssignmentWarnings = $warnings;
-            $this->assignmentRecommendations = $this->buildAssignmentRecommendations($faculty, $first);
-            $this->conflictModalOpen = true;
+            $this->pendingAssignmentGroupIds   = $scheduleIds;
+            $this->pendingAssignmentWarnings   = $warnings;
+            $this->assignmentRecommendations   = $this->buildAssignmentRecommendations($faculty, $first);
+            $this->conflictModalOpen           = true;
             $this->toast(
                 $this->canOverrideAssignmentWarnings(Auth::user()) ? 'warning' : 'error',
                 $this->canOverrideAssignmentWarnings(Auth::user())
@@ -1761,9 +1861,6 @@ class FacultyLoading extends Component
             $scheduleIds = $schedules->pluck('id')->all();
 
             DB::transaction(function () use ($scheduleIds, $faculty) {
-                // Re-read with a pessimistic lock so two simultaneous Assign
-                // clicks cannot both pass the already-assigned-elsewhere check
-                // and write conflicting faculty_ids.
                 $fresh = Schedule::lockForUpdate()->findMany($scheduleIds);
 
                 $conflict = $fresh->first(
@@ -1780,12 +1877,11 @@ class FacultyLoading extends Component
                 foreach ($fresh as $schedule) {
                     $schedule->update([
                         'faculty_id' => $faculty->id,
-                        'status' => Schedule::STATUS_PARTIAL,
+                        'status'     => Schedule::STATUS_PARTIAL,
                     ]);
                 }
             });
 
-            $this->subjectSearch = '';
             $this->resetPendingAssignment();
             unset($this->selectedFaculty);
 
@@ -1805,14 +1901,14 @@ class FacultyLoading extends Component
 
     private function getFacultyConflicts(Collection $assignedSchedules): Collection
     {
-        $conflicts = collect();
-        $schedules = $assignedSchedules->values();
+        $conflicts       = collect();
+        $schedules       = $assignedSchedules->values();
         $conflictService = app(ScheduleConflictService::class);
 
         foreach ($schedules as $schedule) {
             if (! Setting::dayIsActive((string) $schedule->day)) {
                 $conflicts->push([
-                    'title' => 'Inactive Schedule Day',
+                    'title'   => 'Inactive Schedule Day',
                     'message' => "{$schedule->subject?->subject_code} is scheduled on {$schedule->day}, which is disabled in global settings.",
                 ]);
             }
@@ -1827,7 +1923,7 @@ class FacultyLoading extends Component
 
                 if (($availability['status'] ?? true) === false) {
                     $conflicts->push([
-                        'title' => $availability['title'] ?? 'Faculty Availability Conflict',
+                        'title'   => $availability['title'] ?? 'Faculty Availability Conflict',
                         'message' => $availability['message'] ?? 'Faculty availability conflict detected.',
                     ]);
                 }
@@ -1836,7 +1932,7 @@ class FacultyLoading extends Component
 
         for ($i = 0; $i < $schedules->count(); $i++) {
             for ($j = $i + 1; $j < $schedules->count(); $j++) {
-                $first = $schedules[$i];
+                $first  = $schedules[$i];
                 $second = $schedules[$j];
 
                 if ($first->day !== $second->day) {
@@ -1848,7 +1944,7 @@ class FacultyLoading extends Component
 
                 if ($overlaps) {
                     $conflicts->push([
-                        'title' => 'Overlapping Faculty Schedule',
+                        'title'   => 'Overlapping Faculty Schedule',
                         'message' => "{$first->subject?->subject_code} overlaps with {$second->subject?->subject_code} on {$first->day}.",
                     ]);
                 }
@@ -1861,7 +1957,7 @@ class FacultyLoading extends Component
     private function getScheduleGroups(Collection $assignedSchedules): Collection
     {
         $activeDays = Setting::getActiveDays();
-        $otherDays = $assignedSchedules
+        $otherDays  = $assignedSchedules
             ->pluck('day')
             ->filter()
             ->unique()
@@ -1897,8 +1993,8 @@ class FacultyLoading extends Component
     private function getScheduleDepartments(): array
     {
         $scheduleDepartments = Schedule::query()->select('department')->distinct()->pluck('department');
-        $subjectDepartments = Subject::query()->select('department')->distinct()->pluck('department');
-        $departmentCodes = Department::query()->select('code')->distinct()->pluck('code');
+        $subjectDepartments  = Subject::query()->select('department')->distinct()->pluck('department');
+        $departmentCodes     = Department::query()->select('code')->distinct()->pluck('code');
 
         return $this->collectDepartmentCodes($scheduleDepartments, $subjectDepartments, $departmentCodes);
     }
@@ -1921,7 +2017,7 @@ class FacultyLoading extends Component
     private function getAvailableMajors()
     {
         $scheduleMajors = Schedule::query()->select('major')->distinct()->pluck('major');
-        $subjectMajors = Subject::query()->select('major')->distinct()->pluck('major');
+        $subjectMajors  = Subject::query()->select('major')->distinct()->pluck('major');
 
         return collect(self::DEFAULT_MAJOR_FILTERS)
             ->merge($scheduleMajors)
@@ -1938,7 +2034,7 @@ class FacultyLoading extends Component
     private function getAvailableYearLevels()
     {
         $scheduleYears = Schedule::query()->select('year_level')->distinct()->pluck('year_level');
-        $subjectYears = Subject::query()->select('year_level')->distinct()->pluck('year_level');
+        $subjectYears  = Subject::query()->select('year_level')->distinct()->pluck('year_level');
 
         $years = collect([1, 2, 3, 4])
             ->merge($scheduleYears)
@@ -1957,7 +2053,7 @@ class FacultyLoading extends Component
     private function getAvailableSections()
     {
         $scheduleSections = Schedule::query()->select('section')->distinct()->pluck('section');
-        $subjectSections = Subject::query()->select('section')->distinct()->pluck('section');
+        $subjectSections  = Subject::query()->select('section')->distinct()->pluck('section');
 
         return $scheduleSections
             ->merge($subjectSections)
@@ -1972,7 +2068,7 @@ class FacultyLoading extends Component
 
     private function getAvailableSubjectTypes()
     {
-        $user = Auth::user();
+        $user    = Auth::user();
         $faculty = $this->selectedFaculty;
 
         if ($faculty) {
@@ -2003,7 +2099,7 @@ class FacultyLoading extends Component
         return $schedules
             ->sortBy(function (Schedule $schedule) use ($dayOrder) {
                 $dayIndex = $dayOrder[$schedule->day] ?? 99;
-                $time = Carbon::parse($schedule->start_time)->format('H:i:s');
+                $time     = Carbon::parse($schedule->start_time)->format('H:i:s');
 
                 return sprintf('%02d-%s-%08d', $dayIndex, $time, $schedule->id);
             })
@@ -2016,7 +2112,7 @@ class FacultyLoading extends Component
 
     public function render()
     {
-        $user = Auth::user();
+        $user    = Auth::user();
         $faculties = $this->getFacultyQuery()
             ->with('schedules.subject')
             ->orderBy('full_name', 'asc')
@@ -2029,46 +2125,46 @@ class FacultyLoading extends Component
                     ->sum('units');
             });
 
-        $availableSubjects = $this->getAvailableSubjects();
+        $availableSubjects        = $this->getAvailableSubjects();
         $groupedAvailableSubjects = $this->getGroupedAvailableSubjects();
-        $currentFaculty = $this->selectedFaculty;
-        $assignedSchedules = $this->assignedSchedules();
-        $assignedSubjects = $this->assignedSubjects();
-        $groupedAssignedSubjects = $this->groupedAssignedSubjects();
-        $facultySummary = $this->getFacultySummary();
-        $facultyDepartments = $this->getFacultyDepartments();
-        $scheduleDepartments = $this->getScheduleDepartments();
-        $majors = $this->getAvailableMajors();
-        $yearLevels = $this->getAvailableYearLevels();
-        $sections = $this->getAvailableSections();
-        $subjectTypes = $this->getAvailableSubjectTypes();
-        $employmentTypes = ['Full-time', 'Part-time'];
-        $facultyConflicts = $this->getFacultyConflicts($assignedSchedules);
-        $scheduleGroups = $this->getScheduleGroups($assignedSchedules);
-        $activeDays = Setting::getActiveDays();
+        $currentFaculty           = $this->selectedFaculty;
+        $assignedSchedules        = $this->assignedSchedules();
+        $assignedSubjects         = $this->assignedSubjects();
+        $groupedAssignedSubjects  = $this->groupedAssignedSubjects();
+        $facultySummary           = $this->getFacultySummary();
+        $departmentSummary        = $this->getDepartmentSummary();
+        $facultyDepartments       = $this->getFacultyDepartments();
+        $scheduleDepartments      = $this->getScheduleDepartments();
+        $majors                   = $this->getAvailableMajors();
+        $yearLevels               = $this->getAvailableYearLevels();
+        $sections                 = $this->getAvailableSections();
+        $subjectTypes             = $this->getAvailableSubjectTypes();
+        $facultyConflicts         = $this->getFacultyConflicts($assignedSchedules);
+        $scheduleGroups           = $this->getScheduleGroups($assignedSchedules);
+        $activeDays               = Setting::getActiveDays();
 
         return view('livewire.faculty-loading', [
-            'faculties' => $faculties,
-            'availableSubjects' => $availableSubjects,
+            'faculties'                => $faculties,
+            'availableSubjects'        => $availableSubjects,
             'groupedAvailableSubjects' => $groupedAvailableSubjects,
-            'assignedSchedules' => $assignedSchedules,
-            'assignedSubjects' => $assignedSubjects,
-            'groupedAssignedSubjects' => $groupedAssignedSubjects,
-            'currentFaculty' => $currentFaculty,
-            'facultySummary' => $facultySummary,
-            'facultyDepartments' => $facultyDepartments,
-            'scheduleDepartments' => $scheduleDepartments,
-            'majors' => $majors,
-            'yearLevels' => $yearLevels,
-            'sections' => $sections,
-            'employmentTypes' => $employmentTypes,
-            'subjectTypes' => $subjectTypes,
-            'userRole' => $user->role,
-            'activeTab' => $this->activeTab,
-            'facultyConflicts' => $facultyConflicts,
-            'scheduleGroups' => $scheduleGroups,
-            'activeDays' => $activeDays,
-            'canOverrideWarnings' => $this->canOverrideAssignmentWarnings($user),
+            'assignedSchedules'        => $assignedSchedules,
+            'assignedSubjects'         => $assignedSubjects,
+            'groupedAssignedSubjects'  => $groupedAssignedSubjects,
+            'currentFaculty'           => $currentFaculty,
+            'facultySummary'           => $facultySummary,
+            'departmentSummary'        => $departmentSummary,
+            'facultyDepartments'       => $facultyDepartments,
+            'scheduleDepartments'      => $scheduleDepartments,
+            'majors'                   => $majors,
+            'yearLevels'               => $yearLevels,
+            'sections'                 => $sections,
+            'subjectTypes'             => $subjectTypes,
+            'userRole'                 => $user->role,
+            'activeTab'                => $this->activeTab,
+            'facultyConflicts'         => $facultyConflicts,
+            'scheduleGroups'           => $scheduleGroups,
+            'activeDays'               => $activeDays,
+            'canOverrideWarnings'      => $this->canOverrideAssignmentWarnings($user),
         ])->layout('layouts.app');
     }
 }
