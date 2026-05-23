@@ -70,7 +70,7 @@
                             <p class="mt-2 text-2xl font-black">{{ $activeSchedulesCount }}</p>
                         </div>
                         <div class="rounded-md border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
-                            <p class="text-[10px] font-black uppercase tracking-widest text-slate-500">EDP Prefix</p>
+                            <p class="text-[10px] font-black uppercase tracking-widest text-slate-500">EDP Term Prefix</p>
                             <p class="mt-2 text-2xl font-black">{{ $currentEdpPrefix }}</p>
                         </div>
                     </div>
@@ -90,7 +90,7 @@
                         </div>
                     </div>
                     <p class="mt-3 text-xs font-semibold text-indigo-700 dark:text-indigo-300">
-                        Next EDP prefix: {{ $nextPeriod['edp_prefix'] }}
+                        Next EDP term prefix: {{ $nextPeriod['edp_prefix'] }}
                     </p>
                 </div>
             </div>

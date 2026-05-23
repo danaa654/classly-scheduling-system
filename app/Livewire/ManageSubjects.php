@@ -13,6 +13,7 @@ use App\Models\Activity;
 use App\Models\Setting;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Validation\Rule;
 
 class ManageSubjects extends Component
 {
@@ -132,9 +133,9 @@ class ManageSubjects extends Component
     }
 
     /**
-     * Generate EDP codes from the active academic year.
+     * Generate EDP codes from the active academic workspace.
      *
-     * Format: MAJOR-[YY][LEVEL][###], e.g. IT-271001 for A.Y. 2027-2028.
+     * Format: MAJOR-[YY][SEM][LEVEL][###], e.g. IT-2621001.
      */
     private function generateEdpCode(): void
     {
@@ -143,28 +144,15 @@ class ManageSubjects extends Component
             return;
         }
 
-        $major      = strtoupper($this->major);
-        $yearPrefix = Setting::academicYearPrefix($this->activePeriod()['school_year']);
-        $level      = (int) $this->year_level;
-        $codePrefix = "{$yearPrefix}{$level}";
-        $pattern    = "{$major}-{$codePrefix}%";
+        $period = $this->activePeriod();
+        $this->edp_code = Subject::generateEdpCode(
+            strtoupper($this->major),
+            (int) $this->year_level,
+            $period['school_year'],
+            $period['semester'],
+            $this->subjectId ? (int) $this->subjectId : null
+        );
 
-        $highest = Subject::where('edp_code', 'like', $pattern)
-            ->orderByDesc('edp_code')
-            ->value('edp_code');
-
-        $nextSequence = 1;
-
-        if ($highest) {
-            $parts = explode('-', $highest);
-            if (count($parts) >= 2) {
-                // "IT-271004" → parts[1] = "271004" → strip "271" prefix → "004" → 4
-                $sequenceStr  = substr($parts[1], strlen($codePrefix));
-                $nextSequence = ((int) $sequenceStr) + 1;
-            }
-        }
-
-        $this->edp_code = "{$major}-{$codePrefix}" . str_pad($nextSequence, 3, '0', STR_PAD_LEFT);
     }
 
     /**
@@ -254,9 +242,10 @@ class ManageSubjects extends Component
 
         // Preview data
         $indexes = array_flip($normalizedHeader);
-        $this->previewData = collect(array_slice($data, 0, 10))->map(function ($row) use ($indexes) {
+        $period = $this->activePeriod();
+        $this->previewData = collect(array_slice($data, 0, 10))->map(function ($row) use ($indexes, $period) {
             $edp = strtoupper(trim($row[$indexes['edp_code']] ?? ''));
-            $exists = Subject::where('edp_code', $edp)->exists();
+            $exists = $edp !== '' && Subject::edpExistsInWorkspace($edp, $period['school_year'], $period['semester']);
             return [
                 'edp_code' => $edp,
                 'subject' => $row[$indexes['subject_code']] ?? '',
@@ -326,24 +315,21 @@ class ManageSubjects extends Component
             $rawUnits    = (int) $value('units', 3);
             $clampedUnits = max(3, min(5, $rawUnits));
 
+            $period = $this->activePeriod();
             $edpCode = strtoupper($value('edp_code'));
             $section = strtoupper($value('section', 'A'));
 
-            // Check if subject already exists
-            $exists = Subject::where('edp_code', $edpCode)
-                ->where('section', $section)
-                ->exists();
+            // EDP codes are unique only inside the active semester workspace.
+            $exists = Subject::edpExistsInWorkspace($edpCode, $period['school_year'], $period['semester']);
 
             if ($exists) {
-                \Log::warning("Subject {$edpCode} Section {$section} already exists. Skipping import.");
+                \Log::warning("Subject {$edpCode} already exists in {$period['semester']} {$period['school_year']}. Skipping import.");
                 continue;
             }
 
             // Normalize type
             $normalizedType = str_contains(strtolower($rawType), 'minor') ? 'Minor' : 'Major';
             $specialization = strtoupper($value('specialization', $rowMajor));
-
-            $period = $this->activePeriod();
 
             Subject::create([
                 'edp_code'          => $edpCode,
@@ -360,7 +346,9 @@ class ManageSubjects extends Component
                 'subject_type'      => $rawType,
                 'specialization'    => $specialization,
                 'semester'          => $period['semester'],
+                'school_year'       => $period['school_year'],
                 'academic_year'     => $period['school_year'],
+                'workspace_key'     => $period['workspace_key'],
                 'is_archived'       => false,
             ]);
             $count++;
@@ -539,10 +527,18 @@ class ManageSubjects extends Component
         $deptUpper = strtoupper($this->department);
         $subjectCodeUpper = strtoupper($this->subject_code);
         $majorUpper = strtoupper($this->major);
+        $period = $this->activePeriod();
 
         // Validation
         $this->validate([
-            'edp_code'       => 'required|unique:subjects,edp_code,' . ($this->subjectId ?? 'NULL') . ',id',
+            'edp_code'       => [
+                'required',
+                Rule::unique('subjects', 'edp_code')
+                    ->where(fn ($query) => $query
+                        ->where('school_year', $period['school_year'])
+                        ->where('semester', $period['semester']))
+                    ->ignore($this->subjectId),
+            ],
             'subject_code'   => 'required',
             'section'        => 'required|max:10',
             'department'     => 'required',
@@ -563,15 +559,12 @@ class ManageSubjects extends Component
             return;
         }
 
-        // Check for duplicate EDP+Section if creating new
+        // Check for duplicate EDP inside this semester workspace.
         if (!$this->isEditMode) {
-            $duplicate = $this->activeSubjectsQuery()
-                ->where('edp_code', $edpUpper)
-                ->where('section', $sectionUpper)
-                ->first();
+            $duplicate = Subject::edpExistsInWorkspace($edpUpper, $period['school_year'], $period['semester']);
 
             if ($duplicate) {
-                $this->showDuplicateConfirmModal = true;
+                $this->addError('edp_code', "EDP code '{$edpUpper}' already exists in {$period['semester']} {$period['school_year']}.");
                 return;
             }
         }
@@ -613,7 +606,9 @@ class ManageSubjects extends Component
                 'meetings_per_week' => (int)$this->meetings_per_week,
                 'department'        => $deptUpper,
                 'semester'          => $period['semester'],
+                'school_year'       => $period['school_year'],
                 'academic_year'     => $period['school_year'],
+                'workspace_key'     => $period['workspace_key'],
                 'is_archived'       => false,
                 'archived_at'       => null,
                 'archive_batch'     => null,
@@ -727,45 +722,12 @@ class ManageSubjects extends Component
                 $nextSection = chr(ord($currentSection) + 1);
             }
 
-            // Extract major, year, level from original EDP
-            $edpParts = explode('-', $original->edp_code);
-            
-            if (count($edpParts) < 2) {
-                \Log::error("Invalid EDP format for subject {$original->id}: {$original->edp_code}");
-                $skippedCount++;
-                continue;
-            }
-
-            $majorCode = $edpParts[0];
-            $yearCodePart = $edpParts[1];
-            
-            $year = substr($yearCodePart, 0, 2);
-            $level = substr($yearCodePart, 2, 1);
-            $oldSequence = (int)substr($yearCodePart, 3, 3);
-
-            $nextSequence = $oldSequence + 1;
-            $maxAttempts = 100;
-            $attempts = 0;
-            
-            while ($attempts < $maxAttempts) {
-                $newSequenceStr = str_pad($nextSequence, 3, '0', STR_PAD_LEFT);
-                $newEdp = "{$majorCode}-{$year}{$level}{$newSequenceStr}";
-                
-                $edpExists = Subject::where('edp_code', $newEdp)->exists();
-                
-                if (!$edpExists) {
-                    break;
-                }
-                
-                $nextSequence++;
-                $attempts++;
-            }
-
-            if ($attempts >= $maxAttempts) {
-                \Log::error("Could not find available EDP sequence for {$majorCode}-{$year}{$level}");
-                $skippedCount++;
-                continue;
-            }
+            $newEdp = Subject::generateEdpCode(
+                $original->major ?: strtok((string) $original->edp_code, '-'),
+                (int) $original->year_level,
+                $period['school_year'],
+                $period['semester']
+            );
 
             // ✅ CRITICAL CHECK: Does this SUBJECT CODE already exist in the NEXT SECTION?
             $subjectExistsInNextSection = $this->activeSubjectsQuery()
@@ -782,11 +744,7 @@ class ManageSubjects extends Component
                 continue;
             }
 
-            // Also check if this EDP+SECTION combination exists
-            $sectionExists = $this->activeSubjectsQuery()
-                ->where('edp_code', $newEdp)
-                ->where('section', $nextSection)
-                ->exists();
+            $sectionExists = Subject::edpExistsInWorkspace($newEdp, $period['school_year'], $period['semester']);
             
             if ($sectionExists) {
                 $skippedCount++;
@@ -810,7 +768,9 @@ class ManageSubjects extends Component
                     'duration_hours'    => $original->duration_hours,
                     'meetings_per_week' => $original->meetings_per_week ?? 1,
                     'semester'          => $period['semester'],
+                    'school_year'       => $period['school_year'],
                     'academic_year'     => $period['school_year'],
+                    'workspace_key'     => $period['workspace_key'],
                     'is_archived'       => false,
                 ]);
 

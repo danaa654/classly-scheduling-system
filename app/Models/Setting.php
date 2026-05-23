@@ -204,8 +204,15 @@ class Setting extends Model
             'academic_year' => $schoolYear,
             'semester' => $semester,
             'semester_name' => self::getValue('semester_name', self::semesterDisplayName($semester, $schoolYear)),
-            'edp_prefix' => self::academicYearPrefix($schoolYear),
+            'workspace_key' => self::workspaceKey($schoolYear, $semester),
+            'year_prefix' => self::academicYearPrefix($schoolYear),
+            'edp_prefix' => self::edpTermPrefix($schoolYear, $semester),
         ];
+    }
+
+    public static function currentWorkspace(): array
+    {
+        return self::getAcademicPeriod();
     }
 
     public static function normalizeSemester(?string $semester): string
@@ -240,9 +247,27 @@ class Setting extends Model
         };
     }
 
+    public static function semesterEdpDigit(?string $semester): string
+    {
+        return match (self::normalizeSemester($semester)) {
+            self::SEMESTER_FIRST => '1',
+            self::SEMESTER_SECOND => '2',
+            self::SEMESTER_SUMMER => '3',
+            default => '1',
+        };
+    }
+
     public static function semesterDisplayName(?string $semester, ?string $schoolYear): string
     {
         return trim(self::semesterLabel($semester).' '.($schoolYear ?: ''));
+    }
+
+    public static function workspaceKey(?string $schoolYear = null, ?string $semester = null): string
+    {
+        $schoolYear = trim((string) ($schoolYear ?: self::getValue('school_year', '2026-2027')));
+        $semester = self::normalizeSemester($semester ?: self::getValue('semester', self::SEMESTER_FIRST));
+
+        return $schoolYear.'_'.$semester;
     }
 
     public static function academicYearPrefix(?string $schoolYear): string
@@ -252,6 +277,20 @@ class Setting extends Model
         }
 
         return substr((string) now()->year, -2);
+    }
+
+    public static function edpTermPrefix(?string $schoolYear = null, ?string $semester = null): string
+    {
+        return self::academicYearPrefix($schoolYear ?: self::getValue('school_year', '2026-2027'))
+            .self::semesterEdpDigit($semester ?: self::getValue('semester', self::SEMESTER_FIRST));
+    }
+
+    public static function edpCodePrefix(string $major, int $yearLevel, ?string $schoolYear = null, ?string $semester = null): string
+    {
+        $major = strtoupper(trim($major ?: 'GEN'));
+        $yearLevel = max(1, min(9, $yearLevel));
+
+        return "{$major}-".self::edpTermPrefix($schoolYear, $semester).$yearLevel;
     }
 
     public static function nextAcademicYear(string $schoolYear): string
@@ -285,7 +324,9 @@ class Setting extends Model
             'school_year' => $nextSchoolYear,
             'academic_year' => $nextSchoolYear,
             'semester_name' => self::semesterDisplayName($nextSemester, $nextSchoolYear),
-            'edp_prefix' => self::academicYearPrefix($nextSchoolYear),
+            'workspace_key' => self::workspaceKey($nextSchoolYear, $nextSemester),
+            'year_prefix' => self::academicYearPrefix($nextSchoolYear),
+            'edp_prefix' => self::edpTermPrefix($nextSchoolYear, $nextSemester),
         ];
     }
 

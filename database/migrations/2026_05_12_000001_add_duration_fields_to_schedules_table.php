@@ -19,6 +19,12 @@ return new class extends Migration
             }
         });
 
+        if (DB::getDriverName() === 'sqlite') {
+            $this->backfillDurationFieldsForSqlite();
+
+            return;
+        }
+
         DB::table('schedules')
             ->join('subjects', 'subjects.id', '=', 'schedules.subject_id')
             ->whereNull('schedules.duration_hours')
@@ -26,6 +32,35 @@ return new class extends Migration
                 'schedules.duration_hours' => DB::raw('subjects.duration_hours'),
                 'schedules.meetings_per_week' => DB::raw('subjects.meetings_per_week'),
             ]);
+    }
+
+    private function backfillDurationFieldsForSqlite(): void
+    {
+        DB::table('schedules')
+            ->select('id', 'subject_id', 'duration_hours', 'meetings_per_week')
+            ->whereNull('duration_hours')
+            ->orderBy('id')
+            ->chunkById(500, function ($schedules) {
+                $subjects = DB::table('subjects')
+                    ->whereIn('id', $schedules->pluck('subject_id')->filter()->unique())
+                    ->get()
+                    ->keyBy('id');
+
+                foreach ($schedules as $schedule) {
+                    $subject = $subjects->get($schedule->subject_id);
+
+                    if (! $subject) {
+                        continue;
+                    }
+
+                    DB::table('schedules')
+                        ->where('id', $schedule->id)
+                        ->update([
+                            'duration_hours' => $schedule->duration_hours ?: $subject->duration_hours,
+                            'meetings_per_week' => $schedule->meetings_per_week ?: $subject->meetings_per_week,
+                        ]);
+                }
+            });
     }
 
     public function down(): void

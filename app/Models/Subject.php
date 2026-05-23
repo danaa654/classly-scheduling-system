@@ -25,9 +25,11 @@ class Subject extends Model
         'meetings_per_week',
         'faculty_id',
         'semester',
+        'school_year',
         'academic_year',
         'is_archived',
         'archived_at',
+        'workspace_key',
         'copied_from_id',
         'archive_batch',
     ];
@@ -43,12 +45,32 @@ class Subject extends Model
 
     protected static function booted(): void
     {
-        static::creating(function (Subject $subject) {
+        static::saving(function (Subject $subject) {
             $period = Setting::getAcademicPeriod();
 
             if (blank($subject->semester)) {
                 $subject->semester = $period['semester'];
             }
+
+            $subject->semester = Setting::normalizeSemester($subject->semester);
+
+            $schoolYear = $subject->school_year ?: $subject->academic_year ?: $period['school_year'];
+            $academicYear = $subject->academic_year ?: $schoolYear;
+
+            if ($subject->isDirty('academic_year') && ! $subject->isDirty('school_year')) {
+                $schoolYear = $academicYear;
+            }
+
+            if ($subject->isDirty('school_year') && ! $subject->isDirty('academic_year')) {
+                $academicYear = $schoolYear;
+            }
+
+            if ($schoolYear !== $academicYear) {
+                $academicYear = $schoolYear;
+            }
+
+            $subject->school_year = $schoolYear;
+            $subject->academic_year = $academicYear;
 
             if (blank($subject->academic_year)) {
                 $subject->academic_year = $period['school_year'];
@@ -57,6 +79,8 @@ class Subject extends Model
             if ($subject->is_archived === null) {
                 $subject->is_archived = false;
             }
+
+            $subject->workspace_key = Setting::workspaceKey($subject->school_year, $subject->semester);
         });
     }
 
@@ -193,20 +217,88 @@ class Subject extends Model
         return $query->where('is_archived', false);
     }
 
-    public function scopeActiveTerm($query, ?string $semester = null, ?string $academicYear = null)
+    public function scopeForWorkspace($query, ?string $semester = null, ?string $schoolYear = null)
     {
         $period = Setting::getAcademicPeriod();
         $semester ??= $period['semester'];
-        $academicYear ??= $period['school_year'];
+        $schoolYear ??= $period['school_year'];
+        $semester = Setting::normalizeSemester($semester);
+        $workspaceKey = Setting::workspaceKey($schoolYear, $semester);
 
         return $query->where('semester', $semester)
-            ->where('academic_year', $academicYear)
+            ->where(function ($query) use ($schoolYear, $workspaceKey) {
+                $query->where('workspace_key', $workspaceKey)
+                    ->orWhere('school_year', $schoolYear)
+                    ->orWhere('academic_year', $schoolYear);
+            });
+    }
+
+    public function scopeActiveWorkspace($query)
+    {
+        $period = Setting::getAcademicPeriod();
+
+        return $query->activeTerm($period['semester'], $period['school_year']);
+    }
+
+    public function scopeActiveTerm($query, ?string $semester = null, ?string $schoolYear = null)
+    {
+        return $query->forWorkspace($semester, $schoolYear)
             ->where('is_archived', false);
     }
 
     public function scopeArchived($query)
     {
         return $query->where('is_archived', true);
+    }
+
+    public function scopeArchivedWorkspace($query, ?string $semester = null, ?string $schoolYear = null)
+    {
+        return $query->forWorkspace($semester, $schoolYear)
+            ->where('is_archived', true);
+    }
+
+    public static function generateEdpCode(string $major, int $yearLevel, ?string $schoolYear = null, ?string $semester = null, ?int $ignoreSubjectId = null): string
+    {
+        $period = Setting::getAcademicPeriod();
+        $schoolYear ??= $period['school_year'];
+        $semester = Setting::normalizeSemester($semester ?? $period['semester']);
+        $major = strtoupper(trim($major ?: 'GEN'));
+        $yearLevel = max(1, min(9, $yearLevel));
+        $codePrefix = Setting::edpCodePrefix($major, $yearLevel, $schoolYear, $semester);
+
+        $maxSequence = static::query()
+            ->forWorkspace($semester, $schoolYear)
+            ->where('major', $major)
+            ->where('year_level', $yearLevel)
+            ->where('edp_code', 'like', $codePrefix.'%')
+            ->when($ignoreSubjectId, fn ($query) => $query->whereKeyNot($ignoreSubjectId))
+            ->pluck('edp_code')
+            ->map(function ($edpCode) use ($codePrefix) {
+                $sequence = substr((string) $edpCode, strlen($codePrefix));
+
+                return ctype_digit($sequence) ? (int) $sequence : 0;
+            })
+            ->max() ?? 0;
+
+        do {
+            $maxSequence++;
+            $candidate = $codePrefix.str_pad((string) $maxSequence, 3, '0', STR_PAD_LEFT);
+        } while (static::edpExistsInWorkspace($candidate, $schoolYear, $semester, $ignoreSubjectId));
+
+        return $candidate;
+    }
+
+    public static function edpExistsInWorkspace(string $edpCode, ?string $schoolYear = null, ?string $semester = null, ?int $ignoreSubjectId = null): bool
+    {
+        $period = Setting::getAcademicPeriod();
+        $schoolYear ??= $period['school_year'];
+        $semester = Setting::normalizeSemester($semester ?? $period['semester']);
+
+        return static::query()
+            ->forWorkspace($semester, $schoolYear)
+            ->where('edp_code', strtoupper(trim($edpCode)))
+            ->when($ignoreSubjectId, fn ($query) => $query->whereKeyNot($ignoreSubjectId))
+            ->exists();
     }
 
     // ============================================================

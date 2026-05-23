@@ -81,8 +81,8 @@
                             <select
                                 wire:model.live="catalogMode"
                                 class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl p-4 font-semibold text-sm uppercase text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
-                                <option value="active">Current Semester Workspace</option>
-                                <option value="archive">Archived Semester History</option>
+                                <option value="active">Current Workspace</option>
+                                <option value="archive">Archived Semesters</option>
                             </select>
                         </div>
 
@@ -576,7 +576,7 @@
                                     </td>
                                     <td class="px-4 py-3 text-right">
                                         @if($row['exists'])
-                                            <span class="text-red-600 font-bold uppercase text-xs">Already Exists</span>
+                                            <span class="text-red-600 font-bold uppercase text-xs">Exists in Workspace</span>
                                         @else
                                             <span class="text-emerald-600 font-bold uppercase text-xs">New</span>
                                         @endif
@@ -716,7 +716,7 @@
                     text-blue-700 dark:text-blue-300 cursor-not-allowed border border-blue-300 dark:border-blue-600"
                 placeholder="Generates after selecting Major & Year">
             <span class="text-[7px] font-bold text-blue-600 dark:text-blue-400 uppercase ml-1 italic mt-1 block">
-                Format: MAJOR-YEAR[LEVEL]### (e.g., IT-261001)
+                Format: MAJOR-YYSEMLEVEL### (e.g., IT-2621001)
             </span>
         </div>
 

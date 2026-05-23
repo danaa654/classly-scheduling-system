@@ -125,9 +125,10 @@ class MasterGrid extends Component
         $this->days = $scheduleSettings['active_days'];
         $this->dayStart = $scheduleSettings['start_time'];
         $this->dayEnd = $scheduleSettings['end_time'];
-        $this->schoolYear = Setting::getValue('school_year', '2026-2027');
-        $this->semester = Setting::getValue('semester', '1st');
-        $this->semesterName = Setting::getValue('semester_name', 'First Semester 2026-2027');
+        $period = Setting::getAcademicPeriod();
+        $this->schoolYear = $period['school_year'];
+        $this->semester = $period['semester'];
+        $this->semesterName = $period['semester_name'];
     }
 
     private function activeScheduleQuery()
@@ -1549,7 +1550,9 @@ class MasterGrid extends Component
             'status' => Schedule::STATUS_PARTIAL,
             'edp_code' => $subject->edp_code,
             'semester' => $period['semester'],
+            'school_year' => $period['school_year'],
             'academic_year' => $period['school_year'],
+            'workspace_key' => $period['workspace_key'],
             'is_archived' => false,
         ]);
     }   

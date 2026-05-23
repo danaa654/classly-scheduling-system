@@ -41,9 +41,11 @@ class Schedule extends Model
         'status',
         'edp_code',
         'semester',
+        'school_year',
         'academic_year',
         'is_archived',
         'archived_at',
+        'workspace_key',
         'archive_batch',
     ];
 
@@ -58,12 +60,32 @@ class Schedule extends Model
 
     protected static function booted(): void
     {
-        static::creating(function (Schedule $schedule) {
+        static::saving(function (Schedule $schedule) {
             $period = Setting::getAcademicPeriod();
 
             if (blank($schedule->semester)) {
                 $schedule->semester = $period['semester'];
             }
+
+            $schedule->semester = Setting::normalizeSemester($schedule->semester);
+
+            $schoolYear = $schedule->school_year ?: $schedule->academic_year ?: $period['school_year'];
+            $academicYear = $schedule->academic_year ?: $schoolYear;
+
+            if ($schedule->isDirty('academic_year') && ! $schedule->isDirty('school_year')) {
+                $schoolYear = $academicYear;
+            }
+
+            if ($schedule->isDirty('school_year') && ! $schedule->isDirty('academic_year')) {
+                $academicYear = $schoolYear;
+            }
+
+            if ($schoolYear !== $academicYear) {
+                $academicYear = $schoolYear;
+            }
+
+            $schedule->school_year = $schoolYear;
+            $schedule->academic_year = $academicYear;
 
             if (blank($schedule->academic_year)) {
                 $schedule->academic_year = $period['school_year'];
@@ -72,6 +94,8 @@ class Schedule extends Model
             if ($schedule->is_archived === null) {
                 $schedule->is_archived = false;
             }
+
+            $schedule->workspace_key = Setting::workspaceKey($schedule->school_year, $schedule->semester);
 
             if (! $schedule->edp_code && $schedule->subject_id) {
                 $schedule->edp_code = Subject::whereKey($schedule->subject_id)->value('edp_code');
@@ -219,19 +243,41 @@ class Schedule extends Model
     }
 
     /** Only rows belonging to the given semester + year */
-    public function scopeForTerm($query, string $semester, string $academicYear)
+    public function scopeForTerm($query, string $semester, string $schoolYear)
     {
-        return $query->where('semester', $semester)
-            ->where('academic_year', $academicYear);
+        return $query->forWorkspace($semester, $schoolYear);
     }
 
-    public function scopeActiveTerm($query, ?string $semester = null, ?string $academicYear = null)
+    public function scopeForWorkspace($query, ?string $semester = null, ?string $schoolYear = null)
     {
         $period = Setting::getAcademicPeriod();
         $semester ??= $period['semester'];
-        $academicYear ??= $period['school_year'];
+        $schoolYear ??= $period['school_year'];
+        $semester = Setting::normalizeSemester($semester);
+        $workspaceKey = Setting::workspaceKey($schoolYear, $semester);
 
-        return $query->forTerm($semester, $academicYear)
+        return $query->where('semester', $semester)
+            ->where(function ($query) use ($schoolYear, $workspaceKey) {
+                $query->where('workspace_key', $workspaceKey)
+                    ->orWhere('school_year', $schoolYear)
+                    ->orWhere('academic_year', $schoolYear);
+            });
+    }
+
+    public function scopeActiveWorkspace($query)
+    {
+        $period = Setting::getAcademicPeriod();
+
+        return $query->activeTerm($period['semester'], $period['school_year']);
+    }
+
+    public function scopeActiveTerm($query, ?string $semester = null, ?string $schoolYear = null)
+    {
+        $period = Setting::getAcademicPeriod();
+        $semester ??= $period['semester'];
+        $schoolYear ??= $period['school_year'];
+
+        return $query->forWorkspace($semester, $schoolYear)
             ->where('is_archived', false);
     }
 
@@ -245,6 +291,12 @@ class Schedule extends Model
     public function scopeArchived($query)
     {
         return $query->where('is_archived', true);
+    }
+
+    public function scopeArchivedWorkspace($query, ?string $semester = null, ?string $schoolYear = null)
+    {
+        return $query->forWorkspace($semester, $schoolYear)
+            ->where('is_archived', true);
     }
 
     public static function sectionTimePreference(?string $section): ?string

@@ -60,6 +60,10 @@ return new class extends Migration
 
     private function dropForeignKeyOnFacultyId(): void
     {
+        if (DB::getDriverName() === 'sqlite') {
+            return;
+        }
+
         $databaseName = DB::getDatabaseName();
 
         $constraintName = DB::table('information_schema.KEY_COLUMN_USAGE')

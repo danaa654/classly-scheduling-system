@@ -99,6 +99,7 @@ class AutoScheduleService
         }
 
         $bounds = Setting::getDayBounds();
+        $period = Setting::getAcademicPeriod();
         $rooms = Room::query()
             ->select('id', 'room_name', 'type', 'capacity', 'specialization', 'floor')
             ->available()
@@ -187,6 +188,12 @@ class AutoScheduleService
                         'meetings_per_week' => $subject->meetings_per_week,
                         'pairing_key' => $pairingKey,
                         'status' => Schedule::STATUS_PARTIAL,
+                        'edp_code' => $subject->edp_code,
+                        'semester' => $period['semester'],
+                        'school_year' => $period['school_year'],
+                        'academic_year' => $period['school_year'],
+                        'workspace_key' => $period['workspace_key'],
+                        'is_archived' => false,
                     ];
 
                     $schedule = $persist
@@ -233,6 +240,7 @@ class AutoScheduleService
     public function persistGeneratedSchedules(array $items, ?int $userId = null): array
     {
         set_time_limit(300);
+        $period = Setting::getAcademicPeriod();
 
         $subjectIds = collect($items)->pluck('subject_id')->filter()->unique()->values();
         $roomIds = collect($items)->pluck('room_id')->filter()->unique()->values();
@@ -383,6 +391,12 @@ class AutoScheduleService
                     'meetings_per_week' => $item['meetings_per_week'] ?? $subject->meetings_per_week,
                     'pairing_key' => $pairingKey,
                     'status' => Schedule::STATUS_PARTIAL,
+                    'edp_code' => $subject->edp_code,
+                    'semester' => $period['semester'],
+                    'school_year' => $period['school_year'],
+                    'academic_year' => $period['school_year'],
+                    'workspace_key' => $period['workspace_key'],
+                    'is_archived' => false,
                 ];
 
                 $previewSchedule = new Schedule($payload);

@@ -46,6 +46,12 @@ return new class extends Migration
                 ->update(['status' => 'partial']);
         }
 
+        if (DB::getDriverName() === 'sqlite') {
+            $this->backfillScheduleFieldsForSqlite();
+
+            return;
+        }
+
         DB::table('schedules')
             ->join('subjects', 'subjects.id', '=', 'schedules.subject_id')
             ->whereNull('schedules.department')
@@ -72,6 +78,38 @@ return new class extends Migration
                 ->whereNotNull('subjects.faculty_id')
                 ->update(['schedules.faculty_id' => DB::raw('subjects.faculty_id')]);
         }
+    }
+
+    private function backfillScheduleFieldsForSqlite(): void
+    {
+        DB::table('schedules')
+            ->select('id', 'subject_id', 'department', 'major', 'year_level', 'duration_hours', 'meetings_per_week', 'faculty_id')
+            ->orderBy('id')
+            ->chunkById(500, function ($schedules) {
+                $subjects = DB::table('subjects')
+                    ->whereIn('id', $schedules->pluck('subject_id')->filter()->unique())
+                    ->get()
+                    ->keyBy('id');
+
+                foreach ($schedules as $schedule) {
+                    $subject = $subjects->get($schedule->subject_id);
+
+                    if (! $subject) {
+                        continue;
+                    }
+
+                    DB::table('schedules')
+                        ->where('id', $schedule->id)
+                        ->update([
+                            'department' => $schedule->department ?: $subject->department,
+                            'major' => $schedule->major ?: $subject->major,
+                            'year_level' => $schedule->year_level ?: $subject->year_level,
+                            'duration_hours' => $schedule->duration_hours ?: $subject->duration_hours,
+                            'meetings_per_week' => $schedule->meetings_per_week ?: $subject->meetings_per_week,
+                            'faculty_id' => $schedule->faculty_id ?: ($subject->faculty_id ?? null),
+                        ]);
+                }
+            });
     }
 
     public function down(): void

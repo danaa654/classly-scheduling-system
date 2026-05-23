@@ -171,7 +171,7 @@ class GlobalSettings extends Component
             return;
         }
 
-        if ($this->academicPeriodChanged() && ($this->activeSubjectCount() + $this->activeScheduleCount()) > 0) {
+        if ($this->academicPeriodChanged() && ($this->storedActiveSubjectCount() + $this->storedActiveScheduleCount()) > 0) {
             $this->dispatch('notify', [
                 'type' => 'error',
                 'message' => 'Use Reset Semester before changing the active academic period.',
@@ -297,7 +297,9 @@ class GlobalSettings extends Component
         foreach ($subjects as $subject) {
             $subject->forceFill([
                 'semester' => $period['semester'],
+                'school_year' => $period['school_year'],
                 'academic_year' => $period['school_year'],
+                'workspace_key' => $period['workspace_key'],
                 'is_archived' => true,
                 'archived_at' => $now,
                 'archive_batch' => $archiveBatchId,
@@ -308,7 +310,9 @@ class GlobalSettings extends Component
             $schedule->forceFill([
                 'edp_code' => $schedule->edp_code ?: $schedule->subject?->edp_code,
                 'semester' => $period['semester'],
+                'school_year' => $period['school_year'],
                 'academic_year' => $period['school_year'],
+                'workspace_key' => $period['workspace_key'],
                 'is_archived' => true,
                 'archived_at' => $now,
                 'archive_batch' => $archiveBatchId,
@@ -434,10 +438,11 @@ class GlobalSettings extends Component
                     }
 
                     $newSubject = Subject::create([
-                        'edp_code' => $this->generateNextEdpCode(
+                        'edp_code' => Subject::generateEdpCode(
                             $source->major ?: strtok((string) $source->edp_code, '-'),
                             (int) $source->year_level,
-                            $period['school_year']
+                            $period['school_year'],
+                            $period['semester']
                         ),
                         'subject_code' => $source->subject_code,
                         'section' => $source->section,
@@ -453,7 +458,9 @@ class GlobalSettings extends Component
                         'meetings_per_week' => $source->meetings_per_week,
                         'faculty_id' => $source->faculty_id,
                         'semester' => $period['semester'],
+                        'school_year' => $period['school_year'],
                         'academic_year' => $period['school_year'],
+                        'workspace_key' => $period['workspace_key'],
                         'is_archived' => false,
                         'archived_at' => null,
                         'copied_from_id' => $source->id,
@@ -501,7 +508,9 @@ class GlobalSettings extends Component
                         'status' => $sourceSchedule->status ?: Schedule::STATUS_PARTIAL,
                         'edp_code' => $newSubject->edp_code,
                         'semester' => $period['semester'],
+                        'school_year' => $period['school_year'],
                         'academic_year' => $period['school_year'],
+                        'workspace_key' => $period['workspace_key'],
                         'is_archived' => false,
                         'archived_at' => null,
                         'archive_batch' => null,
@@ -557,27 +566,14 @@ class GlobalSettings extends Component
 
     private function generateNextEdpCode(string $major, int $yearLevel, ?string $academicYear = null): string
     {
-        $major = strtoupper(trim($major ?: 'GEN'));
-        $yearLevel = max(1, min(9, $yearLevel));
-        $prefix = Setting::academicYearPrefix($academicYear ?: Setting::getAcademicPeriod()['school_year']);
-        $codePrefix = "{$major}-{$prefix}{$yearLevel}";
+        $period = Setting::getAcademicPeriod();
 
-        $maxSequence = Subject::where('edp_code', 'like', $codePrefix.'%')
-            ->lockForUpdate()
-            ->pluck('edp_code')
-            ->map(function ($edpCode) use ($codePrefix) {
-                $sequence = substr((string) $edpCode, strlen($codePrefix));
-
-                return ctype_digit($sequence) ? (int) $sequence : 0;
-            })
-            ->max() ?? 0;
-
-        do {
-            $maxSequence++;
-            $candidate = $codePrefix.str_pad((string) $maxSequence, 3, '0', STR_PAD_LEFT);
-        } while (Subject::where('edp_code', $candidate)->exists());
-
-        return $candidate;
+        return Subject::generateEdpCode(
+            $major,
+            $yearLevel,
+            $academicYear ?: $period['school_year'],
+            $period['semester']
+        );
     }
 
     private function retrievedPairingKey(?string $sourcePairingKey, array &$pairingKeyMap): ?string
@@ -717,7 +713,7 @@ class GlobalSettings extends Component
             return 0;
         }
 
-        return $this->activeSubjectsBaseQuery()->count();
+        return Subject::activeTerm($this->semester, $this->school_year)->count();
     }
 
     public function activeScheduleCount(): int
@@ -726,12 +722,30 @@ class GlobalSettings extends Component
             return 0;
         }
 
-        return $this->activeSchedulesBaseQuery()->count();
+        return Schedule::activeTerm($this->semester, $this->school_year)->count();
+    }
+
+    private function storedActiveSubjectCount(): int
+    {
+        $period = Setting::getAcademicPeriod();
+
+        return Schema::hasTable('subjects')
+            ? Subject::activeTerm($period['semester'], $period['school_year'])->count()
+            : 0;
+    }
+
+    private function storedActiveScheduleCount(): int
+    {
+        $period = Setting::getAcademicPeriod();
+
+        return Schema::hasTable('schedules')
+            ? Schedule::activeTerm($period['semester'], $period['school_year'])->count()
+            : 0;
     }
 
     public function currentEdpPrefix(): string
     {
-        return Setting::academicYearPrefix((string) $this->school_year);
+        return Setting::edpTermPrefix((string) $this->school_year, (string) $this->semester);
     }
 
     public function previewNextAcademicPeriod(): array
@@ -767,7 +781,7 @@ class GlobalSettings extends Component
         $newEnd = Carbon::parse($this->day_end);
         $activeDays = Setting::normalizeActiveDays($this->active_days);
 
-        $schedules = $this->activeSchedulesBaseQuery()
+        $schedules = Schedule::activeTerm($this->semester, $this->school_year)
             ->with('subject:id,subject_code')
             ->get();
 
@@ -835,28 +849,12 @@ class GlobalSettings extends Component
 
     private function currentWorkspaceSubjectsQuery(array $period): Builder
     {
-        return $this->activeSubjectsBaseQuery()
-            ->where(function (Builder $query) use ($period) {
-                $query->where(function (Builder $query) use ($period) {
-                    $query->where('semester', $period['semester'])
-                        ->where('academic_year', $period['school_year']);
-                })
-                    ->orWhereNull('semester')
-                    ->orWhereNull('academic_year');
-            });
+        return Subject::activeTerm($period['semester'], $period['school_year']);
     }
 
     private function currentWorkspaceSchedulesQuery(array $period): Builder
     {
-        return $this->activeSchedulesBaseQuery()
-            ->where(function (Builder $query) use ($period) {
-                $query->where(function (Builder $query) use ($period) {
-                    $query->where('semester', $period['semester'])
-                        ->where('academic_year', $period['school_year']);
-                })
-                    ->orWhereNull('semester')
-                    ->orWhereNull('academic_year');
-            });
+        return Schedule::activeTerm($period['semester'], $period['school_year']);
     }
 
     private function activeSubjectsBaseQuery(): Builder
@@ -993,8 +991,8 @@ class GlobalSettings extends Component
     private function ensureLifecycleSchema(): void
     {
         $requirements = [
-            'subjects' => ['semester', 'academic_year', 'is_archived', 'archived_at', 'copied_from_id', 'archive_batch'],
-            'schedules' => ['semester', 'academic_year', 'is_archived', 'archived_at', 'archive_batch'],
+            'subjects' => ['semester', 'school_year', 'academic_year', 'workspace_key', 'is_archived', 'archived_at', 'copied_from_id', 'archive_batch'],
+            'schedules' => ['semester', 'school_year', 'academic_year', 'workspace_key', 'is_archived', 'archived_at', 'archive_batch'],
             'schedule_archives' => ['archive_batch_id', 'semester', 'total_subjects', 'next_semester', 'next_school_year'],
         ];
 
