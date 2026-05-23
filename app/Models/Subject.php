@@ -2,10 +2,10 @@
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Casts\Attribute;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Subject extends Model
 {
@@ -24,6 +24,12 @@ class Subject extends Model
         'specialization',
         'meetings_per_week',
         'faculty_id',
+        'semester',
+        'academic_year',
+        'is_archived',
+        'archived_at',
+        'copied_from_id',
+        'archive_batch',
     ];
 
     protected $casts = [
@@ -31,12 +37,33 @@ class Subject extends Model
         'year_level' => 'integer',
         'duration_hours' => 'float',
         'meetings_per_week' => 'integer',
+        'is_archived' => 'boolean',
+        'archived_at' => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (Subject $subject) {
+            $period = Setting::getAcademicPeriod();
+
+            if (blank($subject->semester)) {
+                $subject->semester = $period['semester'];
+            }
+
+            if (blank($subject->academic_year)) {
+                $subject->academic_year = $period['school_year'];
+            }
+
+            if ($subject->is_archived === null) {
+                $subject->is_archived = false;
+            }
+        });
+    }
 
     // ============================================================
     // RELATIONSHIPS
     // ============================================================
-    
+
     /**
      * Get schedules associated with this subject
      */
@@ -52,6 +79,16 @@ class Subject extends Model
     public function faculty(): BelongsTo
     {
         return $this->belongsTo(Faculty::class, 'faculty_id');
+    }
+
+    public function copiedFrom(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'copied_from_id');
+    }
+
+    public function copiedSubjects(): HasMany
+    {
+        return $this->hasMany(self::class, 'copied_from_id');
     }
 
     protected function edpCode(): Attribute
@@ -124,7 +161,7 @@ class Subject extends Model
 
     public function scopeByYear($query, $year)
     {
-        return $query->where('year_level', (int)$year);
+        return $query->where('year_level', (int) $year);
     }
 
     public function scopeBySection($query, $section)
@@ -140,8 +177,36 @@ class Subject extends Model
     public function scopeSearch($query, $term)
     {
         return $query->where('subject_code', 'like', "%{$term}%")
-                     ->orWhere('description', 'like', "%{$term}%")
-                     ->orWhere('edp_code', 'like', "%{$term}%");
+            ->orWhere('description', 'like', "%{$term}%")
+            ->orWhere('edp_code', 'like', "%{$term}%");
+    }
+
+    public function scopeCurrentSemester($query)
+    {
+        $period = Setting::getAcademicPeriod();
+
+        return $query->activeTerm($period['semester'], $period['school_year']);
+    }
+
+    public function scopeActive($query)
+    {
+        return $query->where('is_archived', false);
+    }
+
+    public function scopeActiveTerm($query, ?string $semester = null, ?string $academicYear = null)
+    {
+        $period = Setting::getAcademicPeriod();
+        $semester ??= $period['semester'];
+        $academicYear ??= $period['school_year'];
+
+        return $query->where('semester', $semester)
+            ->where('academic_year', $academicYear)
+            ->where('is_archived', false);
+    }
+
+    public function scopeArchived($query)
+    {
+        return $query->where('is_archived', true);
     }
 
     // ============================================================
@@ -214,7 +279,8 @@ class Subject extends Model
      */
     public static function getSubjectsForGroup($department, $major, $section)
     {
-        return static::where('department', $department)
+        return static::activeTerm()
+            ->where('department', $department)
             ->where('major', $major)
             ->where('section', $section)
             ->get();
@@ -225,7 +291,10 @@ class Subject extends Model
      */
     public function getRemainingMeetings()
     {
-        $scheduled = Schedule::where('subject_id', $this->id)->count();
+        $scheduled = Schedule::activeTerm()
+            ->where('subject_id', $this->id)
+            ->count();
+
         return max(0, $this->meetings_per_week - $scheduled);
     }
 }

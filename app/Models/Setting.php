@@ -2,10 +2,23 @@
 
 namespace App\Models;
 
+use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
 
 class Setting extends Model
 {
+    public const SEMESTER_FIRST = '1st';
+
+    public const SEMESTER_SECOND = '2nd';
+
+    public const SEMESTER_SUMMER = 'Summer';
+
+    public const SEMESTERS = [
+        self::SEMESTER_FIRST,
+        self::SEMESTER_SECOND,
+        self::SEMESTER_SUMMER,
+    ];
+
     public const ALL_SCHEDULE_DAYS = [
         'Monday',
         'Tuesday',
@@ -183,20 +196,107 @@ class Setting extends Model
      */
     public static function getAcademicPeriod(): array
     {
+        $schoolYear = self::getValue('school_year', '2026-2027');
+        $semester = self::normalizeSemester(self::getValue('semester', self::SEMESTER_FIRST));
+
         return [
-            'school_year' => self::getValue('school_year', '2026-2027'),
-            'semester' => self::getValue('semester', '1st Semester'),
+            'school_year' => $schoolYear,
+            'academic_year' => $schoolYear,
+            'semester' => $semester,
+            'semester_name' => self::getValue('semester_name', self::semesterDisplayName($semester, $schoolYear)),
+            'edp_prefix' => self::academicYearPrefix($schoolYear),
+        ];
+    }
+
+    public static function normalizeSemester(?string $semester): string
+    {
+        $semester = trim((string) $semester);
+
+        return match (strtolower($semester)) {
+            '1', '1st', 'first', 'first semester', '1st semester' => self::SEMESTER_FIRST,
+            '2', '2nd', 'second', 'second semester', '2nd semester' => self::SEMESTER_SECOND,
+            'summer', 'summer semester' => self::SEMESTER_SUMMER,
+            default => self::SEMESTER_FIRST,
+        };
+    }
+
+    public static function semesterLabel(?string $semester): string
+    {
+        return match (self::normalizeSemester($semester)) {
+            self::SEMESTER_FIRST => '1st Semester',
+            self::SEMESTER_SECOND => '2nd Semester',
+            self::SEMESTER_SUMMER => 'Summer',
+            default => '1st Semester',
+        };
+    }
+
+    public static function semesterCode(?string $semester): string
+    {
+        return match (self::normalizeSemester($semester)) {
+            self::SEMESTER_FIRST => '1ST',
+            self::SEMESTER_SECOND => '2ND',
+            self::SEMESTER_SUMMER => 'SUM',
+            default => '1ST',
+        };
+    }
+
+    public static function semesterDisplayName(?string $semester, ?string $schoolYear): string
+    {
+        return trim(self::semesterLabel($semester).' '.($schoolYear ?: ''));
+    }
+
+    public static function academicYearPrefix(?string $schoolYear): string
+    {
+        if (preg_match('/^(\d{4})-\d{4}$/', (string) $schoolYear, $matches)) {
+            return substr($matches[1], -2);
+        }
+
+        return substr((string) now()->year, -2);
+    }
+
+    public static function nextAcademicYear(string $schoolYear): string
+    {
+        if (! preg_match('/^(\d{4})-(\d{4})$/', $schoolYear, $matches)) {
+            $start = (int) now()->year;
+
+            return $start.'-'.($start + 1);
+        }
+
+        $start = (int) $matches[1] + 1;
+
+        return $start.'-'.($start + 1);
+    }
+
+    public static function nextAcademicPeriod(?string $semester = null, ?string $schoolYear = null): array
+    {
+        $semester = self::normalizeSemester($semester ?? self::getValue('semester', self::SEMESTER_FIRST));
+        $schoolYear ??= self::getValue('school_year', '2026-2027');
+
+        if ($semester === self::SEMESTER_FIRST) {
+            $nextSemester = self::SEMESTER_SECOND;
+            $nextSchoolYear = $schoolYear;
+        } else {
+            $nextSemester = self::SEMESTER_FIRST;
+            $nextSchoolYear = self::nextAcademicYear($schoolYear);
+        }
+
+        return [
+            'semester' => $nextSemester,
+            'school_year' => $nextSchoolYear,
+            'academic_year' => $nextSchoolYear,
+            'semester_name' => self::semesterDisplayName($nextSemester, $nextSchoolYear),
+            'edp_prefix' => self::academicYearPrefix($nextSchoolYear),
         ];
     }
 
     private static function normalizeTime(?string $time, string $default): string
     {
-        if (!$time) {
+        if (! $time) {
             return $default;
         }
 
         try {
-            return \Carbon\Carbon::parse($time)->format('H:i');
+            return Carbon::parse($time)->format('H:i');
         } catch (\Throwable) {
             return $default;
         }

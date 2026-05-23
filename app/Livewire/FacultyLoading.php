@@ -74,6 +74,16 @@ class FacultyLoading extends Component
         $this->dispatch('toast', type: $type, message: $message);
     }
 
+    private function activeScheduleQuery(): Builder
+    {
+        return Schedule::activeTerm();
+    }
+
+    private function activeSubjectQuery(): Builder
+    {
+        return Subject::activeTerm();
+    }
+
     // ============================================================
     // FACULTY SELECTION & TAB CONTROL
     // ============================================================
@@ -100,7 +110,8 @@ class FacultyLoading extends Component
     public function selectedFaculty()
     {
         return $this->selectedFacultyId
-            ? Faculty::with(['schedules.subject', 'schedules.room'])->find($this->selectedFacultyId)
+            ? Faculty::with(['schedules' => fn ($query) => $query->activeTerm()->with(['subject', 'room'])])
+                ->find($this->selectedFacultyId)
             : null;
     }
 
@@ -177,7 +188,7 @@ class FacultyLoading extends Component
             return collect();
         }
 
-        return Schedule::query()
+        return $this->activeScheduleQuery()
             ->where('faculty_id', $this->selectedFacultyId)
             ->with(['subject', 'room'])
             ->orderBy('start_time')
@@ -274,7 +285,7 @@ class FacultyLoading extends Component
         }
 
         // ── Total schedule rows (each unique subject-section-day slot counts as one) ──
-        $baseQuery = Schedule::query()
+        $baseQuery = $this->activeScheduleQuery()
             ->whereIn('status', [
                 Schedule::STATUS_PARTIAL,
                 Schedule::STATUS_FACULTY_ASSIGNED,
@@ -400,7 +411,9 @@ class FacultyLoading extends Component
             return;
         }
 
-        $schedule = Schedule::with(['subject', 'room'])->find($scheduleId);
+        $schedule = $this->activeScheduleQuery()
+            ->with(['subject', 'room'])
+            ->find($scheduleId);
         $faculty = Faculty::find($this->selectedFacultyId);
 
         if (! $schedule || ! $schedule->subject) {
@@ -491,7 +504,9 @@ class FacultyLoading extends Component
         $groupIds = $this->pendingAssignmentGroupIds;
 
         if (! empty($groupIds)) {
-            $schedules = Schedule::with(['subject', 'room'])->findMany($groupIds);
+            $schedules = $this->activeScheduleQuery()
+                ->with(['subject', 'room'])
+                ->findMany($groupIds);
 
             if ($schedules->isEmpty()) {
                 $this->resetPendingAssignment();
@@ -523,7 +538,9 @@ class FacultyLoading extends Component
             return;
         }
 
-        $schedule = Schedule::with(['subject', 'room'])->find($this->pendingAssignmentScheduleId);
+        $schedule = $this->activeScheduleQuery()
+            ->with(['subject', 'room'])
+            ->find($this->pendingAssignmentScheduleId);
 
         if (! $schedule || ! $schedule->subject) {
             $this->resetPendingAssignment();
@@ -615,7 +632,9 @@ class FacultyLoading extends Component
         try {
             DB::transaction(function () use ($schedules, $faculty, $singleSchedule, $day, $startTime, $endTime) {
                 $ids = $schedules->pluck('id')->all();
-                $fresh = Schedule::lockForUpdate()->findMany($ids);
+                $fresh = $this->activeScheduleQuery()
+                    ->lockForUpdate()
+                    ->findMany($ids);
 
                 foreach ($fresh as $schedule) {
                     $payload = [
@@ -670,7 +689,9 @@ class FacultyLoading extends Component
 
         try {
             DB::transaction(function () use ($schedules, $faculty, $room) {
-                $fresh = Schedule::lockForUpdate()->findMany($schedules->pluck('id')->all());
+                $fresh = $this->activeScheduleQuery()
+                    ->lockForUpdate()
+                    ->findMany($schedules->pluck('id')->all());
 
                 foreach ($fresh as $schedule) {
                     $schedule->update([
@@ -700,7 +721,9 @@ class FacultyLoading extends Component
 
         return [
             Faculty::find($this->selectedFacultyId),
-            Schedule::with(['subject', 'room'])->findMany($ids),
+            $this->activeScheduleQuery()
+                ->with(['subject', 'room'])
+                ->findMany($ids),
         ];
     }
 
@@ -765,7 +788,9 @@ class FacultyLoading extends Component
             $scheduleId = $schedule->id;
 
             DB::transaction(function () use ($scheduleId, $faculty) {
-                $fresh = Schedule::lockForUpdate()->findOrFail($scheduleId);
+                $fresh = $this->activeScheduleQuery()
+                    ->lockForUpdate()
+                    ->findOrFail($scheduleId);
 
                 if ($fresh->faculty_id !== null && (int) $fresh->faculty_id !== (int) $faculty->id) {
                     throw new \RuntimeException(
@@ -797,7 +822,7 @@ class FacultyLoading extends Component
         $warnings = [];
         $startTime = Carbon::parse($schedule->start_time)->format('H:i:s');
         $endTime = Carbon::parse($schedule->end_time)->format('H:i:s');
-        $assignedSchedules = Schedule::query()
+        $assignedSchedules = $this->activeScheduleQuery()
             ->where('faculty_id', $faculty->id)
             ->with(['subject', 'room'])
             ->get();
@@ -1088,7 +1113,7 @@ class FacultyLoading extends Component
 
         return Faculty::query()
             ->approved()
-            ->with('schedules.subject')
+            ->with(['schedules' => fn ($query) => $query->activeTerm()->with('subject')])
             ->whereKeyNot($currentFaculty->id)
             ->orderBy('full_name')
             ->get()
@@ -1129,7 +1154,7 @@ class FacultyLoading extends Component
     {
         $schedules = $faculty->relationLoaded('schedules')
             ? $faculty->schedules
-            : $faculty->schedules()->with('subject')->get();
+            : $faculty->schedules()->activeTerm()->with('subject')->get();
         $currentSubjects = $schedules
             ->pluck('subject')
             ->filter()
@@ -1254,7 +1279,9 @@ class FacultyLoading extends Component
 
     public function removeSubject($scheduleId)
     {
-        $schedule = Schedule::with('subject')->find($scheduleId);
+        $schedule = $this->activeScheduleQuery()
+            ->with('subject')
+            ->find($scheduleId);
 
         if (! $schedule || ! $schedule->subject) {
             $this->toast('error', 'Scheduled subject not found.');
@@ -1292,7 +1319,9 @@ class FacultyLoading extends Component
             return;
         }
 
-        $schedules = Schedule::with('subject')->findMany($scheduleIds);
+        $schedules = $this->activeScheduleQuery()
+            ->with('subject')
+            ->findMany($scheduleIds);
 
         if ($schedules->isEmpty()) {
             $this->toast('error', 'Scheduled subjects not found.');
@@ -1331,7 +1360,7 @@ class FacultyLoading extends Component
     public function submitFacultyLoading(): void
     {
         $user  = Auth::user();
-        $query = Schedule::query()
+        $query = $this->activeScheduleQuery()
             ->assignable()
             ->whereNotNull('faculty_id');
 
@@ -1366,7 +1395,7 @@ class FacultyLoading extends Component
 
     private function facultyConflict(Faculty $faculty, Schedule $schedule): ?string
     {
-        $conflict = Schedule::query()
+        $conflict = $this->activeScheduleQuery()
             ->where('faculty_id', $faculty->id)
             ->whereKeyNot($schedule->id)
             ->where('day', $schedule->day)
@@ -1472,7 +1501,7 @@ class FacultyLoading extends Component
         $user  = Auth::user();
         $query = Faculty::query()
             ->approved()
-            ->withCount('schedules');
+            ->withCount(['schedules' => fn ($query) => $query->activeTerm()]);
 
         if (in_array($user->role, ['dean', 'oic'])) {
             $query->where(function (Builder $visibility) use ($user) {
@@ -1566,7 +1595,7 @@ class FacultyLoading extends Component
 
     private function getAvailableSubjects()
     {
-        $query = Schedule::query()
+        $query = $this->activeScheduleQuery()
             ->with(['subject', 'room', 'faculty'])
             ->whereIn('status', [
                 Schedule::STATUS_PARTIAL,
@@ -1764,7 +1793,9 @@ class FacultyLoading extends Component
             return;
         }
 
-        $schedules = Schedule::with(['subject', 'room'])->findMany($scheduleIds);
+        $schedules = $this->activeScheduleQuery()
+            ->with(['subject', 'room'])
+            ->findMany($scheduleIds);
 
         if ($schedules->isEmpty()) {
             $this->toast('error', 'Scheduled subjects not found.');
@@ -1861,7 +1892,9 @@ class FacultyLoading extends Component
             $scheduleIds = $schedules->pluck('id')->all();
 
             DB::transaction(function () use ($scheduleIds, $faculty) {
-                $fresh = Schedule::lockForUpdate()->findMany($scheduleIds);
+                $fresh = $this->activeScheduleQuery()
+                    ->lockForUpdate()
+                    ->findMany($scheduleIds);
 
                 $conflict = $fresh->first(
                     fn (Schedule $s) => $s->faculty_id !== null
@@ -1992,8 +2025,8 @@ class FacultyLoading extends Component
 
     private function getScheduleDepartments(): array
     {
-        $scheduleDepartments = Schedule::query()->select('department')->distinct()->pluck('department');
-        $subjectDepartments  = Subject::query()->select('department')->distinct()->pluck('department');
+        $scheduleDepartments = $this->activeScheduleQuery()->select('department')->distinct()->pluck('department');
+        $subjectDepartments  = $this->activeSubjectQuery()->select('department')->distinct()->pluck('department');
         $departmentCodes     = Department::query()->select('code')->distinct()->pluck('code');
 
         return $this->collectDepartmentCodes($scheduleDepartments, $subjectDepartments, $departmentCodes);
@@ -2016,8 +2049,8 @@ class FacultyLoading extends Component
 
     private function getAvailableMajors()
     {
-        $scheduleMajors = Schedule::query()->select('major')->distinct()->pluck('major');
-        $subjectMajors  = Subject::query()->select('major')->distinct()->pluck('major');
+        $scheduleMajors = $this->activeScheduleQuery()->select('major')->distinct()->pluck('major');
+        $subjectMajors  = $this->activeSubjectQuery()->select('major')->distinct()->pluck('major');
 
         return collect(self::DEFAULT_MAJOR_FILTERS)
             ->merge($scheduleMajors)
@@ -2033,8 +2066,8 @@ class FacultyLoading extends Component
 
     private function getAvailableYearLevels()
     {
-        $scheduleYears = Schedule::query()->select('year_level')->distinct()->pluck('year_level');
-        $subjectYears  = Subject::query()->select('year_level')->distinct()->pluck('year_level');
+        $scheduleYears = $this->activeScheduleQuery()->select('year_level')->distinct()->pluck('year_level');
+        $subjectYears  = $this->activeSubjectQuery()->select('year_level')->distinct()->pluck('year_level');
 
         $years = collect([1, 2, 3, 4])
             ->merge($scheduleYears)
@@ -2052,8 +2085,8 @@ class FacultyLoading extends Component
 
     private function getAvailableSections()
     {
-        $scheduleSections = Schedule::query()->select('section')->distinct()->pluck('section');
-        $subjectSections  = Subject::query()->select('section')->distinct()->pluck('section');
+        $scheduleSections = $this->activeScheduleQuery()->select('section')->distinct()->pluck('section');
+        $subjectSections  = $this->activeSubjectQuery()->select('section')->distinct()->pluck('section');
 
         return $scheduleSections
             ->merge($subjectSections)
@@ -2114,7 +2147,7 @@ class FacultyLoading extends Component
     {
         $user    = Auth::user();
         $faculties = $this->getFacultyQuery()
-            ->with('schedules.subject')
+            ->with(['schedules' => fn ($query) => $query->activeTerm()->with('subject')])
             ->orderBy('full_name', 'asc')
             ->get()
             ->each(function (Faculty $faculty) {

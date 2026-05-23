@@ -130,6 +130,16 @@ class MasterGrid extends Component
         $this->semesterName = Setting::getValue('semester_name', 'First Semester 2026-2027');
     }
 
+    private function activeScheduleQuery()
+    {
+        return Schedule::activeTerm($this->semester, $this->schoolYear);
+    }
+
+    private function activeSubjectQuery()
+    {
+        return Subject::activeTerm($this->semester, $this->schoolYear);
+    }
+
     public function maxMeetingDays(): int
     {
         return max(1, count($this->days));
@@ -210,7 +220,7 @@ class MasterGrid extends Component
 
     public function canDeleteSchedule($scheduleId): bool
     {
-        return $this->canAutoGenerateSchedules() && Schedule::whereKey($scheduleId)->exists();
+        return $this->canAutoGenerateSchedules() && $this->activeScheduleQuery()->whereKey($scheduleId)->exists();
     }
 
     public function getDepartmentColor($department): string
@@ -254,7 +264,7 @@ class MasterGrid extends Component
 
     public function getRemainingHoursDecimal($subjectId): float
     {
-        $subject = Subject::find($subjectId);
+        $subject = $this->activeSubjectQuery()->find($subjectId);
         if (!$subject) return 0;
 
         $minutesPerMeeting = $this->calculateMinutesPerMeeting($subject);
@@ -293,7 +303,9 @@ class MasterGrid extends Component
 
     public function getScheduledCount($subjectId): int
     {
-        return Schedule::where('subject_id', $subjectId)->count();
+        return $this->activeScheduleQuery()
+            ->where('subject_id', $subjectId)
+            ->count();
     }
 
     public function getRemainingHours($subjectId): float
@@ -512,7 +524,7 @@ class MasterGrid extends Component
 
     public function findCompatibleRooms(int $subjectId): array
     {
-        $subject = Subject::find($subjectId);
+        $subject = $this->activeSubjectQuery()->find($subjectId);
 
         if (!$subject) {
             return [];
@@ -569,14 +581,14 @@ class MasterGrid extends Component
 
     public function findAvailableTimeSlot(int $subjectId): ?array
     {
-        $subject = Subject::find($subjectId);
+        $subject = $this->activeSubjectQuery()->find($subjectId);
 
         if (!$subject) {
             return null;
         }
 
         $rooms = Room::query()->available()->get();
-        $schedules = Schedule::query()
+        $schedules = $this->activeScheduleQuery()
             ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
             ->with('subject:id,subject_code,department,major,year_level,section')
             ->get();
@@ -586,7 +598,7 @@ class MasterGrid extends Component
 
     public function hasConflict(int $roomId, string $day, string $startTime, string $endTime, ?int $subjectId = null): bool
     {
-        $schedules = Schedule::query()
+        $schedules = $this->activeScheduleQuery()
             ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
             ->with('subject:id,subject_code,department,major,year_level,section')
             ->get();
@@ -595,7 +607,7 @@ class MasterGrid extends Component
             return true;
         }
 
-        $subject = $subjectId ? Subject::find($subjectId) : null;
+        $subject = $subjectId ? $this->activeSubjectQuery()->find($subjectId) : null;
 
         return $subject
             ? app(AutoGenerateScheduler::class)->hasSectionConflict($schedules, $subject, $day, $startTime, $endTime)
@@ -1060,7 +1072,7 @@ class MasterGrid extends Component
             return;
         }
 
-        $subject = Subject::query()
+        $subject = $this->activeSubjectQuery()
             ->with('faculty:id,full_name')
             ->find($first['subject_id'] ?? null);
 
@@ -1186,7 +1198,7 @@ class MasterGrid extends Component
         if (($result['scheduled'] ?? 0) <= 0) {
             if (!empty($result['conflict']) && is_array($result['conflict'])) {
                 $conflictData = $result['conflict'];
-                $subject = Subject::find((int) ($inputs['subject_id'] ?? 0));
+                $subject = $this->activeSubjectQuery()->find((int) ($inputs['subject_id'] ?? 0));
                 $room = Room::find((int) ($inputs['room_id'] ?? 0));
                 $conflictDay = $conflictData['details']['requested_day'] ?? ($inputs['days'][0] ?? $this->days[0] ?? 'Monday');
 
@@ -1518,6 +1530,8 @@ class MasterGrid extends Component
             throw new \InvalidArgumentException("{$day} is not enabled for scheduling.");
         }
 
+        $period = Setting::getAcademicPeriod();
+
         return Schedule::create([
             'subject_id' => $subject->id,
             'room_id' => $room->id,
@@ -1533,19 +1547,23 @@ class MasterGrid extends Component
             'meetings_per_week' => $subject->meetings_per_week,
             'pairing_key' => "manual-{$subject->id}-" . now()->format('YmdHisv'),
             'status' => Schedule::STATUS_PARTIAL,
+            'edp_code' => $subject->edp_code,
+            'semester' => $period['semester'],
+            'academic_year' => $period['school_year'],
+            'is_archived' => false,
         ]);
     }   
 
     public function generateLinkedMeetingPattern(int $subjectId): ?array
     {
-        $subject = Subject::find($subjectId);
+        $subject = $this->activeSubjectQuery()->find($subjectId);
 
         if (!$subject) {
             return null;
         }
 
         $rooms = Room::query()->available()->get();
-        $schedules = Schedule::query()
+        $schedules = $this->activeScheduleQuery()
             ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
             ->with('subject:id,subject_code,department,major,year_level,section')
             ->get();
@@ -1663,7 +1681,8 @@ class MasterGrid extends Component
             return 0;
         }
 
-        $scheduledSubjects = Schedule::where('room_id', $room->id)
+        $scheduledSubjects = $this->activeScheduleQuery()
+            ->where('room_id', $room->id)
             ->whereIn('day', $this->days)
             ->with('subject')
             ->get();
@@ -1766,7 +1785,7 @@ class MasterGrid extends Component
             return;
         }
 
-        $subject = Subject::find($subjectId);
+        $subject = $this->activeSubjectQuery()->find($subjectId);
 
         if (!$subject) {
             $this->dispatch('toast', [
@@ -1921,7 +1940,7 @@ class MasterGrid extends Component
         }
 
         try {
-            $schedule = Schedule::find($scheduleId);
+            $schedule = $this->activeScheduleQuery()->find($scheduleId);
             if ($schedule) {
                 $subject = $schedule->subject;
                 $schedule->delete();
@@ -1954,7 +1973,9 @@ class MasterGrid extends Component
             return;
         }
 
-        $schedule = Schedule::with('subject:id,subject_code')->find($scheduleId);
+        $schedule = $this->activeScheduleQuery()
+            ->with('subject:id,subject_code')
+            ->find($scheduleId);
 
         if (!$schedule) {
             $this->dispatch('toast', [
@@ -1974,7 +1995,7 @@ class MasterGrid extends Component
 
     public function getFilteredSubjects()
     {
-        $query = Subject::query()
+        $query = $this->activeSubjectQuery()
             ->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'meetings_per_week', 'units', 'department', 'section', 'type', 'major', 'year_level', 'faculty_id');
 
         // Access control for non-admin users
@@ -2080,7 +2101,8 @@ class MasterGrid extends Component
             return [];
         }
 
-        $schedules = Schedule::where('room_id', $this->selectedRoomId)
+        $schedules = $this->activeScheduleQuery()
+            ->where('room_id', $this->selectedRoomId)
             ->where('day', $day)
             ->with('subject')
             ->get()
@@ -2116,7 +2138,8 @@ class MasterGrid extends Component
             return [];
         }
 
-        return Schedule::where('room_id', $this->selectedRoomId)
+        return $this->activeScheduleQuery()
+            ->where('room_id', $this->selectedRoomId)
             ->where('day', $day)
             ->with('subject')
             ->whereRaw('start_time < ? AND end_time > ?', [$slotEnd, $slotStart])
@@ -2157,7 +2180,8 @@ class MasterGrid extends Component
             ->sortBy('room_name');
 
         $schedules = $this->selectedRoomId
-            ? Schedule::where('room_id', $this->selectedRoomId)
+            ? $this->activeScheduleQuery()
+                ->where('room_id', $this->selectedRoomId)
                 ->whereIn('day', $this->days)
                 ->with(['subject' => function ($query) {
                     $query->select(

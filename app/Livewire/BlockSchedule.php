@@ -54,7 +54,7 @@ class BlockSchedule extends Component
         // =====================================================
         // Get all schedules for selected section
         // =====================================================
-        $allSchedules = Schedule::query()
+        $allSchedules = Schedule::activeTerm($this->semester, $this->schoolYear)
             ->whereIn('status', [
                 Schedule::STATUS_PARTIAL,
                 Schedule::STATUS_FACULTY_ASSIGNED,

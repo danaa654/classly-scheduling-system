@@ -10,6 +10,9 @@ use Illuminate\Support\Facades\Notification;
 use App\Notifications\SubjectUpdatedNotification;
 use App\Models\Subject;
 use App\Models\Activity;
+use App\Models\Setting;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 class ManageSubjects extends Component
 {
@@ -24,6 +27,8 @@ class ManageSubjects extends Component
     public $selectedDept = '';
     public $selectedYear = '';
     public $selectedMajor = '';
+    public string $catalogMode = 'active';
+    public string $selectedArchiveBatch = '';
 
     // Form Fields
     public $subjectId, $edp_code, $subject_code, $section, $description, $department, $units;
@@ -55,6 +60,46 @@ class ManageSubjects extends Component
     public function updatedSelectedYear() { $this->resetPage(); }
     public function updatedSelectedMajor() { $this->resetPage(); }
     public function updatedSelectedSection() { $this->resetPage(); }
+    public function updatedCatalogMode() { $this->selectedArchiveBatch = ''; $this->selectedSubjects = []; $this->selectAll = false; $this->resetPage(); }
+    public function updatedSelectedArchiveBatch() { $this->selectedSubjects = []; $this->selectAll = false; $this->resetPage(); }
+
+    private function activePeriod(): array
+    {
+        return Setting::getAcademicPeriod();
+    }
+
+    private function activeSubjectsQuery()
+    {
+        $period = $this->activePeriod();
+
+        return Subject::activeTerm($period['semester'], $period['school_year']);
+    }
+
+    private function archiveOptions()
+    {
+        if (Schema::hasTable('schedule_archives')) {
+            return DB::table('schedule_archives')
+                ->whereNotNull('archive_batch_id')
+                ->select('archive_batch_id', 'semester', 'semester_name', 'school_year', 'total_subjects', 'archived_at')
+                ->latest('archived_at')
+                ->get();
+        }
+
+        return Subject::archived()
+            ->whereNotNull('archive_batch')
+            ->select('archive_batch', 'semester', 'academic_year')
+            ->distinct()
+            ->orderByDesc('archive_batch')
+            ->get()
+            ->map(fn ($archive) => (object) [
+                'archive_batch_id' => $archive->archive_batch,
+                'semester' => $archive->semester,
+                'semester_name' => Setting::semesterDisplayName($archive->semester, $archive->academic_year),
+                'school_year' => $archive->academic_year,
+                'total_subjects' => null,
+                'archived_at' => null,
+            ]);
+    }
 
     /**
      * Get available majors based on selected department
@@ -87,39 +132,39 @@ class ManageSubjects extends Component
     }
 
     /**
-     * Generate EDP Code: MAJOR-YEAR[LEVEL]###
-     * Example: IT-261001 (IT = major, 26 = 2026, 1 = 1st year, 001 = sequence)
+     * Generate EDP codes from the active academic year.
+     *
+     * Format: MAJOR-[YY][LEVEL][###], e.g. IT-271001 for A.Y. 2027-2028.
      */
-    private function generateEdpCode()
+    private function generateEdpCode(): void
     {
         if (empty($this->major) || empty($this->year_level) || empty($this->department)) {
             $this->edp_code = '';
             return;
         }
 
-        $major = strtoupper($this->major);
-        $currentYear = date('y'); // e.g., "26" for 2026
-        $yearLevel = (int)$this->year_level;
+        $major      = strtoupper($this->major);
+        $yearPrefix = Setting::academicYearPrefix($this->activePeriod()['school_year']);
+        $level      = (int) $this->year_level;
+        $codePrefix = "{$yearPrefix}{$level}";
+        $pattern    = "{$major}-{$codePrefix}%";
 
-        // Find the highest sequence number for this major+year+level combination
-        $lastSubject = Subject::where('major', $major)
-            ->where('year_level', $yearLevel)
-            ->orderBy('edp_code', 'desc')
-            ->first();
+        $highest = Subject::where('edp_code', 'like', $pattern)
+            ->orderByDesc('edp_code')
+            ->value('edp_code');
 
         $nextSequence = 1;
-        if ($lastSubject) {
-            // Extract sequence from edp_code (last 3 digits)
-            $parts = explode('-', $lastSubject->edp_code);
+
+        if ($highest) {
+            $parts = explode('-', $highest);
             if (count($parts) >= 2) {
-                $lastCode = $parts[1]; // e.g., "261001"
-                $lastSequence = (int)substr($lastCode, -3); // Get last 3 digits
-                $nextSequence = $lastSequence + 1;
+                // "IT-271004" → parts[1] = "271004" → strip "271" prefix → "004" → 4
+                $sequenceStr  = substr($parts[1], strlen($codePrefix));
+                $nextSequence = ((int) $sequenceStr) + 1;
             }
         }
 
-        // Format: MAJOR-YEAR[LEVEL]### (e.g., IT-261001)
-        $this->edp_code = "{$major}-{$currentYear}{$yearLevel}" . str_pad($nextSequence, 3, '0', STR_PAD_LEFT);
+        $this->edp_code = "{$major}-{$codePrefix}" . str_pad($nextSequence, 3, '0', STR_PAD_LEFT);
     }
 
     /**
@@ -137,7 +182,7 @@ class ManageSubjects extends Component
         $yearLevel = (int)$this->year_level;
         $sectionUpper = strtoupper($this->section);
 
-        $query = Subject::where('subject_code', $subjectCodeUpper)
+        $query = $this->activeSubjectsQuery()->where('subject_code', $subjectCodeUpper)
             ->where('major', $majorUpper)
             ->where('year_level', $yearLevel)
             ->where('section', $sectionUpper); // ✅ CRITICAL: Check SECTION too!
@@ -298,6 +343,8 @@ class ManageSubjects extends Component
             $normalizedType = str_contains(strtolower($rawType), 'minor') ? 'Minor' : 'Major';
             $specialization = strtoupper($value('specialization', $rowMajor));
 
+            $period = $this->activePeriod();
+
             Subject::create([
                 'edp_code'          => $edpCode,
                 'subject_code'      => strtoupper($value('subject_code')),
@@ -312,6 +359,9 @@ class ManageSubjects extends Component
                 'type'              => $normalizedType,
                 'subject_type'      => $rawType,
                 'specialization'    => $specialization,
+                'semester'          => $period['semester'],
+                'academic_year'     => $period['school_year'],
+                'is_archived'       => false,
             ]);
             $count++;
         }
@@ -377,6 +427,11 @@ class ManageSubjects extends Component
      */
     public function openModal()
     {
+        if ($this->catalogMode !== 'active') {
+            $this->catalogMode = 'active';
+            $this->selectedArchiveBatch = '';
+        }
+
         $this->resetValidation();
         $this->resetExcept(['selectedDept', 'search', 'selectedYear', 'selectedMajor', 'selectedSection']);
         $this->isEditMode = false;
@@ -410,8 +465,17 @@ class ManageSubjects extends Component
      */
     public function editSubject($id)
     {
+        if ($this->catalogMode !== 'active') {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Archive is read only',
+                'detail' => 'Switch back to the current semester before editing subjects.'
+            ]);
+            return;
+        }
+
         $this->resetValidation();
-        $subject = Subject::findOrFail($id);
+        $subject = $this->activeSubjectsQuery()->findOrFail($id);
 
         // Validate access
         if (!$this->validateDepartmentAccess($subject->department)) {
@@ -454,6 +518,11 @@ class ManageSubjects extends Component
      */
     public function saveSubject()
     {
+        if ($this->catalogMode !== 'active') {
+            $this->addError('edp_code', 'Archived subjects are read only.');
+            return;
+        }
+
         $user = auth()->user();
         $userRole = strtolower($user->role ?? '');
         $powerRoles = ['admin', 'registrar', 'associate_dean'];
@@ -496,7 +565,8 @@ class ManageSubjects extends Component
 
         // Check for duplicate EDP+Section if creating new
         if (!$this->isEditMode) {
-            $duplicate = Subject::where('edp_code', $edpUpper)
+            $duplicate = $this->activeSubjectsQuery()
+                ->where('edp_code', $edpUpper)
                 ->where('section', $sectionUpper)
                 ->first();
 
@@ -519,6 +589,7 @@ class ManageSubjects extends Component
         $edpUpper = strtoupper($this->edp_code);
         $subjectCodeUpper = strtoupper($this->subject_code);
         $majorUpper = strtoupper($this->major);
+        $period = $this->activePeriod();
 
         // Normalize type
         $normalizedType = in_array($this->type, ['Major', 'Minor']) 
@@ -541,6 +612,11 @@ class ManageSubjects extends Component
                 'duration_hours'    => (float)$this->duration_hours,
                 'meetings_per_week' => (int)$this->meetings_per_week,
                 'department'        => $deptUpper,
+                'semester'          => $period['semester'],
+                'academic_year'     => $period['school_year'],
+                'is_archived'       => false,
+                'archived_at'       => null,
+                'archive_batch'     => null,
             ]
         );
 
@@ -612,6 +688,15 @@ class ManageSubjects extends Component
      */
     public function bulkDuplicate()
     {
+        if ($this->catalogMode !== 'active') {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Archive is read only',
+                'detail' => 'Switch back to the current semester before duplicating subjects.'
+            ]);
+            return;
+        }
+
         $count = count($this->selectedSubjects);
         if ($count === 0) return;
 
@@ -619,9 +704,10 @@ class ManageSubjects extends Component
         $duplicatedCount = 0;
         $skippedCount = 0;
         $skippedReasons = [];
+        $period = $this->activePeriod();
 
         foreach ($this->selectedSubjects as $id) {
-            $original = Subject::find($id);
+            $original = $this->activeSubjectsQuery()->find($id);
             if (!$original) continue;
 
             // Validate access
@@ -682,7 +768,8 @@ class ManageSubjects extends Component
             }
 
             // ✅ CRITICAL CHECK: Does this SUBJECT CODE already exist in the NEXT SECTION?
-            $subjectExistsInNextSection = Subject::where('subject_code', strtoupper($original->subject_code))
+            $subjectExistsInNextSection = $this->activeSubjectsQuery()
+                ->where('subject_code', strtoupper($original->subject_code))
                 ->where('section', $nextSection)
                 ->where('major', $original->major)
                 ->where('year_level', $original->year_level)
@@ -696,7 +783,8 @@ class ManageSubjects extends Component
             }
 
             // Also check if this EDP+SECTION combination exists
-            $sectionExists = Subject::where('edp_code', $newEdp)
+            $sectionExists = $this->activeSubjectsQuery()
+                ->where('edp_code', $newEdp)
                 ->where('section', $nextSection)
                 ->exists();
             
@@ -721,6 +809,9 @@ class ManageSubjects extends Component
                     'specialization'    => $original->specialization,
                     'duration_hours'    => $original->duration_hours,
                     'meetings_per_week' => $original->meetings_per_week ?? 1,
+                    'semester'          => $period['semester'],
+                    'academic_year'     => $period['school_year'],
+                    'is_archived'       => false,
                 ]);
 
                 $duplicatedCount++;
@@ -765,13 +856,19 @@ class ManageSubjects extends Component
 
     public function updatedSelectAll($value)
     {
+        if ($this->catalogMode !== 'active') {
+            $this->selectAll = false;
+            $this->selectedSubjects = [];
+            return;
+        }
+
         if ($value) {
             $user = auth()->user();
             $userRole = strtolower($user->role ?? '');
             $powerRoles = ['admin', 'registrar', 'associate_dean'];
             $isPowerUser = in_array($userRole, $powerRoles);
 
-            $query = Subject::query();
+            $query = $this->activeSubjectsQuery();
 
             // 1. Department filter based on role
             if (!$isPowerUser) {
@@ -815,11 +912,20 @@ class ManageSubjects extends Component
 
     public function deleteSelected()
     {
+        if ($this->catalogMode !== 'active') {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Archive is read only',
+                'detail' => 'Switch back to the current semester before editing subjects.'
+            ]);
+            return;
+        }
+
         $count = count($this->selectedSubjects);
         $user = auth()->user();
         
         if ($count > 0) {
-            $sampleSubject = Subject::whereIn('id', $this->selectedSubjects)->first();
+            $sampleSubject = $this->activeSubjectsQuery()->whereIn('id', $this->selectedSubjects)->first();
             $targetDept = $sampleSubject ? $sampleSubject->department : ($user->department ?? 'General');
 
             // Validate access
@@ -832,7 +938,7 @@ class ManageSubjects extends Component
                 return;
             }
 
-            Subject::whereIn('id', $this->selectedSubjects)->delete();
+            $this->activeSubjectsQuery()->whereIn('id', $this->selectedSubjects)->delete();
 
             Activity::create([
                 'user_id'     => $user->id,
@@ -880,8 +986,17 @@ class ManageSubjects extends Component
 
     public function deleteSubject($id)
     {
+        if ($this->catalogMode !== 'active') {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'Archive is read only',
+                'detail' => 'Archived subjects cannot be edited or deleted from this view.'
+            ]);
+            return;
+        }
+
         $user = auth()->user();
-        $subject = Subject::findOrFail($id);
+        $subject = $this->activeSubjectsQuery()->findOrFail($id);
 
         // Validate access
         if (!$this->validateDepartmentAccess($subject->department)) {
@@ -951,7 +1066,7 @@ class ManageSubjects extends Component
     }
 
     /**
-     * FIXED RENDER METHOD
+     * FIXED RENDER METHOD — scoped to active (non-archived) subjects only
      */
     public function render()
     {
@@ -960,7 +1075,17 @@ class ManageSubjects extends Component
         $powerRoles = ['admin', 'registrar', 'associate_dean'];
         $isPowerUser = in_array($userRole, $powerRoles);
 
-        $query = Subject::query();
+        $period = $this->activePeriod();
+        $archiveOptions = $this->archiveOptions();
+        $isArchiveMode = $this->catalogMode === 'archive';
+
+        $query = $isArchiveMode
+            ? Subject::archived()->where('archive_batch', $this->selectedArchiveBatch)
+            : Subject::activeTerm($period['semester'], $period['school_year']);
+
+        if ($isArchiveMode && $this->selectedArchiveBatch === '') {
+            $query->whereRaw('1 = 0');
+        }
 
         // 1. DEPARTMENT FILTER - ROLE-BASED SECURITY
         if (!$isPowerUser) {
@@ -995,8 +1120,14 @@ class ManageSubjects extends Component
 
         $subjects = $query->orderBy('edp_code', 'asc')->paginate(10);
 
-        // DYNAMIC SECTIONS DROPDOWN
-        $sectionsQuery = Subject::query();
+        // DYNAMIC SECTIONS DROPDOWN — scoped by department/role as usual.
+        $sectionsQuery = $isArchiveMode
+            ? Subject::archived()->where('archive_batch', $this->selectedArchiveBatch)
+            : Subject::activeTerm($period['semester'], $period['school_year']);
+
+        if ($isArchiveMode && $this->selectedArchiveBatch === '') {
+            $sectionsQuery->whereRaw('1 = 0');
+        }
 
         if (!$isPowerUser) {
             $sectionsQuery->where('department', $user->department);
@@ -1020,6 +1151,10 @@ class ManageSubjects extends Component
                 ->take(10)
                 ->get(),
             'isPowerUser' => $isPowerUser,
+            'activePeriod' => $period,
+            'catalogMode' => $this->catalogMode,
+            'archiveOptions' => $archiveOptions,
+            'isArchiveMode' => $isArchiveMode,
         ]); 
     }
 }

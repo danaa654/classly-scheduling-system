@@ -487,7 +487,7 @@ class ScheduleConflictService
         string $endTime,
         ?int $ignoreScheduleId = null
     ): Builder {
-        return Schedule::query()
+        return Schedule::activeTerm()
             ->where('day', $day)
             ->when($ignoreScheduleId, fn (Builder $query) => $query->whereKeyNot($ignoreScheduleId))
             ->where(function (Builder $query) use ($startTime, $endTime) {

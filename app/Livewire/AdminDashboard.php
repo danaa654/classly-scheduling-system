@@ -7,6 +7,7 @@ use App\Models\Faculty;
 use App\Models\Room;
 use App\Models\User;
 use App\Models\Schedule;
+use App\Models\Setting;
 use App\Models\Subject;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -36,16 +37,18 @@ class AdminDashboard extends Component
             'total_users'     => User::count(),
             'total_faculty'   => Faculty::count(),
             'total_rooms'     => Room::count(),
-            'total_subjects'  => Subject::count(),
-            'total_schedules' => Schedule::count(),
+            'total_subjects'  => Subject::activeTerm()->count(),
+            'total_schedules' => Schedule::activeTerm()->count(),
             'pending_faculty' => Faculty::where('status', 'pending')->count(),
-            'finalized_schedules' => Schedule::where('status', 'finalized')->count(),
-            'draft_schedules'     => Schedule::where('status', 'draft')->count(),
+            'finalized_schedules' => Schedule::activeTerm()->where('status', 'finalized')->count(),
+            'draft_schedules'     => Schedule::activeTerm()->where('status', 'draft')->count(),
         ];
     }
 
     private function loadSystemStatus(): void
     {
+        $period = Setting::getAcademicPeriod();
+
         $conflictCount = DB::table('schedules as s1')
             ->join('schedules as s2', function ($join) {
                 $join->on('s1.room_id', '=', 's2.room_id')
@@ -53,7 +56,14 @@ class AdminDashboard extends Component
                      ->where('s1.id', '<', DB::raw('s2.id'))
                      ->whereRaw('s1.start_time < s2.end_time')
                      ->whereRaw('s1.end_time > s2.start_time');
-            })->count();
+            })
+            ->where('s1.is_archived', false)
+            ->where('s2.is_archived', false)
+            ->where('s1.semester', $period['semester'])
+            ->where('s2.semester', $period['semester'])
+            ->where('s1.academic_year', $period['school_year'])
+            ->where('s2.academic_year', $period['school_year'])
+            ->count();
 
         $this->systemStatus = [
             'scheduler'        => $conflictCount === 0 ? 'healthy' : 'warning',
@@ -61,7 +71,7 @@ class AdminDashboard extends Component
             'db_tables'        => DB::select("SHOW TABLES") ? 'healthy' : 'critical',
             'rooms_available'  => Room::count() > 0 ? 'healthy' : 'warning',
             'faculty_assigned' => Faculty::where('status', 'approved')->count(),
-            'current_semester' => '1st Semester 2026–2027',
+            'current_semester' => $period['semester_name'],
             'server_time'      => Carbon::now()->format('H:i:s'),
         ];
     }
@@ -103,6 +113,8 @@ class AdminDashboard extends Component
 
     private function loadConflictAlerts(): void
     {
+        $period = Setting::getAcademicPeriod();
+
         $conflicts = DB::table('schedules as s1')
             ->join('schedules as s2', function ($join) {
                 $join->on('s1.room_id', '=', 's2.room_id')
@@ -112,6 +124,12 @@ class AdminDashboard extends Component
                      ->whereRaw('s1.end_time > s2.start_time');
             })
             ->join('rooms', 's1.room_id', '=', 'rooms.id')
+            ->where('s1.is_archived', false)
+            ->where('s2.is_archived', false)
+            ->where('s1.semester', $period['semester'])
+            ->where('s2.semester', $period['semester'])
+            ->where('s1.academic_year', $period['school_year'])
+            ->where('s2.academic_year', $period['school_year'])
             ->select('s1.id', 'rooms.room_name', 's1.day', 's1.start_time', 's1.end_time', 's2.id as conflict_id')
             ->limit(5)
             ->get()
@@ -124,7 +142,7 @@ class AdminDashboard extends Component
             ])->toArray();
 
         // Overloaded faculty (more than max_units' worth of schedules)
-        $overloaded = Faculty::withCount('schedules')
+        $overloaded = Faculty::withCount(['schedules' => fn ($query) => $query->activeTerm()])
             ->having('schedules_count', '>', 6)
             ->limit(3)
             ->get()
@@ -142,18 +160,22 @@ class AdminDashboard extends Component
     private function loadSchedulingAnalytics(): void
     {
         $today = Carbon::today();
+        $totalSchedules = Schedule::activeTerm()->count();
+        $finalizedSchedules = Schedule::activeTerm()->where('status', 'finalized')->count();
 
         $this->schedulingAnalytics = [
-            'total_scheduled'   => Schedule::count(),
-            'finalized'         => Schedule::where('status', 'finalized')->count(),
-            'draft'             => Schedule::where('status', 'draft')->count(),
-            'partial'           => Schedule::where('status', 'partial')->count(),
-            'rooms_in_use'      => Schedule::distinct('room_id')->count('room_id'),
-            'faculty_assigned'  => Schedule::whereNotNull('faculty_id')->distinct('faculty_id')->count('faculty_id'),
-            'completion_rate'   => Schedule::count() > 0
-                ? round((Schedule::where('status', 'finalized')->count() / Schedule::count()) * 100, 1)
+            'total_scheduled'   => $totalSchedules,
+            'finalized'         => $finalizedSchedules,
+            'draft'             => Schedule::activeTerm()->where('status', 'draft')->count(),
+            'partial'           => Schedule::activeTerm()->where('status', 'partial')->count(),
+            'rooms_in_use'      => Schedule::activeTerm()->distinct('room_id')->count('room_id'),
+            'faculty_assigned'  => Schedule::activeTerm()->whereNotNull('faculty_id')->distinct('faculty_id')->count('faculty_id'),
+            'completion_rate'   => $totalSchedules > 0
+                ? round(($finalizedSchedules / $totalSchedules) * 100, 1)
                 : 0,
-            'subjects_unscheduled' => Subject::whereDoesntHave('schedules')->count(),
+            'subjects_unscheduled' => Subject::activeTerm()
+                ->whereDoesntHave('schedules', fn ($query) => $query->activeTerm())
+                ->count(),
         ];
     }
 

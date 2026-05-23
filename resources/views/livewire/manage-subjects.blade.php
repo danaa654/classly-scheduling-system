@@ -4,10 +4,20 @@
         
         {{-- Header --}}
         <header class="mx-auto mt-3 h-16 w-[97%] max-w-7xl bg-white dark:bg-slate-900/60 border border-slate-300 dark:border-slate-700 flex items-center justify-between px-8 shadow-xl backdrop-blur-xl rounded-full transition-colors z-20">
-            <h2 class="text-xl font-extrabold text-slate-900 dark:text-slate-100 uppercase tracking-tight">Subject Catalog</h2>
+            <div>
+                <h2 class="text-xl font-extrabold text-slate-900 dark:text-slate-100 uppercase tracking-tight">Subject Catalog</h2>
+                <div class="mt-1 flex flex-wrap items-center gap-2">
+                    <span class="rounded-lg bg-blue-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-blue-700 dark:bg-blue-950/50 dark:text-blue-300">
+                        {{ \App\Models\Setting::semesterLabel($activePeriod['semester']) }} {{ $activePeriod['school_year'] }}
+                    </span>
+                    <span class="rounded-lg px-2 py-0.5 text-[9px] font-black uppercase tracking-widest {{ $catalogMode === 'archive' ? 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' }}">
+                        {{ $catalogMode === 'archive' ? 'Archive History' : 'Active Workspace' }}
+                    </span>
+                </div>
+            </div>
             
             <div class="flex items-center space-x-3">
-                @if(count($selectedSubjects) > 0)
+                @if($catalogMode === 'active' && count($selectedSubjects) > 0)
                     <div class="flex items-center gap-2">
                         <button 
                             type="button"
@@ -45,12 +55,14 @@
                 @endif
                 
 
+                @if($catalogMode === 'active')
                 <button @click.prevent="bulkOpen = true" class="px-5 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-400 rounded-2xl font-extrabold text-xs uppercase hover:bg-slate-200 dark:hover:bg-slate-700 transition shadow-sm">
                     📥 Bulk Import
                 </button>
                 <button wire:click="openModal" class="px-6 py-3 bg-blue-700 dark:bg-indigo-700 text-white rounded-3xl font-extrabold shadow-lg shadow-blue-600/70 text-xs uppercase hover:scale-105 active:scale-95 transition-all">
                     + Add Subject
                 </button>
+                @endif
             </div>
         </header>
         {{-- Main Scrollable Container --}}
@@ -63,6 +75,33 @@
                     $isPowerUser = in_array($userRole, $powerRoles);
                 @endphp
                 <div class="col-span-12 lg:col-span-9 space-y-4">
+                    <div class="grid gap-3 bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-md md:grid-cols-2">
+                        <div>
+                            <label class="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-500">Catalog View</label>
+                            <select
+                                wire:model.live="catalogMode"
+                                class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl p-4 font-semibold text-sm uppercase text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
+                                <option value="active">Current Semester Workspace</option>
+                                <option value="archive">Archived Semester History</option>
+                            </select>
+                        </div>
+
+                        @if($catalogMode === 'archive')
+                            <div>
+                                <label class="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-500">Archived Batch</label>
+                                <select
+                                    wire:model.live="selectedArchiveBatch"
+                                    class="w-full bg-slate-50 dark:bg-slate-800 border-none rounded-2xl p-4 font-semibold text-sm uppercase text-slate-800 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
+                                    <option value="">Select Archived Semester</option>
+                                    @foreach($archiveOptions as $archive)
+                                        <option value="{{ $archive->archive_batch_id }}">
+                                            {{ $archive->archive_batch_id }} - {{ $archive->semester_name ?: \App\Models\Setting::semesterDisplayName($archive->semester, $archive->school_year) }}
+                                        </option>
+                                    @endforeach
+                                </select>
+                            </div>
+                        @endif
+                    </div>
                     
                     {{-- Filter Bar Section --}}
 <div class="grid grid-cols-1 md:grid-cols-4 gap-4 bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-300 dark:border-slate-700 shadow-md">
@@ -157,7 +196,7 @@
                             <thead class="bg-slate-50 dark:bg-slate-800/60 text-xs font-extrabold uppercase text-slate-500 dark:text-slate-400 tracking-wide">
                                 <tr>
                                     <th class="pl-5 pr-3 py-4 w-10">
-                                        <input type="checkbox" wire:model.live="selectAll" 
+                                        <input type="checkbox" wire:model.live="selectAll" @disabled($catalogMode !== 'active')
                                             class="w-4 h-4 rounded border-slate-300 dark:border-slate-600 dark:bg-slate-900 text-blue600 focus:ring-blue-500 transition-all">
                                     </th>
                                     <th class="px-4 py-4">EDP Code</th>
@@ -173,7 +212,7 @@
                                 @forelse($subjects as $subject)
                                 <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors {{ in_array($subject->id, $selectedSubjects) ? 'bg-blue-50/40 dark:bg-indigo-900/20' : '' }} align-middle">
                                     <td class="pl-5 pr-3 py-5">
-                                        <input type="checkbox" wire:model.live="selectedSubjects" value="{{ $subject->id }}" class="w-4 h-4 rounded border-slate-300 dark:border-slate-600 dark:bg-slate-900 text-blue-600 focus:ring-blue-500 transition-all">
+                                        <input type="checkbox" wire:model.live="selectedSubjects" value="{{ $subject->id }}" @disabled($catalogMode !== 'active') class="w-4 h-4 rounded border-slate-300 dark:border-slate-600 dark:bg-slate-900 text-blue-600 focus:ring-blue-500 transition-all">
                                     </td>
                                     <td class="px-4 py-5 font-extrabold text-blue-700 dark:text-indigo-400 uppercase text-sm">{{ $subject->edp_code }}</td>
                                     <td class="px-6 py-5">
@@ -197,15 +236,21 @@
                                     </td>
                                     <td class="px-6 py-5 text-right space-x-4 whitespace-nowrap">
                                        
-                                        <button wire:click="editSubject({{ $subject->id }})" class="text-blue-700 dark:text-indigo-400 font-extrabold text-xs uppercase hover:underline">Edit</button>
-                                        <button wire:click="deleteSubject({{ $subject->id }})" wire:confirm="Are you sure?" class="text-red-500 dark:text-red-600 font-extrabold text-xs uppercase hover:text-red-700 transition-colors">Delete</button>
+                                        @if($catalogMode === 'active')
+                                            <button wire:click="editSubject({{ $subject->id }})" class="text-blue-700 dark:text-indigo-400 font-extrabold text-xs uppercase hover:underline">Edit</button>
+                                            <button wire:click="deleteSubject({{ $subject->id }})" wire:confirm="Are you sure?" class="text-red-500 dark:text-red-600 font-extrabold text-xs uppercase hover:text-red-700 transition-colors">Delete</button>
+                                        @else
+                                            <span class="text-slate-400 font-extrabold text-xs uppercase">Archived</span>
+                                        @endif
                                         
                                     </td>
                                 </tr>
                                 @empty
                                 <tr>
                                     <td colspan="8" class="px-6 py-12 text-center text-slate-500 dark:text-slate-400">
-                                        <p class="font-semibold uppercase text-sm">No subjects found</p>
+                                        <p class="font-semibold uppercase text-sm">
+                                            {{ $catalogMode === 'archive' ? 'Select an archive batch or no archived subjects found' : 'No active subjects for the current semester' }}
+                                        </p>
                                     </td>
                                 </tr>
                                 @endforelse

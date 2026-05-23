@@ -2,16 +2,19 @@
 
 namespace App\Models;
 
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Casts\Attribute;
-use Carbon\Carbon;
 
 class Schedule extends Model
 {
     public const STATUS_DRAFT = 'draft';
+
     public const STATUS_PARTIAL = 'partial';
+
     public const STATUS_FACULTY_ASSIGNED = 'faculty_assigned';
+
     public const STATUS_FINALIZED = 'finalized';
 
     public const SECTION_TIME_PREFERENCES = [
@@ -36,6 +39,12 @@ class Schedule extends Model
         'meetings_per_week',
         'pairing_key',
         'status',
+        'edp_code',
+        'semester',
+        'academic_year',
+        'is_archived',
+        'archived_at',
+        'archive_batch',
     ];
 
     protected $casts = [
@@ -43,7 +52,32 @@ class Schedule extends Model
         'end_time' => 'datetime:H:i:s',
         'duration_hours' => 'float',
         'meetings_per_week' => 'integer',
+        'is_archived' => 'boolean',
+        'archived_at' => 'datetime',
     ];
+
+    protected static function booted(): void
+    {
+        static::creating(function (Schedule $schedule) {
+            $period = Setting::getAcademicPeriod();
+
+            if (blank($schedule->semester)) {
+                $schedule->semester = $period['semester'];
+            }
+
+            if (blank($schedule->academic_year)) {
+                $schedule->academic_year = $period['school_year'];
+            }
+
+            if ($schedule->is_archived === null) {
+                $schedule->is_archived = false;
+            }
+
+            if (! $schedule->edp_code && $schedule->subject_id) {
+                $schedule->edp_code = Subject::whereKey($schedule->subject_id)->value('edp_code');
+            }
+        });
+    }
 
     // ============================================================
     // RELATIONSHIPS
@@ -147,7 +181,7 @@ class Schedule extends Model
     public function scopeWithinTimeRange($query, $startTime, $endTime)
     {
         return $query->where('start_time', '<', $endTime)
-                     ->where('end_time', '>', $startTime);
+            ->where('end_time', '>', $startTime);
     }
 
     /**
@@ -176,6 +210,41 @@ class Schedule extends Model
     public function scopeAssignable($query)
     {
         return $query->whereIn('status', [self::STATUS_PARTIAL, self::STATUS_FACULTY_ASSIGNED]);
+    }
+
+    /** Only rows visible on the active-term dashboards */
+    public function scopeActive($query)
+    {
+        return $query->where('is_archived', false);
+    }
+
+    /** Only rows belonging to the given semester + year */
+    public function scopeForTerm($query, string $semester, string $academicYear)
+    {
+        return $query->where('semester', $semester)
+            ->where('academic_year', $academicYear);
+    }
+
+    public function scopeActiveTerm($query, ?string $semester = null, ?string $academicYear = null)
+    {
+        $period = Setting::getAcademicPeriod();
+        $semester ??= $period['semester'];
+        $academicYear ??= $period['school_year'];
+
+        return $query->forTerm($semester, $academicYear)
+            ->where('is_archived', false);
+    }
+
+    public function scopeCurrentSemester($query)
+    {
+        $period = Setting::getAcademicPeriod();
+
+        return $query->activeTerm($period['semester'], $period['school_year']);
+    }
+
+    public function scopeArchived($query)
+    {
+        return $query->where('is_archived', true);
     }
 
     public static function sectionTimePreference(?string $section): ?string
@@ -271,6 +340,7 @@ class Schedule extends Model
         try {
             $start = Carbon::parse($this->start_time);
             $end = Carbon::parse($this->end_time);
+
             return round($start->diffInMinutes($end) / 60, 2);
         } catch (\Exception $e) {
             return 0;
@@ -285,7 +355,8 @@ class Schedule extends Model
         try {
             $start = Carbon::parse($this->start_time);
             $end = Carbon::parse($this->end_time);
-            return $start->format('h:i A') . ' - ' . $end->format('h:i A');
+
+            return $start->format('h:i A').' - '.$end->format('h:i A');
         } catch (\Exception $e) {
             return 'Invalid time';
         }
@@ -308,7 +379,7 @@ class Schedule extends Model
      */
     public function isCompatible(): bool
     {
-        if (!$this->subject || !$this->room) {
+        if (! $this->subject || ! $this->room) {
             return false;
         }
 
@@ -327,7 +398,7 @@ class Schedule extends Model
         $scheduleEnd = Carbon::parse($this->end_time);
 
         // Check if schedule overlaps with lunch break
-        return !($scheduleStart < $lunchEnd && $scheduleEnd > $lunchStart);
+        return ! ($scheduleStart < $lunchEnd && $scheduleEnd > $lunchStart);
     }
 
     /**
@@ -368,19 +439,19 @@ class Schedule extends Model
     {
         $errors = [];
 
-        if (!$this->isWithinOperationalHours()) {
+        if (! $this->isWithinOperationalHours()) {
             $errors[] = 'Schedule is outside operational hours.';
         }
 
-        if (!$this->isOnActiveScheduleDay()) {
+        if (! $this->isOnActiveScheduleDay()) {
             $errors[] = 'Schedule day is disabled in global settings.';
         }
 
-        if (!$this->respectsLunchBreak()) {
+        if (! $this->respectsLunchBreak()) {
             $errors[] = 'Schedule overlaps with lunch break (12:00-13:00).';
         }
 
-        if (!$this->isCompatible()) {
+        if (! $this->isCompatible()) {
             $errors[] = 'Subject type is not compatible with room type.';
         }
 
@@ -404,20 +475,22 @@ class Schedule extends Model
 
         return true;
     }
+
     public static function roomIsAvailable(int $roomId, string $day, string $startTime, string $endTime, ?int $excludeScheduleId = null): bool
     {
         $query = static::where('room_id', $roomId)
-                      ->where('day', $day)
-                      ->where(function ($q) use ($startTime, $endTime) {
-                          $q->where('start_time', '<', $endTime)
-                            ->where('end_time', '>', $startTime);
-                      });
+            ->activeTerm()
+            ->where('day', $day)
+            ->where(function ($q) use ($startTime, $endTime) {
+                $q->where('start_time', '<', $endTime)
+                    ->where('end_time', '>', $startTime);
+            });
 
         if ($excludeScheduleId) {
             $query->where('id', '!=', $excludeScheduleId);
         }
 
-        return !$query->exists();
+        return ! $query->exists();
     }
 
     /**
@@ -426,12 +499,13 @@ class Schedule extends Model
     public function getConflicts()
     {
         return static::where('room_id', $this->room_id)
-                    ->where('day', $this->day)
-                    ->where('id', '!=', $this->id)
-                    ->where(function ($q) {
-                        $q->where('start_time', '<', $this->end_time)
-                          ->where('end_time', '>', $this->start_time);
-                    })
-                    ->get();
+            ->activeTerm()
+            ->where('day', $this->day)
+            ->where('id', '!=', $this->id)
+            ->where(function ($q) {
+                $q->where('start_time', '<', $this->end_time)
+                    ->where('end_time', '>', $this->start_time);
+            })
+            ->get();
     }
 }

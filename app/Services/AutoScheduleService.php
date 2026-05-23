@@ -75,6 +75,20 @@ class AutoScheduleService
         return max(1, count($this->activeDays()));
     }
 
+    private function activeScheduleQuery()
+    {
+        $period = Setting::getAcademicPeriod();
+
+        return Schedule::activeTerm($period['semester'], $period['school_year']);
+    }
+
+    private function activeSubjectQuery()
+    {
+        $period = Setting::getAcademicPeriod();
+
+        return Subject::activeTerm($period['semester'], $period['school_year']);
+    }
+
     public function generatePartialSchedules(array $filters = [], ?int $userId = null, bool $persist = false): array
     {
         set_time_limit(300);
@@ -96,21 +110,24 @@ class AutoScheduleService
             return $this->emptyResult('no valid room registry rows available');
         }
 
-        $existingSchedules = Schedule::query()
+        $roomIds = $rooms->pluck('id');
+
+        $existingSchedules = $this->activeScheduleQuery()
             ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
             ->with('subject:id,subject_code,department,major,year_level,section,faculty_id')
-            ->where(function ($query) use ($filters) {
-                $query->where('department', strtoupper($filters['department']))
-                    ->where('major', strtoupper($filters['major']))
-                    ->where('year_level', (int) $filters['year_level'])
-                    ->where('section', strtoupper($filters['section']));
+            ->where(function ($query) use ($filters, $roomIds) {
+                $query->where(function ($query) use ($filters) {
+                    $query->where('department', strtoupper($filters['department']))
+                        ->where('major', strtoupper($filters['major']))
+                        ->where('year_level', (int) $filters['year_level'])
+                        ->where('section', strtoupper($filters['section']));
+                })->orWhereIn('room_id', $roomIds);
             })
-            ->orWhereIn('room_id', $rooms->pluck('id'))
             ->get();
 
         $subjects = $this->subjectQuery($filters)
             ->with('faculty:id,full_name,availability')
-            ->withCount('schedules')
+            ->withCount(['schedules as active_schedules_count' => fn ($query) => $query->activeTerm()])
             ->get()
             ->sortByDesc(fn (Subject $subject) => $this->subjectDifficultyScore($subject))
             ->groupBy(fn (Subject $subject) => $this->groupKey($subject));
@@ -133,7 +150,7 @@ class AutoScheduleService
 
         foreach ($subjects as $groupSubjects) {
             foreach ($groupSubjects as $subject) {
-                $remainingMeetings = max(0, (int) $subject->meetings_per_week - (int) $subject->schedules_count);
+                $remainingMeetings = max(0, (int) $subject->meetings_per_week - (int) $subject->active_schedules_count);
 
                 if ($remainingMeetings <= 0) {
                     continue;
@@ -220,7 +237,7 @@ class AutoScheduleService
         $subjectIds = collect($items)->pluck('subject_id')->filter()->unique()->values();
         $roomIds = collect($items)->pluck('room_id')->filter()->unique()->values();
 
-        $subjects = Subject::query()
+        $subjects = $this->activeSubjectQuery()
             ->with('faculty:id,full_name,availability')
             ->whereIn('id', $subjectIds)
             ->get()
@@ -231,11 +248,13 @@ class AutoScheduleService
             ->get()
             ->keyBy('id');
 
-        $existingSchedules = Schedule::query()
+        $existingSchedules = $this->activeScheduleQuery()
             ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
             ->with('subject:id,subject_code,department,major,year_level,section,faculty_id')
-            ->whereIn('room_id', $roomIds)
-            ->orWhereIn('subject_id', $subjectIds)
+            ->where(function ($query) use ($roomIds, $subjectIds) {
+                $query->whereIn('room_id', $roomIds)
+                    ->orWhereIn('subject_id', $subjectIds);
+            })
             ->get();
 
         $scheduleSettings = Setting::getScheduleSettings();
@@ -545,7 +564,7 @@ class AutoScheduleService
 
     private function subjectQuery(array $filters)
     {
-        return Subject::query()
+        return $this->activeSubjectQuery()
             ->select('id', 'edp_code', 'subject_code', 'description', 'section', 'major', 'year_level', 'department', 'units', 'duration_hours', 'type', 'subject_type', 'specialization', 'meetings_per_week', 'faculty_id')
             ->where('meetings_per_week', '>', 0)
             ->when(!empty($filters['department']), fn ($query) => $query->where('department', strtoupper($filters['department'])))
@@ -565,7 +584,7 @@ class AutoScheduleService
     {
         set_time_limit(300);
 
-        $subject = Subject::query()
+        $subject = $this->activeSubjectQuery()
             ->select('id', 'edp_code', 'subject_code', 'description', 'section', 'major', 'year_level', 'department', 'units', 'duration_hours', 'type', 'subject_type', 'specialization', 'meetings_per_week', 'faculty_id')
             ->with('faculty:id,full_name,availability')
             ->find($subjectId);
@@ -597,16 +616,19 @@ class AutoScheduleService
             ->filter(fn (Room $room) => $this->roomRegistryRowIsValid($room))
             ->values();
 
-        $existingSchedules = Schedule::query()
+        $roomIds = $rooms->pluck('id');
+
+        $existingSchedules = $this->activeScheduleQuery()
             ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
             ->with(['subject:id,subject_code,department,major,year_level,section,faculty_id', 'room:id,room_name'])
-            ->where(function ($query) use ($subject) {
-                $query->where('department', $subject->department)
-                    ->where('major', $subject->major)
-                    ->where('year_level', (int) $subject->year_level)
-                    ->where('section', $subject->section);
+            ->where(function ($query) use ($subject, $roomIds) {
+                $query->where(function ($query) use ($subject) {
+                    $query->where('department', $subject->department)
+                        ->where('major', $subject->major)
+                        ->where('year_level', (int) $subject->year_level)
+                        ->where('section', $subject->section);
+                })->orWhereIn('room_id', $roomIds);
             })
-            ->orWhereIn('room_id', $rooms->pluck('id'))
             ->get();
 
         foreach ($pendingItems as $item) {
@@ -726,7 +748,7 @@ class AutoScheduleService
     {
         set_time_limit(300);
 
-        $subject = Subject::query()
+        $subject = $this->activeSubjectQuery()
             ->select('id', 'edp_code', 'subject_code', 'description', 'section', 'major', 'year_level', 'department', 'units', 'duration_hours', 'type', 'subject_type', 'specialization', 'meetings_per_week', 'faculty_id')
             ->with('faculty:id,full_name,availability')
             ->find($subjectId);
@@ -782,17 +804,23 @@ class AutoScheduleService
             return $result;
         }
 
-        $existingSchedules = Schedule::query()
+        $roomIds = $rooms->pluck('id');
+
+        $existingSchedules = $this->activeScheduleQuery()
             ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
             ->with('subject:id,subject_code,department,major,year_level,section,faculty_id')
-            ->where(function ($query) use ($subject) {
-                $query->where('department', $subject->department)
-                    ->where('major', $subject->major)
-                    ->where('year_level', (int) $subject->year_level)
-                    ->where('section', $subject->section);
+            ->where(function ($query) use ($subject, $roomIds) {
+                $query->where(function ($query) use ($subject) {
+                    $query->where('department', $subject->department)
+                        ->where('major', $subject->major)
+                        ->where('year_level', (int) $subject->year_level)
+                        ->where('section', $subject->section);
+                })->orWhereIn('room_id', $roomIds);
+
+                if ($subject->faculty_id) {
+                    $query->orWhere('faculty_id', $subject->faculty_id);
+                }
             })
-            ->orWhereIn('room_id', $rooms->pluck('id'))
-            ->when($subject->faculty_id, fn ($query) => $query->orWhere('faculty_id', $subject->faculty_id))
             ->get();
 
         foreach ($pendingItems as $item) {

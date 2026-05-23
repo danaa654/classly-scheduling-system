@@ -182,6 +182,7 @@ class Room extends Model
 
         // Count scheduled slots for this room
         $scheduledSlots = $this->schedules()
+            ->activeTerm()
             ->whereIn('day', $activeDays)
             ->count();
 
@@ -194,6 +195,7 @@ class Room extends Model
     public function getSchedulesForDay(string $day)
     {
         return $this->schedules()
+                    ->activeTerm()
                     ->where('day', $day)
                     ->orderBy('start_time')
                     ->get();
@@ -213,6 +215,7 @@ class Room extends Model
     public function hasConflict(string $day, string $startTime, string $endTime): bool
     {
         return $this->schedules()
+                    ->activeTerm()
                     ->where('day', $day)
                     ->where(function ($query) use ($startTime, $endTime) {
                         $query->where('start_time', '<', $endTime)
@@ -273,6 +276,7 @@ class Room extends Model
     public function getTotalHoursScheduledThisWeek(): float
     {
         return $this->schedules()
+                    ->activeTerm()
                     ->get()
                     ->sum(function ($schedule) {
                         $start = \Carbon\Carbon::parse($schedule->start_time);

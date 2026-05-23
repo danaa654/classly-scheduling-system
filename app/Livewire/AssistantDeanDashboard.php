@@ -7,6 +7,7 @@ use App\Models\Subject;
 use App\Models\Faculty;
 use App\Models\Room;
 use App\Models\Schedule;
+use App\Models\Setting;
 use App\Models\User;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -32,16 +33,16 @@ class AssistantDeanDashboard extends Component
 
     private function loadGlobalStats(): void
     {
-        $totalSubjects    = Subject::count();
-        $scheduledSubjects = Subject::whereHas('schedules')->count();
-        $totalSchedules   = Schedule::count();
-        $finalizedCount   = Schedule::where('status', 'finalized')->count();
+        $totalSubjects    = Subject::activeTerm()->count();
+        $scheduledSubjects = Subject::activeTerm()->whereHas('schedules', fn ($query) => $query->activeTerm())->count();
+        $totalSchedules   = Schedule::activeTerm()->count();
+        $finalizedCount   = Schedule::activeTerm()->where('status', 'finalized')->count();
 
         $this->globalStats = [
             'total_faculty'       => Faculty::where('status', 'approved')->count(),
             'total_subjects'      => $totalSubjects,
-            'minor_subjects'      => Subject::where('type', 'Minor')->count(),
-            'major_subjects'      => Subject::where('type', 'Major')->count(),
+            'minor_subjects'      => Subject::activeTerm()->where('type', 'Minor')->count(),
+            'major_subjects'      => Subject::activeTerm()->where('type', 'Major')->count(),
             'total_rooms'         => Room::count(),
             'total_users'         => User::count(),
             'total_schedules'     => $totalSchedules,
@@ -56,7 +57,7 @@ class AssistantDeanDashboard extends Component
     private function loadFacultyCoordination(): void
     {
         $faculty = Faculty::where('status', 'approved')
-            ->withCount('schedules')
+            ->withCount(['schedules' => fn ($query) => $query->activeTerm()])
             ->get();
 
         $overloaded  = $faculty->filter(fn ($f) => $f->schedules_count > ($f->max_units ?? 6))->count();
@@ -77,7 +78,7 @@ class AssistantDeanDashboard extends Component
             'normal'         => $normal,
             'dept_breakdown' => $deptBreakdown,
             'top_loaded'     => Faculty::where('status', 'approved')
-                ->withCount('schedules')
+                ->withCount(['schedules' => fn ($query) => $query->activeTerm()])
                 ->orderByDesc('schedules_count')
                 ->limit(5)
                 ->get()
@@ -95,7 +96,7 @@ class AssistantDeanDashboard extends Component
     private function loadScheduleReview(): void
     {
         // Schedules that are still in draft/partial (need review)
-        $this->scheduleReview = Schedule::whereIn('status', ['draft', 'partial'])
+        $this->scheduleReview = Schedule::activeTerm()->whereIn('status', ['draft', 'partial'])
             ->with(['subject', 'room', 'faculty'])
             ->limit(8)
             ->get()
@@ -115,7 +116,8 @@ class AssistantDeanDashboard extends Component
     private function loadCurriculumValidation(): void
     {
         // Subjects with no schedule at all
-        $missing = Subject::doesntHave('schedules')
+        $missing = Subject::activeTerm()
+            ->whereDoesntHave('schedules', fn ($query) => $query->activeTerm())
             ->select('id', 'subject_code', 'description', 'department', 'year_level', 'type')
             ->limit(8)
             ->get()
@@ -129,7 +131,7 @@ class AssistantDeanDashboard extends Component
             ])->toArray();
 
         // Schedules with no faculty assigned
-        $noFaculty = Schedule::whereNull('faculty_id')
+        $noFaculty = Schedule::activeTerm()->whereNull('faculty_id')
             ->with('subject')
             ->limit(5)
             ->get()
@@ -146,7 +148,7 @@ class AssistantDeanDashboard extends Component
 
     private function loadSubjectDistribution(): void
     {
-        $deptData = Subject::select('department', 'type', DB::raw('count(*) as total'))
+        $deptData = Subject::activeTerm()->select('department', 'type', DB::raw('count(*) as total'))
             ->groupBy('department', 'type')
             ->get();
 
@@ -166,8 +168,8 @@ class AssistantDeanDashboard extends Component
 
         $this->subjectDistribution = [
             'by_department' => $breakdown,
-            'total_major'   => Subject::where('type', 'Major')->count(),
-            'total_minor'   => Subject::where('type', 'Minor')->count(),
+            'total_major'   => Subject::activeTerm()->where('type', 'Major')->count(),
+            'total_minor'   => Subject::activeTerm()->where('type', 'Minor')->count(),
         ];
     }
 
@@ -177,7 +179,7 @@ class AssistantDeanDashboard extends Component
 
         // Check for overloaded faculty
         $overloaded = Faculty::where('status', 'approved')
-            ->withCount('schedules')
+            ->withCount(['schedules' => fn ($query) => $query->activeTerm()])
             ->having('schedules_count', '>', 6)
             ->count();
 
@@ -192,7 +194,9 @@ class AssistantDeanDashboard extends Component
         }
 
         // Unscheduled subjects
-        $unscheduled = Subject::doesntHave('schedules')->count();
+        $unscheduled = Subject::activeTerm()
+            ->whereDoesntHave('schedules', fn ($query) => $query->activeTerm())
+            ->count();
         if ($unscheduled > 0) {
             $recommendations[] = [
                 'type'    => 'info',
@@ -204,6 +208,7 @@ class AssistantDeanDashboard extends Component
         }
 
         // Room conflicts
+        $period = Setting::getAcademicPeriod();
         $conflictCount = DB::table('schedules as s1')
             ->join('schedules as s2', function ($join) {
                 $join->on('s1.room_id', '=', 's2.room_id')
@@ -211,7 +216,14 @@ class AssistantDeanDashboard extends Component
                      ->where('s1.id', '<', DB::raw('s2.id'))
                      ->whereRaw('s1.start_time < s2.end_time')
                      ->whereRaw('s1.end_time > s2.start_time');
-            })->count();
+            })
+            ->where('s1.is_archived', false)
+            ->where('s2.is_archived', false)
+            ->where('s1.semester', $period['semester'])
+            ->where('s2.semester', $period['semester'])
+            ->where('s1.academic_year', $period['school_year'])
+            ->where('s2.academic_year', $period['school_year'])
+            ->count();
 
         if ($conflictCount > 0) {
             $recommendations[] = [
@@ -224,7 +236,7 @@ class AssistantDeanDashboard extends Component
         }
 
         // Rooms running empty
-        $emptyRooms = Room::doesntHave('schedules')->count();
+        $emptyRooms = Room::whereDoesntHave('schedules', fn ($query) => $query->activeTerm())->count();
         if ($emptyRooms > 0) {
             $recommendations[] = [
                 'type'    => 'info',

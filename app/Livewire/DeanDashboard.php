@@ -7,6 +7,7 @@ use App\Models\Faculty;
 use App\Models\Subject;
 use App\Models\Room;
 use App\Models\Schedule;
+use App\Models\Setting;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
@@ -37,14 +38,17 @@ class DeanDashboard extends Component
     {
         $dept = $this->department;
 
-        $totalSubjects    = Subject::where('department', $dept)->count();
-        $majorSubjects    = Subject::where('department', $dept)->where('type', 'Major')->count();
-        $minorSubjects    = Subject::where('department', $dept)->where('type', 'Minor')->count();
-        $scheduledSubjects = Subject::where('department', $dept)->whereHas('schedules')->count();
+        $totalSubjects    = Subject::activeTerm()->where('department', $dept)->count();
+        $majorSubjects    = Subject::activeTerm()->where('department', $dept)->where('type', 'Major')->count();
+        $minorSubjects    = Subject::activeTerm()->where('department', $dept)->where('type', 'Minor')->count();
+        $scheduledSubjects = Subject::activeTerm()
+            ->where('department', $dept)
+            ->whereHas('schedules', fn ($query) => $query->activeTerm())
+            ->count();
         $totalFaculty     = Faculty::where('department', $dept)->where('status', 'approved')->count();
         $assignedFaculty  = Faculty::where('department', $dept)
             ->where('status', 'approved')
-            ->whereHas('schedules')
+            ->whereHas('schedules', fn ($query) => $query->activeTerm())
             ->count();
 
         $this->academicOverview = [
@@ -88,10 +92,10 @@ class DeanDashboard extends Component
     {
         $byYear = [];
         for ($year = 1; $year <= 4; $year++) {
-            $total     = Subject::where('department', $this->department)->where('year_level', $year)->count();
-            $scheduled = Subject::where('department', $this->department)
+            $total     = Subject::activeTerm()->where('department', $this->department)->where('year_level', $year)->count();
+            $scheduled = Subject::activeTerm()->where('department', $this->department)
                 ->where('year_level', $year)
-                ->whereHas('schedules')
+                ->whereHas('schedules', fn ($query) => $query->activeTerm())
                 ->count();
 
             $byYear[] = [
@@ -109,7 +113,7 @@ class DeanDashboard extends Component
     {
         $this->facultySummary = Faculty::where('department', $this->department)
             ->where('status', 'approved')
-            ->withCount('schedules')
+            ->withCount(['schedules' => fn ($query) => $query->activeTerm()])
             ->orderByDesc('schedules_count')
             ->limit(8)
             ->get()
@@ -126,6 +130,8 @@ class DeanDashboard extends Component
 
     private function loadEscalatedConflicts(): void
     {
+        $period = Setting::getAcademicPeriod();
+
         $this->escalatedConflicts = DB::table('schedules as s1')
             ->join('schedules as s2', function ($join) {
                 $join->on('s1.room_id', '=', 's2.room_id')
@@ -137,6 +143,12 @@ class DeanDashboard extends Component
             ->join('subjects as sub1', 's1.subject_id', '=', 'sub1.id')
             ->join('rooms', 's1.room_id', '=', 'rooms.id')
             ->where('sub1.department', $this->department)
+            ->where('s1.is_archived', false)
+            ->where('s2.is_archived', false)
+            ->where('s1.semester', $period['semester'])
+            ->where('s2.semester', $period['semester'])
+            ->where('s1.academic_year', $period['school_year'])
+            ->where('s2.academic_year', $period['school_year'])
             ->select('s1.id', 'rooms.room_name', 's1.day', 's1.start_time', 's1.end_time')
             ->limit(5)
             ->get()

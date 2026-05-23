@@ -15,7 +15,8 @@ class ScheduleService
      */
     public function checkConflict($roomId, $facultyId, $section, $day, $startTime, $endTime, $ignoreId = null)
     {
-        $query = Schedule::where('day', $day)
+        $query = Schedule::activeTerm()
+            ->where('day', $day)
             ->where(function ($q) use ($startTime, $endTime) {
                 $q->where(function ($inner) use ($startTime, $endTime) {
                     // Logic: A conflict exists if (StartA < EndB) AND (EndA > StartB)
@@ -49,7 +50,8 @@ class ScheduleService
             ->diffInMinutes(Carbon::parse($settings['end_time']));
         $totalAvailableMinutes = $minutesPerDay * max(1, count($settings['active_days']));
         
-        $scheduledMinutes = Schedule::where('room_id', $roomId)
+        $scheduledMinutes = Schedule::activeTerm()
+            ->where('room_id', $roomId)
             ->whereIn('day', $settings['active_days'])
             ->get()
             ->sum(function ($schedule) {
