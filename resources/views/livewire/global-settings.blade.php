@@ -219,7 +219,7 @@
         <section class="rounded-lg border border-red-200 bg-red-50 p-6 shadow-sm dark:border-red-950 dark:bg-red-950/20">
             <div class="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                 <div>
-                    <h2 class="text-sm font-black uppercase tracking-widest text-red-700 dark:text-red-300">Reset Semester</h2>
+                    <h2 class="text-sm font-black uppercase tracking-widest text-red-700 dark:text-red-300">End Semester</h2>
                     <p class="mt-2 max-w-2xl text-xs font-semibold text-red-700/80 dark:text-red-300/80">
                         Archives active subjects and schedules, advances the academic period, and leaves the new workspace empty for the next term.
                     </p>
@@ -229,7 +229,7 @@
                     type="button"
                     wire:click="$set('confirmingReset', true)"
                     class="rounded-md bg-red-600 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-sm transition hover:bg-red-700">
-                    Reset Semester
+                    End Semester
                 </button>
             </div>
         </section>

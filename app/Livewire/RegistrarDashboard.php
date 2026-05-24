@@ -9,6 +9,7 @@ use App\Models\Schedule;
 use App\Models\Setting;
 use App\Models\Subject;
 use App\Models\Faculty;
+use App\Models\Department;
 use Carbon\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -34,22 +35,24 @@ class RegistrarDashboard extends Component
     private function loadSchedulingStats(): void
     {
         $total     = Subject::activeTerm()->count();
-        $scheduled = Subject::activeTerm()->whereHas('schedules', fn ($query) => $query->activeTerm())->count();
-        $finalized = Schedule::activeTerm()->where('status', 'finalized')->count();
-        $draft     = Schedule::activeTerm()->where('status', 'draft')->count();
-        $partial   = Schedule::activeTerm()->where('status', 'partial')->count();
+        $scheduled = Subject::activeTerm()->whereHas('schedules', fn ($q) => $q->activeTerm())->count();
+        $finalized = Schedule::activeTerm()->where('status', Schedule::STATUS_FINALIZED)->count();
+        $draft     = Schedule::activeTerm()->where('status', Schedule::STATUS_DRAFT)->count();
+        $partial   = Schedule::activeTerm()->where('status', Schedule::STATUS_PARTIAL)->count();
+        $facAssigned = Schedule::activeTerm()->where('status', Schedule::STATUS_FACULTY_ASSIGNED)->count();
 
         $this->schedulingStats = [
-            'total_subjects'       => $total,
-            'scheduled_subjects'   => $scheduled,
-            'unscheduled_subjects' => max(0, $total - $scheduled),
-            'finalized_schedules'  => $finalized,
-            'draft_schedules'      => $draft,
-            'partial_schedules'    => $partial,
-            'total_schedules'      => Schedule::activeTerm()->count(),
-            'completion_pct'       => $total > 0 ? round(($scheduled / $total) * 100, 1) : 0,
-            'rooms_total'          => Room::count(),
-            'faculty_total'        => Faculty::where('status', 'approved')->count(),
+            'total_subjects'        => $total,
+            'scheduled_subjects'    => $scheduled,
+            'unscheduled_subjects'  => max(0, $total - $scheduled),
+            'finalized_schedules'   => $finalized,
+            'draft_schedules'       => $draft,
+            'partial_schedules'     => $partial,
+            'faculty_assigned'      => $facAssigned,
+            'total_schedules'       => Schedule::activeTerm()->count(),
+            'completion_pct'        => $total > 0 ? round(($scheduled / $total) * 100, 1) : 0,
+            'rooms_total'           => Room::count(),
+            'faculty_total'         => Faculty::where('status', 'approved')->count(),
         ];
     }
 
@@ -84,14 +87,16 @@ class RegistrarDashboard extends Component
                 'sub1.subject_code as subject_a',
                 'sub2.subject_code as subject_b'
             )
-            ->limit(10)
+            ->limit(15)
             ->get()
             ->map(fn ($c) => [
                 'schedule_id' => $c->schedule_id,
                 'conflict_id' => $c->conflict_id,
                 'room'        => $c->room_name,
                 'day'         => $c->day,
-                'time'        => Carbon::parse($c->start_time)->format('h:i A') . ' – ' . Carbon::parse($c->end_time)->format('h:i A'),
+                'time'        => Carbon::parse($c->start_time)->format('h:i A')
+                               . ' – '
+                               . Carbon::parse($c->end_time)->format('h:i A'),
                 'subject_a'   => $c->subject_a,
                 'subject_b'   => $c->subject_b,
                 'severity'    => 'critical',
@@ -100,33 +105,33 @@ class RegistrarDashboard extends Component
 
     private function loadRoomUtilization(): void
     {
-        $this->roomUtilization = Room::withCount(['schedules' => fn ($query) => $query->activeTerm()])
+        $this->roomUtilization = Room::withCount(['schedules' => fn ($q) => $q->activeTerm()])
             ->orderByDesc('schedules_count')
-            ->limit(6)
+            ->limit(8)
             ->get()
             ->map(fn ($r) => [
-                'name'       => $r->room_name,
-                'type'       => $r->type,
-                'floor'      => $r->floor,
-                'schedules'  => $r->schedules_count,
-                'pct'        => min(100, round(($r->schedules_count / max(1, 30)) * 100)),
+                'name'      => $r->room_name,
+                'type'      => $r->type,
+                'floor'     => $r->floor,
+                'schedules' => $r->schedules_count,
+                'pct'       => min(100, round(($r->schedules_count / max(1, 30)) * 100)),
             ])->toArray();
     }
 
     private function loadFacultyLoad(): void
     {
-        $this->facultyLoad = Faculty::withCount(['schedules' => fn ($query) => $query->activeTerm()])
+        $this->facultyLoad = Faculty::withCount(['schedules' => fn ($q) => $q->activeTerm()])
             ->where('status', 'approved')
             ->orderByDesc('schedules_count')
-            ->limit(8)
+            ->limit(10)
             ->get()
             ->map(fn ($f) => [
                 'id'         => $f->id,
                 'name'       => $f->full_name,
-                'department' => $f->department,
+                'department' => $f->displayDepartment(),
                 'load'       => $f->schedules_count,
-                'max_units'  => $f->max_units ?? 6,
-                'status'     => $f->schedules_count > ($f->max_units ?? 6) ? 'overloaded'
+                'max_units'  => $f->max_units ?? 21,
+                'status'     => $f->schedules_count > ($f->max_units ?? 21) ? 'overloaded'
                               : ($f->schedules_count === 0 ? 'unassigned' : 'normal'),
             ])->toArray();
     }
@@ -137,7 +142,7 @@ class RegistrarDashboard extends Component
             ->join('users', 'activities.user_id', '=', 'users.id')
             ->select('activities.*', 'users.name as user_name')
             ->orderByDesc('activities.created_at')
-            ->limit(10)
+            ->limit(15)
             ->get()
             ->map(fn ($a) => [
                 'user'        => $a->user_name,
@@ -151,9 +156,11 @@ class RegistrarDashboard extends Component
     private function loadUnscheduledSubjects(): void
     {
         $this->unscheduledSubjects = Subject::activeTerm()
-            ->whereDoesntHave('schedules', fn ($query) => $query->activeTerm())
+            ->whereDoesntHave('schedules', fn ($q) => $q->activeTerm())
             ->select('id', 'subject_code', 'description', 'department', 'year_level', 'section', 'type')
-            ->limit(8)
+            ->orderBy('department')
+            ->orderBy('year_level')
+            ->limit(12)
             ->get()
             ->toArray();
     }
@@ -173,6 +180,7 @@ class RegistrarDashboard extends Component
 
         $this->loadConflicts();
         $this->loadSchedulingStats();
+        $this->loadRecentActivities();
     }
 
     public function render()

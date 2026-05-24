@@ -20,6 +20,13 @@ class AdminDashboard extends Component
     public $pendingVerifications = [];
     public $conflictAlerts = [];
     public $schedulingAnalytics = [];
+    public $workflowCounts = [];
+    public $departmentProgress = [];
+    public $approvalQueue = [];
+
+    protected $listeners = [
+        'refreshDashboard' => '$refresh',
+    ];
 
     public function mount()
     {
@@ -29,19 +36,22 @@ class AdminDashboard extends Component
         $this->loadPendingVerifications();
         $this->loadConflictAlerts();
         $this->loadSchedulingAnalytics();
+        $this->loadWorkflowCounts();
+        $this->loadDepartmentProgress();
+        $this->loadApprovalQueue();
     }
 
     private function loadStats(): void
     {
         $this->stats = [
-            'total_users'     => User::count(),
-            'total_faculty'   => Faculty::count(),
-            'total_rooms'     => Room::count(),
-            'total_subjects'  => Subject::activeTerm()->count(),
-            'total_schedules' => Schedule::activeTerm()->count(),
-            'pending_faculty' => Faculty::where('status', 'pending')->count(),
-            'finalized_schedules' => Schedule::activeTerm()->where('status', 'finalized')->count(),
-            'draft_schedules'     => Schedule::activeTerm()->where('status', 'draft')->count(),
+            'total_users'        => User::count(),
+            'total_faculty'      => Faculty::count(),
+            'total_rooms'        => Room::count(),
+            'total_subjects'     => Subject::activeTerm()->count(),
+            'total_schedules'    => Schedule::activeTerm()->count(),
+            'pending_faculty'    => Faculty::where('status', 'pending')->count(),
+            'finalized_schedules'=> Schedule::activeTerm()->where('status', 'finalized')->count(),
+            'draft_schedules'    => Schedule::activeTerm()->where('status', 'draft')->count(),
         ];
     }
 
@@ -72,6 +82,8 @@ class AdminDashboard extends Component
             'rooms_available'  => Room::count() > 0 ? 'healthy' : 'warning',
             'faculty_assigned' => Faculty::where('status', 'approved')->count(),
             'current_semester' => $period['semester_name'],
+            'school_year'      => $period['school_year'],
+            'semester'         => $period['semester'],
             'server_time'      => Carbon::now()->format('H:i:s'),
         ];
     }
@@ -80,17 +92,19 @@ class AdminDashboard extends Component
     {
         $this->recentActivities = DB::table('activities')
             ->join('users', 'activities.user_id', '=', 'users.id')
-            ->select('activities.*', 'users.name as user_name')
+            ->select('activities.*', 'users.name as user_name', 'users.role as user_role')
             ->orderByDesc('activities.created_at')
-            ->limit(8)
+            ->limit(10)
             ->get()
             ->map(fn ($a) => [
                 'id'          => $a->id,
                 'user'        => $a->user_name,
+                'role'        => $a->user_role ?? 'user',
                 'action'      => $a->action,
                 'module'      => $a->module,
                 'description' => $a->description,
                 'time'        => Carbon::parse($a->created_at)->diffForHumans(),
+                'created_at'  => Carbon::parse($a->created_at)->format('M d, h:i A'),
                 'severity'    => $this->deriveSeverity($a->action),
             ])->toArray();
     }
@@ -134,24 +148,24 @@ class AdminDashboard extends Component
             ->limit(5)
             ->get()
             ->map(fn ($c) => [
-                'room'      => $c->room_name,
-                'day'       => $c->day,
-                'time'      => Carbon::parse($c->start_time)->format('h:i A') . ' - ' . Carbon::parse($c->end_time)->format('h:i A'),
-                'severity'  => 'critical',
+                'type'        => 'room_conflict',
+                'room'        => $c->room_name,
+                'day'         => $c->day,
+                'time'        => Carbon::parse($c->start_time)->format('h:i A') . ' – ' . Carbon::parse($c->end_time)->format('h:i A'),
+                'severity'    => 'critical',
                 'schedule_id' => $c->id,
             ])->toArray();
 
-        // Overloaded faculty (more than max_units' worth of schedules)
-        $overloaded = Faculty::withCount(['schedules' => fn ($query) => $query->activeTerm()])
+        $overloaded = Faculty::withCount(['schedules' => fn ($q) => $q->activeTerm()])
             ->having('schedules_count', '>', 6)
             ->limit(3)
             ->get()
             ->map(fn ($f) => [
+                'type'     => 'overload',
                 'name'     => $f->full_name,
                 'dept'     => $f->department,
                 'load'     => $f->schedules_count,
                 'severity' => 'warning',
-                'type'     => 'overload',
             ])->toArray();
 
         $this->conflictAlerts = array_merge($conflicts, $overloaded);
@@ -159,24 +173,103 @@ class AdminDashboard extends Component
 
     private function loadSchedulingAnalytics(): void
     {
-        $today = Carbon::today();
-        $totalSchedules = Schedule::activeTerm()->count();
+        $totalSchedules    = Schedule::activeTerm()->count();
         $finalizedSchedules = Schedule::activeTerm()->where('status', 'finalized')->count();
 
         $this->schedulingAnalytics = [
-            'total_scheduled'   => $totalSchedules,
-            'finalized'         => $finalizedSchedules,
-            'draft'             => Schedule::activeTerm()->where('status', 'draft')->count(),
-            'partial'           => Schedule::activeTerm()->where('status', 'partial')->count(),
-            'rooms_in_use'      => Schedule::activeTerm()->distinct('room_id')->count('room_id'),
-            'faculty_assigned'  => Schedule::activeTerm()->whereNotNull('faculty_id')->distinct('faculty_id')->count('faculty_id'),
-            'completion_rate'   => $totalSchedules > 0
+            'total_scheduled'      => $totalSchedules,
+            'finalized'            => $finalizedSchedules,
+            'draft'                => Schedule::activeTerm()->where('status', 'draft')->count(),
+            'partial'              => Schedule::activeTerm()->where('status', 'partial')->count(),
+            'faculty_assigned'     => Schedule::activeTerm()->where('status', 'faculty_assigned')->count(),
+            'rooms_in_use'         => Schedule::activeTerm()->distinct('room_id')->count('room_id'),
+            'faculty_with_load'    => Schedule::activeTerm()->whereNotNull('faculty_id')->distinct('faculty_id')->count('faculty_id'),
+            'completion_rate'      => $totalSchedules > 0
                 ? round(($finalizedSchedules / $totalSchedules) * 100, 1)
                 : 0,
             'subjects_unscheduled' => Subject::activeTerm()
-                ->whereDoesntHave('schedules', fn ($query) => $query->activeTerm())
+                ->whereDoesntHave('schedules', fn ($q) => $q->activeTerm())
                 ->count(),
         ];
+    }
+
+    private function loadWorkflowCounts(): void
+    {
+        $this->workflowCounts = [
+            'draft'            => Schedule::activeTerm()->where('status', Schedule::STATUS_DRAFT)->count(),
+            'partial'          => Schedule::activeTerm()->where('status', Schedule::STATUS_PARTIAL)->count(),
+            'faculty_assigned' => Schedule::activeTerm()->where('status', Schedule::STATUS_FACULTY_ASSIGNED)->count(),
+            'finalized'        => Schedule::activeTerm()->where('status', Schedule::STATUS_FINALIZED)->count(),
+            'total'            => Schedule::activeTerm()->count(),
+            'conflict_count'   => $this->systemStatus['conflict_count'] ?? 0,
+        ];
+    }
+
+    private function loadDepartmentProgress(): void
+    {
+        $departments = [
+            ['code' => 'CCS', 'label' => 'College of Computer Studies', 'majors' => ['IT', 'ACT'], 'color' => 'yellow'],
+            ['code' => 'CTE', 'label' => 'College of Teacher Education',  'majors' => ['ED'],           'color' => 'blue'],
+            ['code' => 'COC', 'label' => 'College of Criminology',        'majors' => ['FB','LD','QD'], 'color' => 'violet'],
+            ['code' => 'SHTM','label' => 'School of Hospitality & Tourism','majors' => ['HM','TM'],     'color' => 'orange'],
+        ];
+
+        $this->departmentProgress = collect($departments)->map(function ($dept) {
+            $majors = $dept['majors'];
+
+            $totalSubjects = Subject::activeTerm()
+                ->whereIn('major', $majors)
+                ->count();
+
+            $scheduledSubjects = Subject::activeTerm()
+                ->whereIn('major', $majors)
+                ->whereHas('schedules', fn ($q) => $q->activeTerm())
+                ->count();
+
+            $finalizedSubjects = Subject::activeTerm()
+                ->whereIn('major', $majors)
+                ->whereHas('schedules', fn ($q) => $q->activeTerm()->where('status', 'finalized'))
+                ->count();
+
+            $pendingSubjects = $totalSubjects - $scheduledSubjects;
+            $rate = $totalSubjects > 0 ? round(($finalizedSubjects / $totalSubjects) * 100) : 0;
+
+            return [
+                'code'      => $dept['code'],
+                'label'     => $dept['label'],
+                'majors'    => implode(', ', $majors),
+                'color'     => $dept['color'],
+                'total'     => $totalSubjects,
+                'scheduled' => $scheduledSubjects,
+                'finalized' => $finalizedSubjects,
+                'pending'   => max(0, $pendingSubjects),
+                'rate'      => $rate,
+            ];
+        })->toArray();
+    }
+
+    private function loadApprovalQueue(): void
+    {
+        // Schedules with status = faculty_assigned are queued for admin review
+        $this->approvalQueue = Schedule::activeTerm()
+            ->where('status', Schedule::STATUS_FACULTY_ASSIGNED)
+            ->with(['subject', 'room', 'faculty'])
+            ->latest()
+            ->limit(8)
+            ->get()
+            ->map(fn ($s) => [
+                'id'         => $s->id,
+                'department' => $s->subject?->department ?? $s->department ?? '—',
+                'major'      => $s->subject?->major ?? $s->major ?? '—',
+                'year_level' => $s->year_level ?? $s->subject?->year_level ?? '—',
+                'section'    => $s->section ?? '—',
+                'subject'    => $s->subject?->description ?? $s->subject?->subject_code ?? '—',
+                'room'       => $s->room?->room_name ?? '—',
+                'faculty'    => $s->faculty?->full_name ?? 'Unassigned',
+                'day'        => $s->day,
+                'time'       => Carbon::parse($s->start_time)->format('h:i A') . '–' . Carbon::parse($s->end_time)->format('h:i A'),
+                'status'     => $s->status,
+            ])->toArray();
     }
 
     public function approveFaculty(int $id): void
@@ -195,6 +288,7 @@ class AdminDashboard extends Component
 
         $this->loadPendingVerifications();
         $this->loadStats();
+        $this->loadWorkflowCounts();
     }
 
     public function rejectFaculty(int $id): void
@@ -215,13 +309,42 @@ class AdminDashboard extends Component
         $this->loadStats();
     }
 
+    public function finalizeSchedule(int $id): void
+    {
+        $schedule = Schedule::findOrFail($id);
+        $schedule->update(['status' => Schedule::STATUS_FINALIZED]);
+
+        DB::table('activities')->insert([
+            'user_id'     => auth()->id(),
+            'action'      => 'finalized',
+            'module'      => 'Schedule',
+            'description' => "Admin finalized schedule ID #{$id}",
+            'created_at'  => now(),
+            'updated_at'  => now(),
+        ]);
+
+        $this->loadApprovalQueue();
+        $this->loadStats();
+        $this->loadWorkflowCounts();
+        $this->loadSchedulingAnalytics();
+        $this->loadDepartmentProgress();
+    }
+
     private function deriveSeverity(string $action): string
     {
-        return match (true) {
-            str_contains($action, 'conflict') || str_contains($action, 'error') => 'critical',
-            str_contains($action, 'warn') || str_contains($action, 'retry')     => 'warning',
-            default => 'info',
-        };
+        if (str_contains($action, 'conflict') || str_contains($action, 'error') || str_contains($action, 'rejected')) {
+            return 'critical';
+        }
+
+        if (str_contains($action, 'warn') || str_contains($action, 'retry') || str_contains($action, 'returned')) {
+            return 'warning';
+        }
+
+        if (str_contains($action, 'approved') || str_contains($action, 'finalized')) {
+            return 'success';
+        }
+
+        return 'info';
     }
 
     public function render()
