@@ -1,5 +1,3 @@
-{{-- resources/views/livewire/assistant-dean-dashboard.blade.php --}}
-
 <style>
     .dash-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
     .dash-scroll::-webkit-scrollbar-track { background: transparent; }

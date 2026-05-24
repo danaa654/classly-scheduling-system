@@ -11,6 +11,7 @@ use App\Notifications\SubjectUpdatedNotification;
 use App\Models\Subject;
 use App\Models\Activity;
 use App\Models\Setting;
+use App\Services\EdpCodeService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Validation\Rule;
@@ -45,15 +46,15 @@ class ManageSubjects extends Component
     public $selectAll = false;
     public $showDuplicateConfirmModal = false;
     public $duplicateCandidateId = null;
-    
+
     protected $listeners = ['refreshComponent' => '$refresh'];
 
     // Major mapping by department
     private $majorsByDept = [
-        'CCS' => ['IT' => 'Information Technology', 'ACT' => 'Assistive Computer Technology'],
+        'CCS'  => ['IT' => 'Information Technology', 'ACT' => 'Assistive Computer Technology'],
         'SHTM' => ['HM' => 'Hospitality Management', 'TM' => 'Tourism Management'],
-        'COC' => ['FB' => 'Forensic Biology', 'LD' => 'Lie Detection', 'QD' => 'Questioned Documents'],
-        'CTE' => ['ED' => 'Education'],
+        'COC'  => ['FB' => 'Forensic Biology', 'LD' => 'Lie Detection', 'QD' => 'Questioned Documents'],
+        'CTE'  => ['ED' => 'Education'],
     ];
 
     public function updatedSearch() { $this->resetPage(); }
@@ -94,16 +95,16 @@ class ManageSubjects extends Component
             ->get()
             ->map(fn ($archive) => (object) [
                 'archive_batch_id' => $archive->archive_batch,
-                'semester' => $archive->semester,
-                'semester_name' => Setting::semesterDisplayName($archive->semester, $archive->academic_year),
-                'school_year' => $archive->academic_year,
-                'total_subjects' => null,
-                'archived_at' => null,
+                'semester'         => $archive->semester,
+                'semester_name'    => Setting::semesterDisplayName($archive->semester, $archive->academic_year),
+                'school_year'      => $archive->academic_year,
+                'total_subjects'   => null,
+                'archived_at'      => null,
             ]);
     }
 
     /**
-     * Get available majors based on selected department
+     * Get available majors based on the selected department.
      */
     public function getAvailableMajorsProperty()
     {
@@ -111,31 +112,34 @@ class ManageSubjects extends Component
             return [];
         }
 
-        $dept = strtoupper($this->department);
-        return $this->majorsByDept[$dept] ?? [];
+        return $this->majorsByDept[strtoupper($this->department)] ?? [];
     }
 
     /**
-     * Auto-generate EDP code when major and year_level are selected
+     * Auto-generate EDP code when major and year_level are both set.
      */
     public function updatedMajor($value)
     {
-        if (!empty($value) && !empty($this->year_level)) {
+        if (! empty($value) && ! empty($this->year_level)) {
             $this->generateEdpCode();
         }
     }
 
     public function updatedYearLevel($value)
     {
-        if (!empty($value) && !empty($this->major)) {
+        if (! empty($value) && ! empty($this->major)) {
             $this->generateEdpCode();
         }
     }
 
     /**
-     * Generate EDP codes from the active academic workspace.
+     * Generate an EDP code from the active academic workspace.
      *
-     * Format: MAJOR-[YY][SEM][LEVEL][###], e.g. IT-2621001.
+     * New format: [MAJOR]-[YY][SEM][LEVEL][SEQ]  e.g. IT-2611001
+     *   YY    = last 2 digits of start year (2026-2027 → "26")
+     *   SEM   = semester digit (1=1st, 2=2nd, 3=Summer)
+     *   LEVEL = year level
+     *   SEQ   = 3-digit zero-padded sequence, auto-incremented per workspace
      */
     private function generateEdpCode(): void
     {
@@ -152,12 +156,11 @@ class ManageSubjects extends Component
             $period['semester'],
             $this->subjectId ? (int) $this->subjectId : null
         );
-
     }
 
     /**
-     * ✅ FIXED: Check if subject code is duplicate within same major/year/SECTION
-     * Now it correctly allows the same subject code in DIFFERENT sections
+     * Check if subject code is duplicate within same major / year / section.
+     * Allows the same subject code in DIFFERENT sections.
      */
     public function getSubjectCodeDuplicateProperty()
     {
@@ -165,17 +168,12 @@ class ManageSubjects extends Component
             return false;
         }
 
-        $subjectCodeUpper = strtoupper($this->subject_code);
-        $majorUpper = strtoupper($this->major);
-        $yearLevel = (int)$this->year_level;
-        $sectionUpper = strtoupper($this->section);
+        $query = $this->activeSubjectsQuery()
+            ->where('subject_code', strtoupper($this->subject_code))
+            ->where('major',        strtoupper($this->major))
+            ->where('year_level',   (int) $this->year_level)
+            ->where('section',      strtoupper($this->section));
 
-        $query = $this->activeSubjectsQuery()->where('subject_code', $subjectCodeUpper)
-            ->where('major', $majorUpper)
-            ->where('year_level', $yearLevel)
-            ->where('section', $sectionUpper); // ✅ CRITICAL: Check SECTION too!
-
-        // Exclude current subject when editing
         if ($this->isEditMode && $this->subjectId) {
             $query->where('id', '!=', $this->subjectId);
         }
@@ -184,20 +182,31 @@ class ManageSubjects extends Component
     }
 
     /**
-     * Validate Department Access based on user role
+     * Normalise a year-level value that may arrive as a plain integer string
+     * ("1"), an ordinal ("1st"), or a full phrase ("1st Year" / "Year 1").
+     *
+     * Delegates to EdpCodeService::yearLevelDigit() so the mapping stays in
+     * one place. Returns an integer 1–4.
      */
-    private function validateDepartmentAccess($dept)
+    private function normalizeYearLevel(mixed $raw): int
     {
-        $user = auth()->user();
-        $userRole = strtolower($user->role ?? '');
+        $edpService = app(\App\Services\EdpCodeService::class);
+        return $edpService->yearLevelDigit($raw ?? 1);
+    }
+
+    /**
+     * Validate department access based on user role.
+     */
+    private function validateDepartmentAccess($dept): bool
+    {
+        $user      = auth()->user();
+        $userRole  = strtolower($user->role ?? '');
         $powerRoles = ['admin', 'registrar', 'associate_dean'];
 
-        // Power users can access all departments
         if (in_array($userRole, $powerRoles)) {
             return true;
         }
 
-        // Dean and OIC can only access their own department
         if (in_array($userRole, ['dean', 'oic'])) {
             return strtoupper($dept) === strtoupper($user->department);
         }
@@ -205,22 +214,27 @@ class ManageSubjects extends Component
         return false;
     }
 
+    // ============================================================
+    // CSV IMPORT
+    // ============================================================
+
     /**
-     * Handle CSV Import
+     * Preview CSV on upload — shows the first 10 rows with:
+     *   • duplicate flag (already exists in workspace)
+     *   • format flag (new vs legacy vs invalid)
      */
     public function updatedImportFile()
     {
         $this->validate(['importFile' => 'required|mimes:csv,txt|max:10240']);
 
-        usleep(500000); 
+        usleep(500000);
 
         $path = $this->importFile->getRealPath();
         $data = array_map('str_getcsv', file($path));
         $headerRow = array_shift($data);
-        
-        $normalizedHeader = array_map(fn($h) => strtolower(trim($h)), $headerRow);
 
-        // Security checks
+        $normalizedHeader = array_map(fn ($h) => strtolower(trim($h)), $headerRow);
+
         if (in_array('room_name', $normalizedHeader) || in_array('building', $normalizedHeader)) {
             $this->abortImport('Room Registry');
             return;
@@ -231,103 +245,181 @@ class ManageSubjects extends Component
             return;
         }
 
-        $required = ['edp_code', 'subject_code', 'section', 'description', 'major', 'year_level', 'units', 'department', 'duration_hours', 'meetings_per_week'];
-        $missing = array_diff($required, $normalizedHeader);
+        $required    = ['edp_code', 'subject_code', 'section', 'description', 'major', 'year_level', 'units', 'department', 'duration_hours', 'meetings_per_week'];
+        $missing     = array_diff($required, $normalizedHeader);
         $hasSubjectType = in_array('type', $normalizedHeader, true) || in_array('subject_type', $normalizedHeader, true);
 
-        if ($missing || !$hasSubjectType) {
+        if ($missing || ! $hasSubjectType) {
             $this->abortImport('Invalid Subject Template');
             return;
         }
 
-        // Preview data
-        $indexes = array_flip($normalizedHeader);
-        $period = $this->activePeriod();
-        $this->previewData = collect(array_slice($data, 0, 10))->map(function ($row) use ($indexes, $period) {
-            $edp = strtoupper(trim($row[$indexes['edp_code']] ?? ''));
-            $exists = $edp !== '' && Subject::edpExistsInWorkspace($edp, $period['school_year'], $period['semester']);
-            return [
-                'edp_code' => $edp,
-                'subject' => $row[$indexes['subject_code']] ?? '',
-                'exists' => $exists
-            ];
-        })->toArray();
+        $indexes    = array_flip($normalizedHeader);
+        $period     = $this->activePeriod();
+        $edpService = app(EdpCodeService::class);
+
+        $this->previewData = collect(array_slice($data, 0, 10))
+            ->map(function ($row, $index) use ($indexes, $period, $edpService) {
+                $edp    = strtoupper(trim($row[$indexes['edp_code']] ?? ''));
+                $exists = $edp !== '' && Subject::edpExistsInWorkspace($edp, $period['school_year'], $period['semester']);
+
+                // Format badge: 'new' | 'legacy' | 'invalid' | 'empty'
+                $formatLabel = $edp !== '' ? $edpService->formatLabel($edp) : 'empty';
+
+                // Semester-mismatch check: only meaningful for codes that pass format validation
+                $semesterMismatch = $formatLabel === 'new'
+                    && ! $edpService->validateSemesterMatch($edp, $period['semester']);
+
+                return [
+                    'row'               => $index + 2, // +2 = 1-based + skipped header
+                    'edp_code'          => $edp,
+                    'subject'           => $row[$indexes['subject_code']] ?? '',
+                    'exists'            => $exists,
+                    'format_label'      => $formatLabel,
+                    'semester_mismatch' => $semesterMismatch, // true = wrong semester digit for active workspace
+                ];
+            })
+            ->toArray();
     }
 
-    private function abortImport($detectedType)
+    private function abortImport($detectedType): void
     {
         $this->reset(['importFile', 'previewData']);
         $this->dispatch('toast', [
-            'type' => 'warning',
+            'type'    => 'warning',
             'message' => 'Incorrect CSV Detected',
-            'detail' => "This file appears to be for the {$detectedType}. Please upload the Subject CSV template instead."
+            'detail'  => "This file appears to be for the {$detectedType}. Please upload the Subject CSV template instead.",
         ]);
     }
 
     /**
-     * Import Subjects from CSV
+     * Import subjects from CSV.
+     *
+     * Validation enforced per row:
+     *   1. EDP code must NOT be empty.
+     *   2. EDP code must match the NEW 7-digit format: [MAJOR]-[YY][SEM][LEVEL][SEQ]
+     *      e.g. IT-2611001  — old format (IT-261001) is REJECTED.
+     *   3. EDP code must not already exist in the active workspace.
+     *   4. User must have department access for the row's department.
      */
     public function importSubjects()
     {
-        if (!$this->importFile) return;
+        if (! $this->importFile) {
+            return;
+        }
 
-        $path = $this->importFile->getRealPath();
-        $file = fopen($path, 'r');
+        $path   = $this->importFile->getRealPath();
+        $file   = fopen($path, 'r');
         $header = true;
         $indexes = [];
-        $count = 0;
-        $detectedDept = null; 
-        $actor = auth()->user();
 
-        $userRole = strtolower($actor->role);
-        $powerRoles = ['admin', 'registrar', 'associate_dean'];
+        $count        = 0;
+        $skipped      = 0;
+        $formatErrors   = []; // format / legacy EDP code errors
+        $semesterErrors = []; // correct format but wrong semester digit
+        $detectedDept = null;
+        $actor        = auth()->user();
+
+        $userRole    = strtolower($actor->role);
+        $powerRoles  = ['admin', 'registrar', 'associate_dean'];
         $isPowerUser = in_array($userRole, $powerRoles);
 
-        while (($row = fgetcsv($file, 1000, ",")) !== FALSE) {
+        $edpService = app(EdpCodeService::class);
+        $period     = $this->activePeriod();
+        $rowNumber  = 1; // header row
+
+        if (empty($period['semester']) || empty($period['school_year'])) {
+            fclose($file);
+            $this->dispatch('toast', [
+                'type'    => 'error',
+                'message' => 'No Active Workspace',
+                'detail'  => 'No active semester workspace found. Please configure the academic period in Settings before importing.',
+            ]);
+            return;
+        }
+
+        while (($row = fgetcsv($file, 1000, ',')) !== false) {
+            // Skip header row
             if ($header) {
                 $indexes = array_flip(array_map(fn ($h) => strtolower(trim($h)), $row));
-                $header = false;
+                $header  = false;
                 continue;
             }
 
+            $rowNumber++;
             $value = fn (string $key, $default = '') => trim((string) ($row[$indexes[$key] ?? -1] ?? $default));
             $typeColumn = array_key_exists('subject_type', $indexes) ? 'subject_type' : 'type';
 
-            if ($value('edp_code') === '') continue;
-
-            $rowDept       = strtoupper($value('department'));
-            $rowSection    = strtoupper($value('section', 'A'));
-            $rowMajor      = strtoupper($value('major'));
-            $rowYearLevel  = (int) $value('year_level', 1);
-            
-            // Authorization check
-            if (!$this->validateDepartmentAccess($rowDept)) {
-                continue; 
-            }
-
-            if (!$detectedDept && !empty($rowDept)) {
-                $detectedDept = $rowDept;
-            }
-
-            $rawDuration = $value('duration_hours', '3');
-            $rawType     = $value($typeColumn, 'Major');
-            $rawMeetings = (int) $value('meetings_per_week', 1);
-            $rawUnits    = (int) $value('units', 3);
-            $clampedUnits = max(3, min(5, $rawUnits));
-
-            $period = $this->activePeriod();
-            $edpCode = strtoupper($value('edp_code'));
-            $section = strtoupper($value('section', 'A'));
-
-            // EDP codes are unique only inside the active semester workspace.
-            $exists = Subject::edpExistsInWorkspace($edpCode, $period['school_year'], $period['semester']);
-
-            if ($exists) {
-                \Log::warning("Subject {$edpCode} already exists in {$period['semester']} {$period['school_year']}. Skipping import.");
+            // Skip rows with empty EDP code
+            if ($value('edp_code') === '') {
+                $skipped++;
                 continue;
             }
 
-            // Normalize type
+            $edpCode  = strtoupper($value('edp_code'));
+            $rowDept  = strtoupper($value('department'));
+
+            // -------------------------------------------------------
+            // VALIDATION 1a: New EDP format enforcement
+            // -------------------------------------------------------
+            // Only the 7-digit format is accepted:  [MAJOR]-[YY][SEM][LEVEL][SEQ]
+            // Example valid:   IT-2621001  (2nd semester)
+            // Example invalid: IT-261001   (old 6-digit — REJECTED)
+            // -------------------------------------------------------
+            if (! $edpService->isValidForCreation($edpCode)) {
+                $formatErrors[] = $edpService->validationMessage($edpCode, $rowNumber);
+                $skipped++;
+                continue;
+            }
+
+            // -------------------------------------------------------
+            // VALIDATION 1b: Semester digit must match active workspace
+            // -------------------------------------------------------
+            // e.g. workspace = 2nd Semester → digit must be "2"
+            //      IT-2611001 has digit "1" → REJECTED
+            //      IT-2621001 has digit "2" → ACCEPTED
+            // -------------------------------------------------------
+            if (! $edpService->validateSemesterMatch($edpCode, $period['semester'])) {
+                $semesterErrors[] = $edpService->semesterMismatchMessage($edpCode, $period['semester'], $rowNumber);
+                $skipped++;
+                continue;
+            }
+
+            // -------------------------------------------------------
+            // VALIDATION 2: Department access
+            // -------------------------------------------------------
+            if (! $this->validateDepartmentAccess($rowDept)) {
+                $skipped++;
+                continue;
+            }
+
+            if (! $detectedDept && ! empty($rowDept)) {
+                $detectedDept = $rowDept;
+            }
+
+            // -------------------------------------------------------
+            // VALIDATION 3: Workspace duplicate check
+            // -------------------------------------------------------
+            $exists  = Subject::edpExistsInWorkspace($edpCode, $period['school_year'], $period['semester']);
+
+            if ($exists) {
+                \Log::warning("CSV import row {$rowNumber}: EDP code {$edpCode} already exists in {$period['semester']} {$period['school_year']}. Skipping.");
+                $skipped++;
+                continue;
+            }
+
+            // -------------------------------------------------------
+            // All validations passed — create the subject
+            // -------------------------------------------------------
+            $rowMajor      = strtoupper($value('major'));
+            // normalizeYearLevel() handles "1st Year", "Year 1", "1st", "1", etc.
+            $rowYearLevel  = $this->normalizeYearLevel($value('year_level', 1));
+            $rawDuration   = $value('duration_hours', '3');
+            $rawType       = $value($typeColumn, 'Major');
+            $rawMeetings   = (int) $value('meetings_per_week', 1);
+            $rawUnits      = (int) $value('units', 3);
+            $clampedUnits  = max(3, min(5, $rawUnits));
+            $section       = strtoupper($value('section', 'A'));
             $normalizedType = str_contains(strtolower($rawType), 'minor') ? 'Minor' : 'Major';
             $specialization = strtoupper($value('specialization', $rowMajor));
 
@@ -351,24 +443,52 @@ class ManageSubjects extends Component
                 'workspace_key'     => $period['workspace_key'],
                 'is_archived'       => false,
             ]);
+
             $count++;
         }
         fclose($file);
 
+        // ── Show per-row semester-digit mismatch errors ──────────────
+        if (! empty($semesterErrors)) {
+            $semSample = array_slice($semesterErrors, 0, 3);
+            $more = count($semesterErrors) > 3
+                ? (' … and ' . (count($semesterErrors) - 3) . ' more.')
+                : '';
+            $this->dispatch('toast', [
+                'type'    => 'error',
+                'message' => 'Wrong Semester in EDP Code',
+                'detail'  => implode(' | ', $semSample) . $more,
+            ]);
+        }
+
+        // ── Show per-row format errors ────────────────────────────────
+        if (! empty($formatErrors)) {
+            $errorSample = array_slice($formatErrors, 0, 5);
+            $more = count($formatErrors) > 5 ? (' … and ' . (count($formatErrors) - 5) . ' more.') : '';
+            $this->dispatch('toast', [
+                'type'    => 'error',
+                'message' => 'Invalid EDP Code Format',
+                'detail'  => implode(' | ', $errorSample) . $more,
+            ]);
+        }
+
         if ($count > 0) {
-            $targetDept = !empty($this->selectedDept) ? $this->selectedDept : ($detectedDept ?? $actor->department ?? 'General');
+            $targetDept = ! empty($this->selectedDept)
+                ? $this->selectedDept
+                : ($detectedDept ?? $actor->department ?? 'General');
 
             Activity::create([
                 'user_id'     => $actor->id,
                 'action'      => 'Import',
                 'module'      => 'Subjects',
-                'description' => "Successfully batch-imported {$count} subjects into the {$targetDept} department.",
+                'description' => "Successfully batch-imported {$count} subjects into the {$targetDept} department."
+                    . ($skipped > 0 ? " ({$skipped} rows skipped due to validation errors.)" : ''),
             ]);
 
             $recipients = User::where('id', '!=', $actor->id)
-                ->where(function($query) use ($targetDept) {
+                ->where(function ($query) use ($targetDept) {
                     $query->whereIn('role', ['admin', 'registrar', 'associate_dean'])
-                          ->orWhere(function($q) use ($targetDept) {
+                          ->orWhere(function ($q) use ($targetDept) {
                               $q->whereIn('role', ['dean', 'oic'])
                                 ->where('department', $targetDept);
                           });
@@ -376,42 +496,53 @@ class ManageSubjects extends Component
 
             if ($recipients->count() > 0) {
                 Notification::send($recipients, new SubjectUpdatedNotification(
-                    (object)[
-                        'subject_code' => 'BATCH IMPORT', 
-                        'subject_description' => "{$count} Subjects synchronized for {$targetDept}"
-                    ], 
-                    'subject_imported' 
+                    (object) [
+                        'subject_code'        => 'BATCH IMPORT',
+                        'subject_description' => "{$count} Subjects synchronized for {$targetDept}",
+                    ],
+                    'subject_imported'
                 ));
             }
 
             $this->dispatch('notify', [
-                'type'        => 'success', 
+                'type'        => 'success',
                 'title'       => 'CATALOG SYNCED',
-                'message'     => "Successfully batch-imported {$count} subjects.",
-                'sender_name' => $actor->name
+                'message'     => "Successfully batch-imported {$count} subjects."
+                    . ($skipped > 0 ? " ({$skipped} skipped.)" : ''),
+                'sender_name' => $actor->name,
             ]);
 
             $this->dispatch('subjectUpdated');
 
             $this->dispatch('toast', [
-                'type'    => 'success', 
-                'message' => 'Import Complete', 
-                'detail'  => "{$count} subjects added/updated for {$targetDept}."
+                'type'    => 'success',
+                'message' => 'Import Complete',
+                'detail'  => "{$count} subjects added for {$targetDept}."
+                    . ($skipped > 0 ? " {$skipped} rows were skipped." : ''),
             ]);
-
         } else {
+            $allRejected = ! empty($formatErrors) || ! empty($semesterErrors);
             $this->dispatch('toast', [
-                'type'    => 'error', 
-                'message' => 'Import Failed', 
-                'detail'  => "No valid subjects found or unauthorized department access."
+                'type'    => 'error',
+                'message' => 'Import Failed',
+                'detail'  => ! $allRejected
+                    ? 'No valid subjects found or unauthorized department access.'
+                    : 'All rows were rejected. Check that EDP codes use the correct format '
+                        . 'and the correct semester digit for the active workspace '
+                        . '(e.g. IT-' . $period['edp_prefix'] . '1001 for '
+                        . Setting::semesterLabel($period['semester']) . ').',
             ]);
         }
 
         $this->reset(['importFile', 'bulkOpen', 'previewData']);
     }
 
+    // ============================================================
+    // MODAL MANAGEMENT
+    // ============================================================
+
     /**
-     * Open modal for new subject
+     * Open modal to create a new subject.
      */
     public function openModal()
     {
@@ -422,42 +553,37 @@ class ManageSubjects extends Component
 
         $this->resetValidation();
         $this->resetExcept(['selectedDept', 'search', 'selectedYear', 'selectedMajor', 'selectedSection']);
-        $this->isEditMode = false;
-        $this->units = 3;
-        $this->type = 'Major';
-        $this->duration_hours = 3;
+        $this->isEditMode       = false;
+        $this->units            = 3;
+        $this->type             = 'Major';
+        $this->duration_hours   = 3;
         $this->meetings_per_week = 1;
-        $this->major = '';
-        $this->year_level = '';
-        $this->edp_code = '';
-        $this->subject_code = '';
-        $this->section = '';
+        $this->major            = '';
+        $this->year_level       = '';
+        $this->edp_code         = '';
+        $this->subject_code     = '';
+        $this->section          = '';
 
-        $user = auth()->user();
+        $user     = auth()->user();
         $userRole = strtolower($user->role);
-        $powerRoles = ['admin', 'registrar', 'associate_dean'];
 
-        // Restrict access based on role
-        if (!in_array($userRole, $powerRoles)) {
-            // Dean and OIC can only manage their own department
-            $this->department = $user->department;
-        } else {
-            $this->department = '';
-        }
+        $this->department = in_array($userRole, ['admin', 'registrar', 'associate_dean'])
+            ? ''
+            : $user->department;
 
         $this->showModal = true;
     }
 
     /**
-     * Edit existing subject
+     * Load an existing subject into the edit form.
      */
     public function editSubject($id)
     {
         if ($this->catalogMode !== 'active') {
             $this->dispatch('toast', [
-                'type' => 'warning',
+                'type'    => 'warning',
                 'message' => 'Archive is read only',
-                'detail' => 'Switch back to the current semester before editing subjects.'
+                'detail'  => 'Switch back to the current semester before editing subjects.',
             ]);
             return;
         }
@@ -465,44 +591,53 @@ class ManageSubjects extends Component
         $this->resetValidation();
         $subject = $this->activeSubjectsQuery()->findOrFail($id);
 
-        // Validate access
-        if (!$this->validateDepartmentAccess($subject->department)) {
+        if (! $this->validateDepartmentAccess($subject->department)) {
             $this->dispatch('toast', [
-                'type' => 'error',
+                'type'    => 'error',
                 'message' => 'Access Denied',
-                'detail' => 'You do not have permission to edit subjects in this department.'
+                'detail'  => 'You do not have permission to edit subjects in this department.',
             ]);
             return;
         }
 
-        $this->isEditMode = true;
-        $this->subjectId = $subject->id;
-        $this->edp_code = $subject->edp_code;
-        $this->subject_code = $subject->subject_code;
-        $this->section = $subject->section;
-        $this->description = $subject->description;
-        $this->units = $subject->units;
-        $this->type = $subject->type ?? 'Major';
-        $this->duration_hours = $subject->duration_hours ?? 3;
+        $this->isEditMode        = true;
+        $this->subjectId         = $subject->id;
+        $this->edp_code          = $subject->edp_code;
+        $this->subject_code      = $subject->subject_code;
+        $this->section           = $subject->section;
+        $this->description       = $subject->description;
+        $this->units             = $subject->units;
+        $this->type              = $subject->type ?? 'Major';
+        $this->duration_hours    = $subject->duration_hours ?? 3;
         $this->meetings_per_week = $subject->meetings_per_week ?? 1;
-        $this->major = $subject->major ?? '';
-        $this->year_level = $subject->year_level ?? 1;
-        $this->department = $subject->department;
-        
+        $this->major             = $subject->major ?? '';
+        $this->year_level        = $subject->year_level ?? 1;
+        $this->department        = $subject->department;
+
         $this->showModal = true;
     }
 
     public function updatedUnits($value)
     {
-        if (!is_numeric($value) || $value < 3) {
+        if (! is_numeric($value) || $value < 3) {
             $this->units = 3;
         } elseif ($value > 5) {
             $this->units = 5;
         }
     }
 
+    // ============================================================
+    // SAVE SUBJECT (Create / Update)
+    // ============================================================
+
     /**
-     * ✅ FIXED: Save Subject (Create or Update) - Only validate uniqueness when section changes
+     * Validate and save a subject (create or update).
+     *
+     * EDP code validation rules enforced here:
+     *   • Required.
+     *   • Must match /^[A-Z]{2,4}-\d{7}$/ — the new 7-digit format only.
+     *     Invalid: IT-261001 (old 6-digit), IT2611001 (no dash), IT-26A1001 (alpha in digits).
+     *   • Must be unique within the active semester workspace.
      */
     public function saveSubject()
     {
@@ -511,83 +646,106 @@ class ManageSubjects extends Component
             return;
         }
 
-        $user = auth()->user();
-        $userRole = strtolower($user->role ?? '');
-        $powerRoles = ['admin', 'registrar', 'associate_dean'];
-        $isPowerUser = in_array($userRole, $powerRoles);
+        $user        = auth()->user();
+        $userRole    = strtolower($user->role ?? '');
+        $isPowerUser = in_array($userRole, ['admin', 'registrar', 'associate_dean']);
 
-        // Validate department access
-        if (!$isPowerUser && !$this->validateDepartmentAccess($this->department)) {
+        if (! $isPowerUser && ! $this->validateDepartmentAccess($this->department)) {
             $this->addError('department', 'You do not have permission to manage subjects in this department.');
             return;
         }
 
-        $edpUpper = strtoupper($this->edp_code);
-        $sectionUpper = strtoupper($this->section);
-        $deptUpper = strtoupper($this->department);
+        $edpUpper         = strtoupper(trim($this->edp_code));
+        $sectionUpper     = strtoupper($this->section);
         $subjectCodeUpper = strtoupper($this->subject_code);
-        $majorUpper = strtoupper($this->major);
-        $period = $this->activePeriod();
+        $majorUpper       = strtoupper($this->major);
+        $period           = $this->activePeriod();
 
-        // Validation
+        // -------------------------------------------------------
+        // VALIDATION — includes strict EDP format enforcement
+        // -------------------------------------------------------
         $this->validate([
-            'edp_code'       => [
+            'edp_code' => [
                 'required',
+                // Format: [MAJOR]-[YY][SEM][LEVEL][SEQ]
+                //   MAJOR  = 2–4 uppercase letters  (e.g. IT)
+                //   YY     = 2-digit school-year start (2026-2027 → 26)
+                //   SEM    = semester digit: 1=1st · 2=2nd · 3=Summer
+                //   LEVEL  = year level: 1=1st · 2=2nd · 3=3rd · 4=4th
+                //   SEQ    = 3-digit zero-padded sequence (001, 002, …)
+                //   Valid:   IT-2611001   IT-2621001   IT-2631001
+                //   Invalid: IT-261001 (old 6-digit)  IT2611001 (no dash)
+                'regex:/^[A-Z]{2,4}-\d{7}$/',
                 Rule::unique('subjects', 'edp_code')
                     ->where(fn ($query) => $query
                         ->where('school_year', $period['school_year'])
-                        ->where('semester', $period['semester']))
+                        ->where('semester',    $period['semester']))
                     ->ignore($this->subjectId),
             ],
-            'subject_code'   => 'required',
-            'section'        => 'required|max:10',
-            'department'     => 'required',
-            'major'          => 'required',
-            'year_level'     => 'required|integer|min:1|max:4',
-            'description'    => 'required',
-            'units'          => 'required|integer|min:3|max:5',
-            'type'           => 'required|in:Major,Minor',
-            'duration_hours' => 'required|numeric|min:1|max:10',
+            'subject_code'      => 'required',
+            'section'           => 'required|max:10',
+            'department'        => 'required',
+            'major'             => 'required',
+            'year_level'        => 'required|integer|min:1|max:4',
+            'description'       => 'required',
+            'units'             => 'required|integer|min:3|max:5',
+            'type'              => 'required|in:Major,Minor',
+            'duration_hours'    => 'required|numeric|min:1|max:10',
             'meetings_per_week' => 'required|integer|min:1|max:5',
+        ], [
+            'edp_code.required' => 'The EDP code is required.',
+            'edp_code.regex'    => 'Invalid EDP code format. '
+                . 'Required: [MAJOR]-[YY][SEM][LEVEL][SEQ] — e.g. IT-2611001 '
+                . '(26=year · 1=1st sem · 1=1st year · 001=sequence). '
+                . 'The old 6-digit format (e.g. IT-261001) is no longer accepted.',
+            'edp_code.unique'   => "EDP code \"{$edpUpper}\" already exists in {$period['semester']} {$period['school_year']}.",
         ]);
 
-        // ✅ FIXED: Only check for duplicate subject code if NOT in edit mode
-        // When editing, we allow the same subject code to remain in the same section
-        // When creating new, we check if this code already exists in this SECTION
-        if (!$this->isEditMode && $this->getSubjectCodeDuplicateProperty()) {
+        // ── VALIDATION B: Legacy-code specific message ────────────────
+        $edpService = app(EdpCodeService::class);
+        if (! $edpService->isNew($edpUpper)) {
+            $this->addError('edp_code', $edpService->validationMessage($edpUpper));
+            return;
+        }
+
+        // ── VALIDATION C: Semester digit must match active workspace ──
+        // The 3rd numeric digit after the dash encodes the semester.
+        // e.g. active workspace = 2nd Semester → digit must be "2"
+        //      IT-2611001 digit "1" → REJECTED  (1st Semester code in 2nd Semester workspace)
+        //      IT-2621001 digit "2" → ACCEPTED
+        if (! $edpService->validateSemesterMatch($edpUpper, $period['semester'])) {
+            $this->addError('edp_code', $edpService->semesterMismatchMessage($edpUpper, $period['semester']));
+            return;
+        }
+
+        // Duplicate subject-code check (only on create)
+        if (! $this->isEditMode && $this->getSubjectCodeDuplicateProperty()) {
             $this->addError('subject_code', "Subject code '{$subjectCodeUpper}' already exists in Section {$sectionUpper} for {$majorUpper} - Year {$this->year_level}.");
             return;
         }
 
-        // Check for duplicate EDP inside this semester workspace.
-        if (!$this->isEditMode) {
-            $duplicate = Subject::edpExistsInWorkspace($edpUpper, $period['school_year'], $period['semester']);
-
-            if ($duplicate) {
-                $this->addError('edp_code', "EDP code '{$edpUpper}' already exists in {$period['semester']} {$period['school_year']}.");
-                return;
-            }
+        // Extra workspace duplicate guard on create
+        if (! $this->isEditMode && Subject::edpExistsInWorkspace($edpUpper, $period['school_year'], $period['semester'])) {
+            $this->addError('edp_code', "EDP code '{$edpUpper}' already exists in {$period['semester']} {$period['school_year']}.");
+            return;
         }
 
         $this->executeSave();
     }
 
     /**
-     * Execute save operation
+     * Execute the actual database write after all validation passes.
      */
     public function executeSave()
     {
-        $user = auth()->user();
-        $deptUpper = strtoupper($this->department);
-        $edpUpper = strtoupper($this->edp_code);
+        $user             = auth()->user();
+        $deptUpper        = strtoupper($this->department);
+        $edpUpper         = strtoupper($this->edp_code);
         $subjectCodeUpper = strtoupper($this->subject_code);
-        $majorUpper = strtoupper($this->major);
-        $period = $this->activePeriod();
+        $majorUpper       = strtoupper($this->major);
+        $period           = $this->activePeriod();
 
-        // Normalize type
-        $normalizedType = in_array($this->type, ['Major', 'Minor']) 
-            ? $this->type 
-            : 'Major';
+        $normalizedType = in_array($this->type, ['Major', 'Minor']) ? $this->type : 'Major';
 
         $subject = Subject::updateOrCreate(
             ['id' => $this->subjectId],
@@ -597,13 +755,13 @@ class ManageSubjects extends Component
                 'section'           => strtoupper($this->section),
                 'description'       => $this->description,
                 'major'             => $majorUpper,
-                'year_level'        => (int)$this->year_level,
-                'units'             => (int)$this->units,
+                'year_level'        => (int) $this->year_level,
+                'units'             => (int) $this->units,
                 'type'              => $normalizedType,
                 'subject_type'      => $normalizedType,
                 'specialization'    => $majorUpper,
-                'duration_hours'    => (float)$this->duration_hours,
-                'meetings_per_week' => (int)$this->meetings_per_week,
+                'duration_hours'    => (float) $this->duration_hours,
+                'meetings_per_week' => (int) $this->meetings_per_week,
                 'department'        => $deptUpper,
                 'semester'          => $period['semester'],
                 'school_year'       => $period['school_year'],
@@ -621,73 +779,66 @@ class ManageSubjects extends Component
         $this->showModal = false;
 
         $this->dispatch('toast', [
-            'type'    => 'success', 
-            'message' => $this->isEditMode ? 'Subject Updated' : 'Subject Created', 
-            'detail'  => "{$subject->subject_code} is now synchronized."
+            'type'    => 'success',
+            'message' => $this->isEditMode ? 'Subject Updated' : 'Subject Created',
+            'detail'  => "{$subject->subject_code} is now synchronized.",
         ]);
 
         $this->dispatch('subjectUpdated');
         $this->completeFormReset();
     }
 
-    /**
-     * ✅ Complete form reset to prevent stale data
-     */
-    private function completeFormReset()
+    private function completeFormReset(): void
     {
         $this->reset([
-            'edp_code', 
-            'subject_code', 
-            'section', 
-            'description', 
-            'units', 
-            'type', 
-            'duration_hours', 
-            'major', 
-            'year_level', 
-            'department', 
-            'subjectId', 
-            'isEditMode',
-            'meetings_per_week'
+            'edp_code', 'subject_code', 'section', 'description',
+            'units', 'type', 'duration_hours', 'major', 'year_level',
+            'department', 'subjectId', 'isEditMode', 'meetings_per_week',
         ]);
     }
 
-    private function logActivityAndNotify($subject, $user, $deptUpper)
+    private function logActivityAndNotify($subject, $user, $deptUpper): void
     {
         Activity::create([
             'user_id'     => $user->id,
             'action'      => $this->isEditMode ? 'Update' : 'Add',
             'module'      => 'Subjects',
-            'description' => $this->isEditMode 
+            'description' => $this->isEditMode
                 ? "Updated {$subject->subject_code} in {$deptUpper}."
                 : "Manually added {$subject->subject_code} to {$deptUpper}.",
         ]);
 
         $recipients = User::where('id', '!=', $user->id)
-            ->where(function($query) use ($deptUpper) {
+            ->where(function ($query) use ($deptUpper) {
                 $query->whereIn('role', ['admin', 'registrar', 'associate_dean'])
-                      ->orWhere(function($q) use ($deptUpper) {
+                      ->orWhere(function ($q) use ($deptUpper) {
                           $q->whereIn('role', ['dean', 'oic'])->where('department', $deptUpper);
                       });
             })->get();
 
         if ($recipients->count() > 0) {
-            Notification::send($recipients, 
-                new SubjectUpdatedNotification($subject, $this->isEditMode ? 'updated' : 'created')
-            );
+            Notification::send($recipients, new SubjectUpdatedNotification(
+                $subject,
+                $this->isEditMode ? 'updated' : 'created'
+            ));
         }
     }
 
+    // ============================================================
+    // BULK OPERATIONS
+    // ============================================================
+
     /**
-     * ✅ FIXED BULK DUPLICATE METHOD
+     * Duplicate selected subjects into the next section.
+     * New EDP codes are auto-generated using the current workspace.
      */
     public function bulkDuplicate()
     {
         if ($this->catalogMode !== 'active') {
             $this->dispatch('toast', [
-                'type' => 'warning',
+                'type'    => 'warning',
                 'message' => 'Archive is read only',
-                'detail' => 'Switch back to the current semester before duplicating subjects.'
+                'detail'  => 'Switch back to the current semester before duplicating subjects.',
             ]);
             return;
         }
@@ -695,33 +846,27 @@ class ManageSubjects extends Component
         $count = count($this->selectedSubjects);
         if ($count === 0) return;
 
-        $actor = auth()->user();
+        $actor           = auth()->user();
         $duplicatedCount = 0;
-        $skippedCount = 0;
-        $skippedReasons = [];
-        $period = $this->activePeriod();
+        $skippedCount    = 0;
+        $skippedReasons  = [];
+        $period          = $this->activePeriod();
 
         foreach ($this->selectedSubjects as $id) {
             $original = $this->activeSubjectsQuery()->find($id);
-            if (!$original) continue;
+            if (! $original) continue;
 
-            // Validate access
-            if (!$this->validateDepartmentAccess($original->department)) {
+            if (! $this->validateDepartmentAccess($original->department)) {
                 $skippedCount++;
                 continue;
             }
 
             $currentSection = strtoupper($original->section ?: 'A');
-            
-            // Calculate next section
-            if ($currentSection === 'Z') {
-                $nextSection = 'AA';
-            } elseif ($currentSection === 'AA') {
-                $nextSection = 'AB';
-            } else {
-                $nextSection = chr(ord($currentSection) + 1);
-            }
+            $nextSection    = $currentSection === 'Z'  ? 'AA'
+                : ($currentSection === 'AA' ? 'AB'
+                : chr(ord($currentSection) + 1));
 
+            // Auto-generate a new EDP code in the new 7-digit format
             $newEdp = Subject::generateEdpCode(
                 $original->major ?: strtok((string) $original->edp_code, '-'),
                 (int) $original->year_level,
@@ -729,29 +874,25 @@ class ManageSubjects extends Component
                 $period['semester']
             );
 
-            // ✅ CRITICAL CHECK: Does this SUBJECT CODE already exist in the NEXT SECTION?
             $subjectExistsInNextSection = $this->activeSubjectsQuery()
                 ->where('subject_code', strtoupper($original->subject_code))
-                ->where('section', $nextSection)
-                ->where('major', $original->major)
-                ->where('year_level', $original->year_level)
-                ->where('department', $original->department)
+                ->where('section',      $nextSection)
+                ->where('major',        $original->major)
+                ->where('year_level',   $original->year_level)
+                ->where('department',   $original->department)
                 ->exists();
-            
+
             if ($subjectExistsInNextSection) {
                 $skippedCount++;
                 $skippedReasons[] = "{$original->subject_code} in Section {$nextSection} already exists";
                 continue;
             }
 
-            $sectionExists = Subject::edpExistsInWorkspace($newEdp, $period['school_year'], $period['semester']);
-            
-            if ($sectionExists) {
+            if (Subject::edpExistsInWorkspace($newEdp, $period['school_year'], $period['semester'])) {
                 $skippedCount++;
                 continue;
             }
 
-            // All checks passed, create the new subject
             try {
                 Subject::create([
                     'edp_code'          => $newEdp,
@@ -785,31 +926,28 @@ class ManageSubjects extends Component
             'user_id'     => $actor->id,
             'action'      => 'Bulk Duplicate',
             'module'      => 'Subjects',
-            'description' => "Created {$duplicatedCount} new subject sections via bulk duplication." . ($skippedCount > 0 ? " ({$skippedCount} skipped - already exist)" : ""),
+            'description' => "Created {$duplicatedCount} new subject sections via bulk duplication."
+                . ($skippedCount > 0 ? " ({$skippedCount} skipped — already exist)" : ''),
         ]);
 
         $this->reset(['selectedSubjects', 'selectAll']);
         $this->dispatch('subjectUpdated');
-        
+
         if ($skippedCount > 0) {
             $detail = "Duplicated {$duplicatedCount} subjects, {$skippedCount} skipped.";
-            if (!empty($skippedReasons)) {
-                $detail .= " Reasons: " . implode(", ", array_slice($skippedReasons, 0, 3));
+            if (! empty($skippedReasons)) {
+                $detail .= ' Reasons: ' . implode(', ', array_slice($skippedReasons, 0, 3));
                 if (count($skippedReasons) > 3) {
-                    $detail .= ", and more...";
+                    $detail .= ', and more…';
                 }
             }
-            
-            $this->dispatch('toast', [
-                'type'    => 'warning',
-                'message' => 'Bulk Duplicate Partial',
-                'detail'  => $detail
-            ]);
+
+            $this->dispatch('toast', ['type' => 'warning', 'message' => 'Bulk Duplicate Partial', 'detail' => $detail]);
         } else {
             $this->dispatch('toast', [
                 'type'    => 'success',
                 'message' => 'Bulk Duplicate Complete',
-                'detail'  => "{$duplicatedCount} subjects have been copied to the next section."
+                'detail'  => "{$duplicatedCount} subjects have been copied to the next section.",
             ]);
         }
     }
@@ -817,53 +955,47 @@ class ManageSubjects extends Component
     public function updatedSelectAll($value)
     {
         if ($this->catalogMode !== 'active') {
-            $this->selectAll = false;
+            $this->selectAll       = false;
             $this->selectedSubjects = [];
             return;
         }
 
         if ($value) {
-            $user = auth()->user();
-            $userRole = strtolower($user->role ?? '');
-            $powerRoles = ['admin', 'registrar', 'associate_dean'];
-            $isPowerUser = in_array($userRole, $powerRoles);
+            $user        = auth()->user();
+            $userRole    = strtolower($user->role ?? '');
+            $isPowerUser = in_array($userRole, ['admin', 'registrar', 'associate_dean']);
 
             $query = $this->activeSubjectsQuery();
 
-            // 1. Department filter based on role
-            if (!$isPowerUser) {
+            if (! $isPowerUser) {
                 $query->where('department', $user->department);
-            } elseif (!empty($this->selectedDept)) {
+            } elseif (! empty($this->selectedDept)) {
                 $query->where('department', $this->selectedDept);
             }
 
-            // 2. Section filter
-            if (!empty($this->selectedSection)) {
+            if (! empty($this->selectedSection)) {
                 $query->where('section', $this->selectedSection);
             }
 
-            // 3. Search with closure to prevent filter interference
-            if (!empty($this->search)) {
-                $query->where(function($q) {
+            if (! empty($this->search)) {
+                $query->where(function ($q) {
                     $q->where('subject_code', 'like', "%{$this->search}%")
-                      ->orWhere('edp_code', 'like', "%{$this->search}%")
+                      ->orWhere('edp_code',   'like', "%{$this->search}%")
                       ->orWhere('description', 'like', "%{$this->search}%");
                 });
             }
 
-            // 4. Year filter
-            if (!empty($this->selectedYear)) {
+            if (! empty($this->selectedYear)) {
                 $query->where('year_level', $this->selectedYear);
             }
 
-            // 5. Major filter
-            if (!empty($this->selectedMajor)) {
+            if (! empty($this->selectedMajor)) {
                 $query->where('major', strtoupper($this->selectedMajor));
             }
 
             $this->selectedSubjects = $query
                 ->pluck('id')
-                ->map(fn($id) => (string)$id)
+                ->map(fn ($id) => (string) $id)
                 ->toArray();
         } else {
             $this->selectedSubjects = [];
@@ -874,26 +1006,25 @@ class ManageSubjects extends Component
     {
         if ($this->catalogMode !== 'active') {
             $this->dispatch('toast', [
-                'type' => 'warning',
+                'type'    => 'warning',
                 'message' => 'Archive is read only',
-                'detail' => 'Switch back to the current semester before editing subjects.'
+                'detail'  => 'Switch back to the current semester before editing subjects.',
             ]);
             return;
         }
 
         $count = count($this->selectedSubjects);
-        $user = auth()->user();
-        
+        $user  = auth()->user();
+
         if ($count > 0) {
             $sampleSubject = $this->activeSubjectsQuery()->whereIn('id', $this->selectedSubjects)->first();
-            $targetDept = $sampleSubject ? $sampleSubject->department : ($user->department ?? 'General');
+            $targetDept    = $sampleSubject ? $sampleSubject->department : ($user->department ?? 'General');
 
-            // Validate access
-            if (!$this->validateDepartmentAccess($targetDept)) {
+            if (! $this->validateDepartmentAccess($targetDept)) {
                 $this->dispatch('toast', [
-                    'type' => 'error',
+                    'type'    => 'error',
                     'message' => 'Access Denied',
-                    'detail' => 'You do not have permission to delete subjects in this department.'
+                    'detail'  => 'You do not have permission to delete subjects in this department.',
                 ]);
                 return;
             }
@@ -908,9 +1039,9 @@ class ManageSubjects extends Component
             ]);
 
             $recipients = User::where('id', '!=', $user->id)
-                ->where(function($query) use ($targetDept) {
+                ->where(function ($query) use ($targetDept) {
                     $query->whereIn('role', ['admin', 'registrar', 'associate_dean'])
-                          ->orWhere(function($q) use ($targetDept) {
+                          ->orWhere(function ($q) use ($targetDept) {
                               $q->whereIn('role', ['dean', 'oic'])
                                 ->where('department', $targetDept);
                           });
@@ -918,25 +1049,25 @@ class ManageSubjects extends Component
 
             if ($recipients->count() > 0) {
                 Notification::send($recipients, new SubjectUpdatedNotification(
-                    (object)[
-                        'subject_code' => 'BATCH PURGE', 
-                        'subject_description' => "{$count} Records removed from {$targetDept}"
-                    ], 
-                    'deleted' 
+                    (object) [
+                        'subject_code'        => 'BATCH PURGE',
+                        'subject_description' => "{$count} Records removed from {$targetDept}",
+                    ],
+                    'deleted'
                 ));
             }
 
             $this->dispatch('notify', [
-                'type'        => 'error', 
-                'title'       => 'REGISTRY PURGED', 
+                'type'        => 'error',
+                'title'       => 'REGISTRY PURGED',
                 'message'     => "Successfully removed {$count} subjects from the database.",
-                'sender_name' => $user->name
+                'sender_name' => $user->name,
             ]);
 
             $this->dispatch('toast', [
-                'type'    => 'success', 
-                'message' => 'Batch Deleted', 
-                'detail'  => "{$count} subjects successfully removed."
+                'type'    => 'success',
+                'message' => 'Batch Deleted',
+                'detail'  => "{$count} subjects successfully removed.",
             ]);
 
             $this->dispatch('subjectUpdated');
@@ -948,44 +1079,40 @@ class ManageSubjects extends Component
     {
         if ($this->catalogMode !== 'active') {
             $this->dispatch('toast', [
-                'type' => 'warning',
+                'type'    => 'warning',
                 'message' => 'Archive is read only',
-                'detail' => 'Archived subjects cannot be edited or deleted from this view.'
+                'detail'  => 'Archived subjects cannot be edited or deleted from this view.',
             ]);
             return;
         }
 
-        $user = auth()->user();
+        $user    = auth()->user();
         $subject = $this->activeSubjectsQuery()->findOrFail($id);
 
-        // Validate access
-        if (!$this->validateDepartmentAccess($subject->department)) {
+        if (! $this->validateDepartmentAccess($subject->department)) {
             $this->dispatch('toast', [
-                'type' => 'error',
+                'type'    => 'error',
                 'message' => 'Access Denied',
-                'detail' => 'You do not have permission to delete subjects in this department.'
+                'detail'  => 'You do not have permission to delete subjects in this department.',
             ]);
             return;
         }
 
         $subjectCode = $subject->subject_code;
         $subjectDesc = $subject->description;
-        $targetDept = $subject->department;
+        $targetDept  = $subject->department;
 
         $recipients = User::where('id', '!=', $user->id)
-            ->where(function($query) use ($targetDept) {
+            ->where(function ($query) use ($targetDept) {
                 $query->whereIn('role', ['admin', 'registrar', 'associate_dean'])
-                      ->orWhere(function($q) use ($targetDept) {
+                      ->orWhere(function ($q) use ($targetDept) {
                           $q->whereIn('role', ['dean', 'oic'])
                             ->where('department', $targetDept);
                       });
             })->get();
 
         if ($recipients->count() > 0) {
-            Notification::send($recipients, new SubjectUpdatedNotification(
-                $subject, 
-                'deleted'
-            ));
+            Notification::send($recipients, new SubjectUpdatedNotification($subject, 'deleted'));
         }
 
         $subject->delete();
@@ -998,46 +1125,44 @@ class ManageSubjects extends Component
         ]);
 
         $this->dispatch('notify', [
-            'type'        => 'error', 
-            'title'       => 'SUBJECT REMOVED', 
+            'type'        => 'error',
+            'title'       => 'SUBJECT REMOVED',
             'message'     => "{$subjectCode} has been deleted from the registry.",
-            'sender_name' => $user->name
+            'sender_name' => $user->name,
         ]);
 
         $this->dispatch('toast', [
-            'type'    => 'warning', 
-            'message' => 'Subject Deleted', 
-            'detail'  => "{$subjectCode} - {$subjectDesc} removed."
+            'type'    => 'warning',
+            'message' => 'Subject Deleted',
+            'detail'  => "{$subjectCode} - {$subjectDesc} removed.",
         ]);
 
         $this->dispatch('subjectUpdated');
     }
 
-    public function mount() {
-        $user = auth()->user();
-        $userRole = strtolower($user->role);
-        $powerRoles = ['admin', 'registrar', 'associate_dean'];
+    // ============================================================
+    // LIFECYCLE
+    // ============================================================
 
-        if (!in_array($userRole, $powerRoles)) {
-            $this->selectedDept = $user->department;
-        } else {
-            $this->selectedDept = '';
-        }
+    public function mount()
+    {
+        $user     = auth()->user();
+        $userRole = strtolower($user->role);
+
+        $this->selectedDept = in_array($userRole, ['admin', 'registrar', 'associate_dean'])
+            ? ''
+            : $user->department;
     }
 
-    /**
-     * FIXED RENDER METHOD — scoped to active (non-archived) subjects only
-     */
     public function render()
     {
-        $user = auth()->user();
-        $userRole = strtolower($user->role ?? '');
-        $powerRoles = ['admin', 'registrar', 'associate_dean'];
-        $isPowerUser = in_array($userRole, $powerRoles);
+        $user        = auth()->user();
+        $userRole    = strtolower($user->role ?? '');
+        $isPowerUser = in_array($userRole, ['admin', 'registrar', 'associate_dean']);
 
-        $period = $this->activePeriod();
+        $period         = $this->activePeriod();
         $archiveOptions = $this->archiveOptions();
-        $isArchiveMode = $this->catalogMode === 'archive';
+        $isArchiveMode  = $this->catalogMode === 'archive';
 
         $query = $isArchiveMode
             ? Subject::archived()->where('archive_batch', $this->selectedArchiveBatch)
@@ -1047,40 +1172,34 @@ class ManageSubjects extends Component
             $query->whereRaw('1 = 0');
         }
 
-        // 1. DEPARTMENT FILTER - ROLE-BASED SECURITY
-        if (!$isPowerUser) {
+        if (! $isPowerUser) {
             $query->where('department', $user->department);
-        } elseif (!empty($this->selectedDept)) {
+        } elseif (! empty($this->selectedDept)) {
             $query->where('department', $this->selectedDept);
         }
 
-        // 2. SECTION FILTER
-        if (!empty($this->selectedSection)) {
+        if (! empty($this->selectedSection)) {
             $query->where('section', $this->selectedSection);
         }
 
-        // 3. YEAR LEVEL FILTER
-        if (!empty($this->selectedYear)) {
-            $query->where('year_level', (int)$this->selectedYear);
+        if (! empty($this->selectedYear)) {
+            $query->where('year_level', (int) $this->selectedYear);
         }
 
-        // 4. MAJOR FILTER
-        if (!empty($this->selectedMajor)) {
+        if (! empty($this->selectedMajor)) {
             $query->where('major', strtoupper($this->selectedMajor));
         }
 
-        // 5. SEARCH FILTER - WRAPPED IN CLOSURE
-        if (!empty($this->search)) {
-            $query->where(function($q) {
+        if (! empty($this->search)) {
+            $query->where(function ($q) {
                 $q->where('subject_code', 'like', "%{$this->search}%")
-                  ->orWhere('edp_code', 'like', "%{$this->search}%")
+                  ->orWhere('edp_code',   'like', "%{$this->search}%")
                   ->orWhere('description', 'like', "%{$this->search}%");
             });
         }
 
         $subjects = $query->orderBy('edp_code', 'asc')->paginate(10);
 
-        // DYNAMIC SECTIONS DROPDOWN — scoped by department/role as usual.
         $sectionsQuery = $isArchiveMode
             ? Subject::archived()->where('archive_batch', $this->selectedArchiveBatch)
             : Subject::activeTerm($period['semester'], $period['school_year']);
@@ -1089,9 +1208,9 @@ class ManageSubjects extends Component
             $sectionsQuery->whereRaw('1 = 0');
         }
 
-        if (!$isPowerUser) {
+        if (! $isPowerUser) {
             $sectionsQuery->where('department', $user->department);
-        } elseif ($isPowerUser && !empty($this->selectedDept)) {
+        } elseif ($isPowerUser && ! empty($this->selectedDept)) {
             $sectionsQuery->where('department', $this->selectedDept);
         }
 
@@ -1103,18 +1222,15 @@ class ManageSubjects extends Component
             ->values();
 
         return view('livewire.manage-subjects', [
-            'subjects' => $subjects,
+            'subjects'        => $subjects,
             'availableMajors' => $this->getAvailableMajorsProperty(),
-            'sections' => $sections,
-            'activities' => \App\Models\Activity::with('user')
-                ->latest()
-                ->take(10)
-                ->get(),
-            'isPowerUser' => $isPowerUser,
-            'activePeriod' => $period,
-            'catalogMode' => $this->catalogMode,
-            'archiveOptions' => $archiveOptions,
-            'isArchiveMode' => $isArchiveMode,
-        ]); 
+            'sections'        => $sections,
+            'activities'      => \App\Models\Activity::with('user')->latest()->take(10)->get(),
+            'isPowerUser'     => $isPowerUser,
+            'activePeriod'    => $period,
+            'catalogMode'     => $this->catalogMode,
+            'archiveOptions'  => $archiveOptions,
+            'isArchiveMode'   => $isArchiveMode,
+        ]);
     }
 }

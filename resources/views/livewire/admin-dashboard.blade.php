@@ -1,6 +1,3 @@
-{{-- resources/views/livewire/admin-dashboard.blade.php --}}
-
-{{-- SCROLLBAR STYLES --}}
 <style>
     .dash-scroll::-webkit-scrollbar { width: 4px; height: 4px; }
     .dash-scroll::-webkit-scrollbar-track { background: transparent; }
