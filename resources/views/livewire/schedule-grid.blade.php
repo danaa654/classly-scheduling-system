@@ -215,6 +215,7 @@
                     <div 
                         class="schedule-block absolute pointer-events-auto z-20 rounded-lg border border-black/10 shadow-sm backdrop-blur-sm transition-all duration-150 hover:-translate-y-0.5 hover:shadow-xl hover:z-50 group/card overflow-hidden ring-1 ring-white/30 dark:ring-white/10
                                {{ $colors['light'] }} {{ $colors['dark'] }} {{ $colors['border'] }} border-l-4"
+                        :class="activeScheduleId && activeScheduleId !== @js($schedule->id) ? 'opacity-40 saturate-50' : ''"
                         style="
                             /* Vertical: Aligns with the 45px rows */
                             top: calc(({{ $slotIndex }} * 45px) + 2px);
@@ -231,7 +232,7 @@
                             z-index: {{ 20 + $myPosition }};
                         "
                         wire:key="schedule-{{ $schedule->id }}"
-                        @mouseenter="showSchedulePopover($event, $el, {
+                        @click.stop="toggleSchedulePanel({
                             scheduleId: @js($schedule->id),
                             canDelete: @js($canDeleteSchedule),
                             code: @js($subjectCode),
@@ -247,24 +248,23 @@
                             time: @js($startTimeDisplay . ' - ' . $endTimeDisplay),
                             day: @js($dayFull)
                         })"
-                        @focusin="showSchedulePopover($event, $el, {
-                            scheduleId: @js($schedule->id),
-                            canDelete: @js($canDeleteSchedule),
-                            code: @js($subjectCode),
-                            description: @js($subjectDescription),
-                            edp: @js($this->cleanScheduleText($subject->edp_code ?? 'N/A')),
-                            section: @js($schedule->section ?? 'N/A'),
-                            instructor: @js($instructor),
-                            room: @js($roomName),
-                            type: @js($subjectType),
-                            department: @js($this->cleanScheduleText($subject->department ?? 'N/A')),
-                            major: @js($this->cleanScheduleText($subject->major ?? 'N/A')),
-                            status: @js($schedule->status ?? 'partial'),
-                            time: @js($startTimeDisplay . ' - ' . $endTimeDisplay),
-                            day: @js($dayFull)
-                        })"
-                        @mouseleave="schedulePopoverLeave()"
                         tabindex="0"
+                        @keydown.enter.stop="toggleSchedulePanel({
+                            scheduleId: @js($schedule->id),
+                            canDelete: @js($canDeleteSchedule),
+                            code: @js($subjectCode),
+                            description: @js($subjectDescription),
+                            edp: @js($this->cleanScheduleText($subject->edp_code ?? 'N/A')),
+                            section: @js($schedule->section ?? 'N/A'),
+                            instructor: @js($instructor),
+                            room: @js($roomName),
+                            type: @js($subjectType),
+                            department: @js($this->cleanScheduleText($subject->department ?? 'N/A')),
+                            major: @js($this->cleanScheduleText($subject->major ?? 'N/A')),
+                            status: @js($schedule->status ?? 'partial'),
+                            time: @js($startTimeDisplay . ' - ' . $endTimeDisplay),
+                            day: @js($dayFull)
+                        })"
                     >
                         {{-- SCHEDULE CARD CONTENT --}}
                         <div class="flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden bg-white/25 px-2 py-1.5 text-center leading-tight pointer-events-none dark:bg-black/15">
@@ -352,8 +352,126 @@
         </div>
     </div>
 
-    {{-- SCHEDULE DETAIL POPOVER PORTAL --}}
-    <div id="schedulePopoverPortal"></div>
+    {{-- SCHEDULE DETAIL SIDE PANEL --}}
+    {{-- Rendered inside the grid container; slides in from the right over the grid --}}
+    <div 
+        id="scheduleDetailPanel"
+        x-show="panelOpen"
+        x-transition:enter="transition ease-out duration-200"
+        x-transition:enter-start="translate-x-full opacity-0"
+        x-transition:enter-end="translate-x-0 opacity-100"
+        x-transition:leave="transition ease-in duration-150"
+        x-transition:leave-start="translate-x-0 opacity-100"
+        x-transition:leave-end="translate-x-full opacity-0"
+        @click.outside="closePanel()"
+        class="absolute top-0 right-0 bottom-0 z-[200] flex w-[17rem] max-w-[85vw] flex-col overflow-hidden rounded-l-2xl border-l-2 border-slate-200 bg-white/95 shadow-2xl shadow-slate-950/20 backdrop-blur-2xl dark:border-slate-700 dark:bg-slate-900/95"
+        style="display: none;"
+    >
+        {{-- Panel Header --}}
+        <div class="flex shrink-0 items-start justify-between gap-2 border-b border-slate-100 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/60">
+            <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-2">
+                    <span class="shrink-0 rounded-full px-2 py-0.5 text-[8px] font-black uppercase tracking-widest"
+                          :class="{
+                              'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300': panelData.type && panelData.type.toLowerCase().includes('major'),
+                              'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300': panelData.type && panelData.type.toLowerCase().includes('minor'),
+                              'bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300': !panelData.type || (!panelData.type.toLowerCase().includes('major') && !panelData.type.toLowerCase().includes('minor'))
+                          }"
+                          x-text="panelData.type || 'N/A'"></span>
+                    <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[8px] font-black text-slate-600 dark:bg-slate-800 dark:text-slate-300" 
+                          x-text="'S' + (panelData.section || 'N/A')"></span>
+                </div>
+                <div class="mt-1.5 text-sm font-black uppercase leading-tight text-slate-900 dark:text-white" x-text="panelData.code"></div>
+                <div class="mt-0.5 text-[11px] font-semibold leading-snug text-slate-500 dark:text-slate-400" x-text="panelData.description"></div>
+            </div>
+            <button 
+                @click="closePanel()"
+                class="shrink-0 rounded-lg p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                title="Close">
+                <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
+                    <path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/>
+                </svg>
+            </button>
+        </div>
+
+        {{-- Panel Body --}}
+        <div class="custom-scrollbar flex-1 overflow-y-auto p-4">
+            <div class="space-y-3">
+
+                {{-- EDP + Day grid --}}
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="rounded-xl bg-slate-50 p-2.5 dark:bg-slate-950/60">
+                        <span class="block text-[8px] font-black uppercase tracking-widest text-slate-400">EDP Code</span>
+                        <span class="mt-1 block truncate text-[11px] font-black text-slate-900 dark:text-slate-100" x-text="panelData.edp"></span>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-2.5 dark:bg-slate-950/60">
+                        <span class="block text-[8px] font-black uppercase tracking-widest text-slate-400">Day</span>
+                        <span class="mt-1 block text-[11px] font-black text-slate-900 dark:text-slate-100" x-text="panelData.day"></span>
+                    </div>
+                </div>
+
+                {{-- Time --}}
+                <div class="flex items-center gap-3 rounded-xl bg-blue-50 p-3 dark:bg-blue-950/30">
+                    <svg class="h-4 w-4 shrink-0 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    <div>
+                        <span class="block text-[8px] font-black uppercase tracking-widest text-blue-500 dark:text-blue-400">Time</span>
+                        <span class="text-[12px] font-black text-blue-900 dark:text-blue-100" x-text="panelData.time"></span>
+                    </div>
+                </div>
+
+                {{-- Instructor --}}
+                <div class="flex items-center gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-950/60">
+                    <svg class="h-4 w-4 shrink-0 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+                    </svg>
+                    <div class="min-w-0">
+                        <span class="block text-[8px] font-black uppercase tracking-widest text-slate-400">Instructor</span>
+                        <span class="block truncate text-[11px] font-black text-slate-800 dark:text-slate-100" x-text="panelData.instructor || 'Unassigned'"></span>
+                    </div>
+                </div>
+
+                {{-- Room --}}
+                <div class="flex items-center gap-3 rounded-xl bg-slate-50 p-3 dark:bg-slate-950/60">
+                    <svg class="h-4 w-4 shrink-0 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                    </svg>
+                    <div class="min-w-0">
+                        <span class="block text-[8px] font-black uppercase tracking-widest text-slate-400">Room</span>
+                        <span class="block truncate text-[11px] font-black text-slate-800 dark:text-slate-100" x-text="panelData.room || 'No room'"></span>
+                    </div>
+                </div>
+
+                {{-- Department / Major --}}
+                <div class="grid grid-cols-2 gap-2">
+                    <div class="rounded-xl bg-slate-50 p-2.5 dark:bg-slate-950/60">
+                        <span class="block text-[8px] font-black uppercase tracking-widest text-slate-400">Dept</span>
+                        <span class="mt-1 block text-[11px] font-black text-slate-900 dark:text-slate-100" x-text="panelData.department || '—'"></span>
+                    </div>
+                    <div class="rounded-xl bg-slate-50 p-2.5 dark:bg-slate-950/60">
+                        <span class="block text-[8px] font-black uppercase tracking-widest text-slate-400">Major</span>
+                        <span class="mt-1 block text-[11px] font-black text-slate-900 dark:text-slate-100" x-text="panelData.major || '—'"></span>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+
+        {{-- Panel Footer: Remove Button --}}
+        <div class="shrink-0 border-t border-slate-100 bg-slate-50/80 p-4 dark:border-slate-800 dark:bg-slate-950/60">
+            <button
+                type="button"
+                x-show="panelData.canDelete"
+                @click="if (confirm('Remove this schedule?')) { $wire.removeAssignment(activeScheduleId); closePanel(); }"
+                class="w-full rounded-xl border border-red-200 bg-red-50 py-2.5 text-[10px] font-black uppercase tracking-widest text-red-700 transition hover:bg-red-100 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-950/50">
+                Remove Schedule
+            </button>
+            <p x-show="!panelData.canDelete" class="text-center text-[10px] font-semibold text-slate-400 dark:text-slate-600">
+                Schedule cannot be removed
+            </p>
+        </div>
+    </div>
 </div>
 
 <script>
@@ -361,247 +479,41 @@
         return {
             activeScheduleId: null,
             activeCanDelete: false,
-            popoverHideTimer: null,
+            panelOpen: false,
+            panelData: {},
 
             initializeGrid() {
-                console.log('Schedule grid initialized');
-            },
-
-            /**
-             * Calculate intelligent popover placement
-             * Returns { x, y, placement }
-             */
-            calculatePopoverPosition(anchorEl, popoverWidth, popoverHeight) {
-                const anchorRect = anchorEl.getBoundingClientRect();
-                const gap = 12;
-                const margin = 12;
-                const viewport = {
-                    width: window.innerWidth,
-                    height: window.innerHeight,
-                };
-
-                // Calculate available space in each direction
-                const space = {
-                    right: viewport.width - anchorRect.right,
-                    left: anchorRect.left,
-                    bottom: viewport.height - anchorRect.bottom,
-                    top: anchorRect.top,
-                };
-
-                // Define candidate positions (priority order)
-                const candidates = [
-                    {
-                        placement: 'right',
-                        space: space.right,
-                        fits: space.right >= popoverWidth + gap + margin,
-                        x: anchorRect.right + gap,
-                        y: anchorRect.top + (anchorRect.height / 2) - (popoverHeight / 2),
-                    },
-                    {
-                        placement: 'left',
-                        space: space.left,
-                        fits: space.left >= popoverWidth + gap + margin,
-                        x: anchorRect.left - popoverWidth - gap,
-                        y: anchorRect.top + (anchorRect.height / 2) - (popoverHeight / 2),
-                    },
-                    {
-                        placement: 'bottom',
-                        space: space.bottom,
-                        fits: space.bottom >= popoverHeight + gap + margin,
-                        x: anchorRect.left + (anchorRect.width / 2) - (popoverWidth / 2),
-                        y: anchorRect.bottom + gap,
-                    },
-                    {
-                        placement: 'top',
-                        space: space.top,
-                        fits: space.top >= popoverHeight + gap + margin,
-                        x: anchorRect.left + (anchorRect.width / 2) - (popoverWidth / 2),
-                        y: anchorRect.top - popoverHeight - gap,
-                    },
-                ];
-
-                // Find first placement that fits perfectly
-                let selected = candidates.find(c => c.fits);
-
-                // If nothing fits perfectly, use the one with most space
-                if (!selected) {
-                    selected = candidates.reduce((best, current) =>
-                        current.space > best.space ? current : best
-                    );
-                }
-
-                // Clamp position to viewport boundaries
-                let x = Math.max(margin, Math.min(selected.x, viewport.width - popoverWidth - margin));
-                let y = Math.max(margin, Math.min(selected.y, viewport.height - popoverHeight - margin));
-
-                // Mobile: center horizontally if near edges
-                if (viewport.width < 640) {
-                    x = (viewport.width - popoverWidth) / 2;
-                    // Prefer bottom placement on mobile
-                    if (space.bottom > popoverHeight + gap + margin) {
-                        y = anchorRect.bottom + gap;
-                    } else if (space.top > popoverHeight + gap + margin) {
-                        y = anchorRect.top - popoverHeight - gap;
+                // Close panel when clicking on the grid background
+                document.addEventListener('click', (e) => {
+                    if (!this.panelOpen) return;
+                    const panel = document.getElementById('scheduleDetailPanel');
+                    if (panel && !panel.contains(e.target) && !e.target.closest('.schedule-block')) {
+                        this.closePanel();
                     }
-                }
-
-                return {
-                    x: Math.round(x),
-                    y: Math.round(y),
-                    placement: selected.placement,
-                };
-            },
-
-            /**
-             * Create and insert popover portal element
-             */
-            createPopoverElement() {
-                const popover = document.createElement('div');
-                popover.id = 'schedulePopover';
-                popover.className = `schedule-popover fixed z-[9999] w-[26rem] max-h-[min(32rem,calc(100vh-2rem))] overflow-y-auto rounded-2xl border border-white/60 bg-white/85 p-4 shadow-2xl shadow-slate-950/20 backdrop-blur-2xl pointer-events-auto opacity-0 scale-95 transition-all duration-150 dark:border-slate-700/80 dark:bg-slate-900/90`;
-                popover.style.maxWidth = 'calc(100vw - 16px)';
-                popover.style.display = 'none';
-
-                // Prevent popover from closing on hover
-                popover.addEventListener('mouseenter', () => this.keepSchedulePopover());
-                popover.addEventListener('mouseleave', () => this.schedulePopoverLeave());
-
-                popover.innerHTML = `
-                    <div class="space-y-3">
-                        <div class="flex items-start justify-between gap-3 border-b border-slate-200 pb-3 dark:border-slate-700">
-                            <div class="flex-1 min-w-0">
-                                <div class="text-sm font-black uppercase text-slate-900 dark:text-white line-clamp-1" id="popCode"></div>
-                                <div class="mt-1 text-[11px] font-semibold leading-snug text-slate-600 dark:text-slate-300 line-clamp-2" id="popDesc"></div>
-                            </div>
-                            <span class="shrink-0 rounded-full bg-slate-100 px-2 py-1 text-[9px] font-black uppercase text-slate-700 dark:bg-slate-700 dark:text-slate-200" id="popType"></span>
-                        </div>
-
-                        <div class="grid grid-cols-2 gap-2 text-[10px]">
-                            <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
-                                <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">EDP</span>
-                                <span class="mt-1 block truncate font-black text-slate-900 dark:text-slate-100" id="popEdp">-</span>
-                            </div>
-                            <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
-                                <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">Section</span>
-                                <span class="mt-1 block font-black text-slate-900 dark:text-slate-100" id="popSection">-</span>
-                            </div>
-                            <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
-                                <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">Type</span>
-                                <span class="mt-1 block font-black text-slate-900 dark:text-slate-100" id="popType2">-</span>
-                            </div>
-                            <div class="rounded-lg bg-slate-50 p-2 dark:bg-slate-950/50">
-                                <span class="block text-[8px] font-black uppercase tracking-widest text-slate-500">Day</span>
-                                <span class="mt-1 block font-black text-slate-900 dark:text-slate-100" id="popDay">-</span>
-                            </div>
-                        </div>
-
-                        <div class="space-y-2 rounded-xl bg-slate-50 p-3 text-[11px] dark:bg-slate-950/50">
-                            <div class="flex items-start justify-between gap-3 font-bold">
-                                <span class="shrink-0 text-slate-500 dark:text-slate-400">Time</span>
-                                <span class="text-right text-slate-900 dark:text-slate-100" id="popTime">-</span>
-                            </div>
-                            <div class="flex items-start justify-between gap-3 font-bold">
-                                <span class="shrink-0 text-slate-500 dark:text-slate-400">Instructor</span>
-                                <span class="min-w-0 text-right text-slate-900 dark:text-slate-100" id="popInstructor">-</span>
-                            </div>
-                            <div class="flex items-start justify-between gap-3 font-bold">
-                                <span class="shrink-0 text-slate-500 dark:text-slate-400">Room</span>
-                                <span class="min-w-0 text-right text-slate-900 dark:text-slate-100" id="popRoom">-</span>
-                            </div>
-                        </div>
-
-                        <div class="flex gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
-                            <button
-                                type="button"
-                                @click="if (confirm('Remove this schedule?')) { $wire.removeAssignment(activeScheduleId); hideSchedulePopover(true) }"
-                                :disabled="!activeCanDelete"
-                                class="flex-1 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-45 dark:border-red-900/70 dark:bg-red-950/30 dark:text-red-300">
-                                Remove Schedule
-                            </button>
-                        </div>
-                    </div>
-                `;
-
-                document.body.appendChild(popover);
-                return popover;
-            },
-
-            showSchedulePopover(event, anchor, data) {
-                let popover = document.getElementById('schedulePopover');
-                
-                // Create popover if it doesn't exist
-                if (!popover) {
-                    popover = this.createPopoverElement();
-                }
-
-                this.keepSchedulePopover();
-                this.activeScheduleId = data.scheduleId || null;
-                this.activeCanDelete = Boolean(data.canDelete);
-
-                const setText = (id, value) => {
-                    const element = document.getElementById(id);
-                    if (element) element.textContent = value || 'N/A';
-                };
-
-                setText('popCode', data.code);
-                setText('popDesc', data.description || 'No description');
-                setText('popEdp', data.edp);
-                setText('popSection', `S${data.section || 'N/A'}`);
-                setText('popInstructor', data.instructor);
-                setText('popRoom', data.room);
-                setText('popTime', data.time);
-                setText('popDay', data.day);
-                setText('popType', data.type);
-                setText('popType2', data.type);
-
-                popover.style.display = 'block';
-                popover.style.opacity = '0';
-                popover.style.transform = 'scale(0.95)';
-
-                // Use requestAnimationFrame to ensure element is rendered before measuring
-                requestAnimationFrame(() => {
-                    const popoverRect = popover.getBoundingClientRect();
-                    const popoverWidth = Math.min(popoverRect.width || 416, window.innerWidth - 32);
-                    const popoverHeight = Math.min(popoverRect.height || 384, window.innerHeight - 32);
-
-                    const position = this.calculatePopoverPosition(anchor, popoverWidth, popoverHeight);
-
-                    popover.style.left = position.x + 'px';
-                    popover.style.top = position.y + 'px';
-                    popover.style.maxWidth = popoverWidth + 'px';
-
-                    // Trigger animation
-                    requestAnimationFrame(() => {
-                        popover.style.opacity = '1';
-                        popover.style.transform = 'scale(1)';
-                    });
                 });
             },
 
-            keepSchedulePopover() {
-                if (this.popoverHideTimer) {
-                    clearTimeout(this.popoverHideTimer);
-                    this.popoverHideTimer = null;
+            toggleSchedulePanel(data) {
+                // If clicking the same card, toggle close
+                if (this.panelOpen && this.activeScheduleId === data.scheduleId) {
+                    this.closePanel();
+                    return;
                 }
+
+                this.activeScheduleId = data.scheduleId || null;
+                this.activeCanDelete = Boolean(data.canDelete);
+                this.panelData = {
+                    ...data,
+                    canDelete: Boolean(data.canDelete),
+                };
+                this.panelOpen = true;
             },
 
-            schedulePopoverLeave() {
-                this.keepSchedulePopover();
-                this.popoverHideTimer = setTimeout(() => this.hideSchedulePopover(), 140);
+            closePanel() {
+                this.panelOpen = false;
+                this.activeScheduleId = null;
+                this.panelData = {};
             },
-
-            hideSchedulePopover(force = false) {
-                const popover = document.getElementById('schedulePopover');
-                if (popover) {
-                    popover.style.opacity = '0';
-                    popover.style.transform = 'scale(0.95)';
-                    setTimeout(() => {
-                        if (force || popover.style.opacity === '0') {
-                            popover.style.display = 'none';
-                        }
-                    }, 150);
-                }
-            }
         };
     }
 </script>
@@ -648,19 +560,16 @@
         animation: pulse-subtle 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
     }
 
-    /* Popover positioning animation */
-    .schedule-popover {
-        will-change: transform, opacity;
+    /* Dim inactive cards when panel is open */
+    .schedule-block {
+        transition: opacity 0.15s ease, filter 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease;
     }
 
-    /* Ensure popover is not affected by grid overflow */
-    #schedulePopoverPortal {
-        position: fixed;
-        top: 0;
-        left: 0;
-        z-index: 9999;
-        width: 0;
-        height: 0;
-        pointer-events: none;
+    /* Active/selected card ring */
+    .schedule-block.is-active {
+        ring: 2px;
+        ring-color: white;
+        box-shadow: 0 0 0 2px white, 0 0 0 4px rgb(59 130 246 / 0.7);
+        z-index: 100 !important;
     }
 </style>
