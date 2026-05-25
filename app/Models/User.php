@@ -17,20 +17,25 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * Enhanced User model to support Role-Based Access Control (RBAC).
  * 'role' tracks user permissions (registrar, dean, oic).
  * 'department' restricts Deans/OICs to specific academic data.
+ *
+ * FIXED: Added 'can_finalize_schedule' to Fillable so that
+ *        $user->update(['can_finalize_schedule' => true/false])
+ *        actually persists to the database.
  */
 #[Fillable([
-    'name', 
-    'email', 
-    'password', 
-    'current_team_id', 
-    'role', 
-    'department'
+    'name',
+    'email',
+    'password',
+    'current_team_id',
+    'role',
+    'department',
+    'can_finalize_schedule',   // ← CRITICAL FIX: was missing; caused Grant/Revoke to silently fail
 ])]
 #[Hidden([
-    'password', 
-    'two_factor_secret', 
-    'two_factor_recovery_codes', 
-    'remember_token'
+    'password',
+    'two_factor_secret',
+    'two_factor_recovery_codes',
+    'remember_token',
 ])]
 class User extends Authenticatable
 {
@@ -45,9 +50,10 @@ class User extends Authenticatable
     protected function casts(): array
     {
         return [
-            'email_verified_at' => 'datetime',
-            'password' => 'hashed',
-            'two_factor_confirmed_at' => 'datetime',
+            'email_verified_at'      => 'datetime',
+            'password'               => 'hashed',
+            'two_factor_confirmed_at'=> 'datetime',
+            'can_finalize_schedule'  => 'boolean',   // cast so ?? false works reliably
         ];
     }
 
@@ -59,11 +65,10 @@ class User extends Authenticatable
         return $this->role === $role;
     }
 
-    public function isAdmin()
-{
-    // Adjust 'role' or 'is_admin' to match your database column
-    return $this->role === 'admin' || $this->is_admin === true;
-}
+    public function isAdmin(): bool
+    {
+        return $this->role === 'admin' || $this->is_admin === true;
+    }
 
     /**
      * Helper to check if the user is an administrative official (Dean or OIC).
@@ -74,19 +79,49 @@ class User extends Authenticatable
     }
 
     /**
-     * Get the user's initials for the profile avatar.
-     * FIXED: Moves ->upper() after the join/implode to avoid Collection error.
+     * Whether this user (registrar) may finalize schedules.
+     * Admin always can; Registrar only when explicitly delegated.
      */
-   // Find the initials() function in app/Models/User.php
-// In app/Models/User.php
-public function initials()
-{
-    $initials = Str::of($this->name)
-        ->explode(' ')
-        ->take(2)
-        ->map(fn ($word) => Str::substr($word, 0, 1))
-        ->implode('');
+    public function canFinalizeSchedule(): bool
+    {
+        if ($this->role === 'admin') {
+            return true;
+        }
 
-    return Str::upper($initials); // Use the Facade to handle the plain string
-}
+        if ($this->role === 'registrar') {
+            return (bool) ($this->can_finalize_schedule ?? false);
+        }
+
+        return false;
+    }
+
+    /**
+     * Permission log entries performed by this user.
+     */
+    public function permissionLogsPerformed()
+    {
+        return $this->hasMany(PermissionLog::class, 'performed_by');
+    }
+
+    /**
+     * Permission log entries targeting this user.
+     */
+    public function permissionLogsReceived()
+    {
+        return $this->hasMany(PermissionLog::class, 'target_user_id');
+    }
+
+    /**
+     * Get the user's initials for the profile avatar.
+     */
+    public function initials(): string
+    {
+        $initials = Str::of($this->name)
+            ->explode(' ')
+            ->take(2)
+            ->map(fn ($word) => Str::substr($word, 0, 1))
+            ->implode('');
+
+        return Str::upper($initials);
+    }
 }
