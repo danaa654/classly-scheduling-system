@@ -22,6 +22,8 @@ class Subject extends Model
         'duration_hours',
         'type',
         'subject_type',
+        'requires_lab',
+        'preferred_room_type',
         'specialization',
         'meetings_per_week',
         'faculty_id',
@@ -43,6 +45,7 @@ class Subject extends Model
         'year_level'       => 'integer',
         'duration_hours'   => 'float',
         'meetings_per_week'=> 'integer',
+        'requires_lab'     => 'boolean',
         'is_archived'      => 'boolean',
         'archived_at'      => 'datetime',
         'is_legacy_edp'    => 'boolean',
@@ -201,6 +204,11 @@ class Subject extends Model
     }
 
     protected function specialization(): Attribute
+    {
+        return Attribute::make(get: fn ($value) => self::cleanText($value));
+    }
+
+    protected function preferredRoomType(): Attribute
     {
         return Attribute::make(get: fn ($value) => self::cleanText($value));
     }

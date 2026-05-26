@@ -36,6 +36,8 @@ class ManageSubjects extends Component
     public $subjectId, $edp_code, $subject_code, $section, $description, $department, $units;
     public $major, $year_level;
     public $type = 'Major';
+    public bool $requires_lab = false;
+    public $preferred_room_type = '';
     public $duration_hours = 3;
     public $meetings_per_week = 1;
 
@@ -422,6 +424,10 @@ class ManageSubjects extends Component
             $section       = strtoupper($value('section', 'A'));
             $normalizedType = str_contains(strtolower($rawType), 'minor') ? 'Minor' : 'Major';
             $specialization = strtoupper($value('specialization', $rowMajor));
+            $requiresLab = filter_var($value('requires_lab', false), FILTER_VALIDATE_BOOLEAN)
+                || str_contains(strtoupper($value('preferred_room_type', '')), 'LAB')
+                || str_contains(strtoupper($rawType.' '.$value('description').' '.$specialization), 'LAB');
+            $preferredRoomType = strtoupper($value('preferred_room_type', $requiresLab ? 'LAB' : 'LECTURE'));
 
             Subject::create([
                 'edp_code'          => $edpCode,
@@ -436,6 +442,8 @@ class ManageSubjects extends Component
                 'meetings_per_week' => $rawMeetings,
                 'type'              => $normalizedType,
                 'subject_type'      => $rawType,
+                'requires_lab'      => $requiresLab,
+                'preferred_room_type' => $preferredRoomType,
                 'specialization'    => $specialization,
                 'semester'          => $period['semester'],
                 'school_year'       => $period['school_year'],
@@ -556,6 +564,8 @@ class ManageSubjects extends Component
         $this->isEditMode       = false;
         $this->units            = 3;
         $this->type             = 'Major';
+        $this->requires_lab     = false;
+        $this->preferred_room_type = '';
         $this->duration_hours   = 3;
         $this->meetings_per_week = 1;
         $this->major            = '';
@@ -608,6 +618,8 @@ class ManageSubjects extends Component
         $this->description       = $subject->description;
         $this->units             = $subject->units;
         $this->type              = $subject->type ?? 'Major';
+        $this->requires_lab      = (bool) ($subject->requires_lab ?? false);
+        $this->preferred_room_type = $subject->preferred_room_type ?? '';
         $this->duration_hours    = $subject->duration_hours ?? 3;
         $this->meetings_per_week = $subject->meetings_per_week ?? 1;
         $this->major             = $subject->major ?? '';
@@ -690,6 +702,8 @@ class ManageSubjects extends Component
             'description'       => 'required',
             'units'             => 'required|integer|min:3|max:5',
             'type'              => 'required|in:Major,Minor',
+            'requires_lab'      => 'boolean',
+            'preferred_room_type' => 'nullable|string|max:80',
             'duration_hours'    => 'required|numeric|min:1|max:10',
             'meetings_per_week' => 'required|integer|min:1|max:5',
         ], [
@@ -759,6 +773,8 @@ class ManageSubjects extends Component
                 'units'             => (int) $this->units,
                 'type'              => $normalizedType,
                 'subject_type'      => $normalizedType,
+                'requires_lab'      => (bool) $this->requires_lab,
+                'preferred_room_type' => $this->preferred_room_type ?: ((bool) $this->requires_lab ? 'LAB' : 'LECTURE'),
                 'specialization'    => $majorUpper,
                 'duration_hours'    => (float) $this->duration_hours,
                 'meetings_per_week' => (int) $this->meetings_per_week,
@@ -794,6 +810,7 @@ class ManageSubjects extends Component
             'edp_code', 'subject_code', 'section', 'description',
             'units', 'type', 'duration_hours', 'major', 'year_level',
             'department', 'subjectId', 'isEditMode', 'meetings_per_week',
+            'requires_lab', 'preferred_room_type',
         ]);
     }
 
@@ -905,6 +922,8 @@ class ManageSubjects extends Component
                     'department'        => $original->department,
                     'type'              => $original->type ?? 'Major',
                     'subject_type'      => $original->subject_type,
+                    'requires_lab'      => (bool) ($original->requires_lab ?? false),
+                    'preferred_room_type' => $original->preferred_room_type,
                     'specialization'    => $original->specialization,
                     'duration_hours'    => $original->duration_hours,
                     'meetings_per_week' => $original->meetings_per_week ?? 1,

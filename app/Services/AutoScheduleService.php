@@ -7,9 +7,11 @@ use App\Models\Schedule;
 use App\Models\Setting;
 use App\Models\Subject;
 use App\Models\Faculty;
+use App\Models\Department;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 class AutoScheduleService
@@ -52,6 +54,8 @@ class AutoScheduleService
         ],
         2 => [
             ['Monday', 'Wednesday'],
+            ['Tuesday', 'Friday'],
+            ['Thursday', 'Saturday'],
             ['Tuesday', 'Thursday'],
             ['Wednesday', 'Friday'],
         ],
@@ -101,7 +105,7 @@ class AutoScheduleService
         $bounds = Setting::getDayBounds();
         $period = Setting::getAcademicPeriod();
         $rooms = Room::query()
-            ->select('id', 'room_name', 'type', 'capacity', 'specialization', 'floor')
+            ->select($this->roomSelectColumns())
             ->available()
             ->get()
             ->filter(fn (Room $room) => $this->roomRegistryRowIsValid($room))
@@ -444,6 +448,16 @@ class AutoScheduleService
         $requiresLab = $this->subjectRequiresLab($subject);
         $isLabRoom = $this->roomIsLab($room);
         $specializations = $this->roomSpecializations($room);
+        $ownerMatches = $this->roomOwnerMatchesSubject($room, $subject);
+        $allowedByDepartment = $this->roomAllowsSubjectDepartment($room, $subject);
+
+        if (!$allowedByDepartment) {
+            return 0;
+        }
+
+        if ($ownerMatches) {
+            $score += 160;
+        }
 
         if ($this->hasExactSpecializationMatch($subjectSpecializations, $specializations)) {
             $score += 120;
@@ -455,6 +469,10 @@ class AutoScheduleService
 
         if ($this->roomTypeMatches($room, $subject)) {
             $score += 40;
+        }
+
+        if ($this->roomIsSpecialized($room)) {
+            $score += $requiresLab || $subjectType === 'MAJOR' ? 35 : -20;
         }
 
         if ($requiresLab && $isLabRoom) {
@@ -483,7 +501,7 @@ class AutoScheduleService
     public function findCompatibleRooms(Subject $subject, ?Collection $rooms = null): Collection
     {
         $rooms ??= Room::query()
-            ->select('id', 'room_name', 'type', 'capacity', 'specialization', 'floor')
+            ->select($this->roomSelectColumns())
             ->available()
             ->get()
             ->filter(fn (Room $room) => $this->roomRegistryRowIsValid($room))
@@ -498,6 +516,10 @@ class AutoScheduleService
             return false;
         }
 
+        if (!$this->roomAllowsSubjectDepartment($room, $subject)) {
+            return false;
+        }
+
         $subjectType = strtoupper((string) $subject->type);
         $subjectSpecializations = $this->subjectSpecializations($subject);
         $isLab = $this->roomIsLab($room);
@@ -507,6 +529,19 @@ class AutoScheduleService
         $hasCompatibleMatch = $this->hasCompatibleSpecializationMatch($subjectSpecializations, $specializations);
         $hasSpecializationMatch = $hasExactMatch || $hasCompatibleMatch;
         $isGeneral = $this->isGeneralRoom($room);
+
+        if ($this->isTechnologyMajor($subject)) {
+            return $this->roomIsTechnologyLab($room)
+                && !$this->roomConflictsWithSubjectDomain($room, $subjectSpecializations);
+        }
+
+        if ($this->isEducationSubject($subject) && !$requiresLab) {
+            return $this->roomIsLecture($room) && !$this->roomIsSpecialized($room);
+        }
+
+        if ($this->isHospitalityPracticalSubject($subject)) {
+            return $this->roomIsHospitalityLab($room);
+        }
 
         if ($requiresLab && !$isLab) {
             return false;
@@ -576,10 +611,36 @@ class AutoScheduleService
         return $slots;
     }
 
+    private function roomSelectColumns(): array
+    {
+        $columns = ['id', 'room_name', 'type', 'capacity', 'specialization', 'floor'];
+
+        foreach (['room_type', 'allowed_departments', 'department_owner', 'is_specialized'] as $column) {
+            if (Schema::hasColumn('rooms', $column)) {
+                $columns[] = $column;
+            }
+        }
+
+        return $columns;
+    }
+
+    private function subjectSelectColumns(): array
+    {
+        $columns = ['id', 'edp_code', 'subject_code', 'description', 'section', 'major', 'year_level', 'department', 'units', 'duration_hours', 'type', 'subject_type', 'specialization', 'meetings_per_week', 'faculty_id'];
+
+        foreach (['requires_lab', 'preferred_room_type'] as $column) {
+            if (Schema::hasColumn('subjects', $column)) {
+                $columns[] = $column;
+            }
+        }
+
+        return $columns;
+    }
+
     private function subjectQuery(array $filters)
     {
         return $this->activeSubjectQuery()
-            ->select('id', 'edp_code', 'subject_code', 'description', 'section', 'major', 'year_level', 'department', 'units', 'duration_hours', 'type', 'subject_type', 'specialization', 'meetings_per_week', 'faculty_id')
+            ->select($this->subjectSelectColumns())
             ->where('meetings_per_week', '>', 0)
             ->when(!empty($filters['department']), fn ($query) => $query->where('department', strtoupper($filters['department'])))
             ->when(!empty($filters['major']), fn ($query) => $query->where('major', strtoupper($filters['major'])))
@@ -599,7 +660,7 @@ class AutoScheduleService
         set_time_limit(300);
 
         $subject = $this->activeSubjectQuery()
-            ->select('id', 'edp_code', 'subject_code', 'description', 'section', 'major', 'year_level', 'department', 'units', 'duration_hours', 'type', 'subject_type', 'specialization', 'meetings_per_week', 'faculty_id')
+            ->select($this->subjectSelectColumns())
             ->with('faculty:id,full_name,availability')
             ->find($subjectId);
 
@@ -624,7 +685,7 @@ class AutoScheduleService
         }
 
         $rooms = Room::query()
-            ->select('id', 'room_name', 'type', 'capacity', 'specialization', 'floor')
+            ->select($this->roomSelectColumns())
             ->available()
             ->get()
             ->filter(fn (Room $room) => $this->roomRegistryRowIsValid($room))
@@ -686,10 +747,11 @@ class AutoScheduleService
         $meetingsNeeded = max(1, min($this->activeDayCount(), max((int) $subject->meetings_per_week, count($preferredDays) ?: 1)));
         $subject->meetings_per_week = $meetingsNeeded;
 
-        $preferredStart = $this->normalizePreferredStart($overrides['preferred_start_time'] ?? null);
+        $preferredStart = $this->normalizePreferredStart($overrides['preferred_start_time'] ?? $overrides['preferred_time_start'] ?? null);
+        $preferredEnd = $this->normalizePreferredStart($overrides['preferred_time_end'] ?? null);
         $preferredRoomHint = trim((string) ($overrides['preferred_room_type'] ?? ''));
-        $linkedPattern = ($preferredStart || $preferredDays || $preferredRoomHint !== '')
-            ? $this->findPatternWithPreferences($subject, $rooms, $existingSchedules, Setting::getDayBounds(), $meetingsNeeded, $preferredStart, $preferredDays, null, $preferredRoomHint)
+        $linkedPattern = ($preferredStart || $preferredEnd || $preferredDays || $preferredRoomHint !== '')
+            ? $this->findPatternWithPreferences($subject, $rooms, $existingSchedules, Setting::getDayBounds(), $meetingsNeeded, $preferredStart, $preferredDays, null, $preferredRoomHint, $preferredEnd)
             : null;
 
         $linkedPattern ??= $this->generateLinkedMeetingPattern($subject, $rooms, $existingSchedules, Setting::getDayBounds(), $meetingsNeeded);
@@ -758,12 +820,411 @@ class AutoScheduleService
         return $result;
     }
 
+    /**
+     * Retry generation for a failed subject with fresh state.
+     *
+     * This method intentionally bypasses the anchored pattern logic so the engine
+     * starts from scratch — new rooms, new time slots, new day patterns — rather
+     * than re-using stale data from previous failed attempts.
+     *
+     * Only `meetings_per_week` is accepted as an override (the only field the UI exposes).
+     */
+    public function retryFailedSubject(int $subjectId, array $filters, array $overrides = [], array $pendingItems = [], ?int $userId = null): array
+    {
+        set_time_limit(300);
+
+        \Illuminate\Support\Facades\Log::info('[RetryGeneration] Retry started', [
+            'subject_id' => $subjectId,
+            'overrides'  => $overrides,
+        ]);
+
+        // ── 1. Load subject ──────────────────────────────────────────────────
+        $subject = $this->activeSubjectQuery()
+            ->select($this->subjectSelectColumns())
+            ->with('faculty:id,full_name,availability')
+            ->find($subjectId);
+
+        if (!$subject) {
+            \Illuminate\Support\Facades\Log::warning('[RetryGeneration] Subject not found', ['subject_id' => $subjectId]);
+            return $this->emptyResult('subject not found');
+        }
+
+        // ── 2. Apply meetings_per_week override ──────────────────────────────
+        if (isset($overrides['meetings_per_week']) && is_numeric($overrides['meetings_per_week'])) {
+            $newMpw = max(1, (int) $overrides['meetings_per_week']);
+            \Illuminate\Support\Facades\Log::info('[RetryGeneration] Meetings per week updated', [
+                'subject_code' => $subject->subject_code,
+                'old_mpw'      => $subject->meetings_per_week,
+                'new_mpw'      => $newMpw,
+            ]);
+            $subject->meetings_per_week = $newMpw;
+        }
+
+        $meetingsNeeded = max(1, min($this->activeDayCount(), (int) $subject->meetings_per_week));
+        $subject->meetings_per_week = $meetingsNeeded;
+
+        // ── 3. Load all available rooms fresh ────────────────────────────────
+        \Illuminate\Support\Facades\Log::info('[RetryGeneration] Generating fresh time slots and room candidates', [
+            'subject_code'    => $subject->subject_code,
+            'meetings_needed' => $meetingsNeeded,
+            'minutes_per_meeting' => $this->minutesPerMeeting($subject),
+        ]);
+
+        $rooms = Room::query()
+            ->select($this->roomSelectColumns())
+            ->available()
+            ->get()
+            ->filter(fn (Room $room) => $this->roomRegistryRowIsValid($room))
+            ->values();
+
+        $result = [
+            'scheduled'         => 0,
+            'failed'            => 0,
+            'warnings'          => 0,
+            'failure_reasons'   => [],
+            'failed_items'      => [],
+            'fallback_warnings' => [],
+            'scheduled_items'   => [],
+            'filters'           => [
+                'department' => strtoupper((string) ($filters['department'] ?? $subject->department)),
+                'major'      => strtoupper((string) ($filters['major']      ?? $subject->major)),
+                'year_level' => (int)              ($filters['year_level']  ?? $subject->year_level),
+                'section'    => strtoupper((string) ($filters['section']    ?? $subject->section)),
+            ],
+        ];
+
+        if ($rooms->isEmpty()) {
+            \Illuminate\Support\Facades\Log::warning('[RetryGeneration] No valid rooms available', ['subject_code' => $subject->subject_code]);
+            $this->recordFailure($result, $subject, 'No valid rooms found in the room registry');
+            $result['failed'] = count($result['failed_items']);
+            return $result;
+        }
+
+        // ── 4. Diagnose room compatibility up front ───────────────────────────
+        $compatibleRoomCount = $this->compatibleRooms($rooms, $subject)->count();
+        \Illuminate\Support\Facades\Log::info('[RetryGeneration] Finding compatible rooms', [
+            'subject_code'          => $subject->subject_code,
+            'total_rooms'           => $rooms->count(),
+            'compatible_room_count' => $compatibleRoomCount,
+        ]);
+
+        if ($compatibleRoomCount === 0) {
+            $requiresLab = $this->subjectRequiresLab($subject);
+            $reason = $requiresLab
+                ? "No compatible laboratory room available for {$subject->subject_code}"
+                : "No compatible lecture room available for {$subject->subject_code}";
+            \Illuminate\Support\Facades\Log::warning('[RetryGeneration] No compatible rooms', ['subject_code' => $subject->subject_code, 'requires_lab' => $requiresLab]);
+            $this->recordFailure($result, $subject, $reason);
+            $result['failed'] = count($result['failed_items']);
+            return $result;
+        }
+
+        $roomIds = $rooms->pluck('id');
+
+        // ── 5. Build existing-schedule context (EXCLUDING this subject's own rows) ──
+        //       This is the critical step: we do NOT include the subject's previous
+        //       failed schedule slots so the engine treats it as a clean slate.
+        $existingSchedules = $this->activeScheduleQuery()
+            ->select('id', 'subject_id', 'room_id', 'faculty_id', 'department', 'major', 'year_level', 'section', 'day', 'start_time', 'end_time', 'duration_hours', 'meetings_per_week', 'pairing_key', 'status')
+            ->with(['subject:id,subject_code,department,major,year_level,section,faculty_id', 'room:id,room_name'])
+            ->where(function ($query) use ($subject, $roomIds) {
+                $query->where(function ($query) use ($subject) {
+                    $query->where('department', $subject->department)
+                        ->where('major', $subject->major)
+                        ->where('year_level', (int) $subject->year_level)
+                        ->where('section', $subject->section);
+                })->orWhereIn('room_id', $roomIds);
+
+                if ($subject->faculty_id) {
+                    $query->orWhere('faculty_id', $subject->faculty_id);
+                }
+            })
+            // Exclude ANY existing schedule rows for this subject so we start fresh
+            ->where('subject_id', '!=', $subject->id)
+            ->get();
+
+        // ── 6. Inject pending items from the UI (other subjects being scheduled) ──
+        foreach ($pendingItems as $item) {
+            if (($item['subject_id'] ?? null) === $subject->id) {
+                continue;
+            }
+            $existingSchedules->push(new Schedule([
+                'subject_id'  => $item['subject_id'] ?? null,
+                'room_id'     => $item['room_id'] ?? null,
+                'faculty_id'  => $item['faculty_id'] ?? null,
+                'department'  => $filters['department'] ?? null,
+                'major'       => $filters['major'] ?? null,
+                'year_level'  => $filters['year_level'] ?? null,
+                'section'     => $filters['section'] ?? null,
+                'day'         => $item['day'] ?? null,
+                'start_time'  => $item['raw_start_time'] ?? null,
+                'end_time'    => $item['raw_end_time'] ?? null,
+                'pairing_key' => $item['pairing_key'] ?? null,
+                'status'      => Schedule::STATUS_PARTIAL,
+            ]));
+        }
+
+        // ── 7. Diagnose faculty availability up front ─────────────────────────
+        if ($subject->faculty_id && $subject->faculty) {
+            \Illuminate\Support\Facades\Log::info('[RetryGeneration] Finding available faculty', [
+                'subject_code' => $subject->subject_code,
+                'faculty_id'   => $subject->faculty_id,
+                'faculty_name' => $subject->faculty->full_name,
+            ]);
+        }
+
+        $bounds = Setting::getDayBounds();
+
+        \Illuminate\Support\Facades\Log::info('[RetryGeneration] Conflict validation started', [
+            'subject_code'         => $subject->subject_code,
+            'existing_schedule_ct' => $existingSchedules->count(),
+        ]);
+
+        // ── 8. Run FULL generation (no anchor, no cached state) ───────────────
+        //       Call findConsistentRoomAndTime directly, bypassing findAnchoredLinkedPattern,
+        //       so the engine tries every room × day-pattern × time-slot combination fresh.
+        $linkedPattern = $this->findFreshLinkedMeetingPattern($subject, $rooms, $existingSchedules, $bounds, $meetingsNeeded);
+
+        // ── 9. Handle failure with rich diagnostics ───────────────────────────
+        if (!$linkedPattern) {
+            $reason = $this->buildRichFailureReason($subject, $rooms, $existingSchedules, $bounds, $meetingsNeeded);
+            \Illuminate\Support\Facades\Log::warning('[RetryGeneration] Retry failed', [
+                'subject_code' => $subject->subject_code,
+                'reason'       => $reason,
+            ]);
+            $this->recordFailure($result, $subject, $reason);
+            $result['failed'] = count($result['failed_items']);
+            return $result;
+        }
+
+        // ── 10. Build result items from successful pattern ────────────────────
+        $pairingKey = $linkedPattern['pairing_key'];
+        $dayPair    = collect($linkedPattern['placements'])->pluck('day')->implode(' / ');
+
+        foreach ($linkedPattern['placements'] as $placement) {
+            $durationHours = round(
+                Carbon::parse($placement['start'])->diffInMinutes(Carbon::parse($placement['end'])) / 60,
+                2
+            );
+
+            $result['scheduled']++;
+            $result['scheduled_items'][] = [
+                'subject_code'      => $this->cleanText($subject->subject_code),
+                'subject_name'      => $this->cleanText($subject->description),
+                'edp_code'          => $this->cleanText($subject->edp_code),
+                'room'              => $this->cleanText($placement['room']->room_name),
+                'day_pair'          => $dayPair,
+                'day'               => $placement['day'],
+                'start_time'        => Carbon::parse($placement['start'])->format('h:i A'),
+                'end_time'          => Carbon::parse($placement['end'])->format('h:i A'),
+                'faculty_id'        => $subject->faculty_id,
+                'instructor'        => $this->cleanText($subject->faculty?->full_name ?? 'Unassigned'),
+                'raw_start_time'    => $placement['start'],
+                'raw_end_time'      => $placement['end'],
+                'subject_id'        => $subject->id,
+                'room_id'           => $placement['room']->id,
+                'duration_hours'    => $durationHours,
+                'meetings_per_week' => $subject->meetings_per_week,
+                'pairing_key'       => $pairingKey,
+            ];
+
+            if ($placement['fallback']) {
+                $result['warnings']++;
+                $result['fallback_warnings'][] = $this->cleanText(
+                    "{$subject->subject_code} used fallback room {$placement['room']->room_name}."
+                );
+            }
+        }
+
+        $result['failed'] = count($result['failed_items']);
+
+        \Illuminate\Support\Facades\Log::info('[RetryGeneration] Retry success', [
+            'subject_code' => $subject->subject_code,
+            'day_pair'     => $dayPair,
+            'room'         => $linkedPattern['placements'][0]['room']->room_name ?? 'unknown',
+        ]);
+
+        return $result;
+    }
+
+    /**
+     * Find a linked meeting pattern WITHOUT anchoring to any existing schedule rows.
+     * Unlike generateLinkedMeetingPattern, this always starts fresh.
+     */
+    public function findFreshLinkedMeetingPattern(
+        Subject $subject,
+        Collection $rooms,
+        Collection $existingSchedules,
+        ?array $bounds = null,
+        ?int $meetingsNeeded = null
+    ): ?array {
+        $bounds        = $bounds ?? Setting::getDayBounds();
+        $meetingsNeeded = max(1, min($this->activeDayCount(), $meetingsNeeded ?? (int) $subject->meetings_per_week));
+        $minutes       = $this->minutesPerMeeting($subject);
+
+        \Illuminate\Support\Facades\Log::info('[RetryGeneration] Generating fresh time slots', [
+            'subject_code'    => $subject->subject_code,
+            'meetings_needed' => $meetingsNeeded,
+            'minutes_per_meeting' => $minutes,
+        ]);
+
+        $compatibleRooms = $this->compatibleRooms($rooms, $subject, $existingSchedules);
+
+        if ($compatibleRooms->isEmpty()) {
+            return null;
+        }
+
+        foreach ($compatibleRooms as $candidate) {
+            $room = $candidate['room'];
+
+            foreach ($this->meetingDayPatterns($meetingsNeeded) as $days) {
+                foreach ($this->sectionWindows($subject->section, $bounds) as $window) {
+                    if ($window['start']->copy()->addMinutes($minutes)->gt($window['end'])) {
+                        continue;
+                    }
+
+                    $period = \Carbon\CarbonPeriod::create(
+                        $window['start'],
+                        self::SLOT_MINUTES . ' minutes',
+                        $window['end']->copy()->subMinutes($minutes)
+                    );
+
+                    foreach ($period as $slotStart) {
+                        $slotEnd = $slotStart->copy()->addMinutes($minutes);
+                        $start   = $slotStart->format('H:i:s');
+                        $end     = $slotEnd->format('H:i:s');
+
+                        if ($this->conflicts->overlapsLunchBreak($start, $end)) {
+                            continue;
+                        }
+
+                        if (!$this->conflicts->respectsSectionSession($subject->section, $start, $end)) {
+                            continue;
+                        }
+
+                        $placements = $this->buildPlacementsForDays(
+                            $existingSchedules,
+                            $subject,
+                            $room,
+                            $days,
+                            $start,
+                            $end,
+                            $candidate['score'],
+                            $candidate['fallback']
+                        );
+
+                        if ($placements) {
+                            return [
+                                'pairing_key' => $this->makePairingKey($subject),
+                                'placements'  => $placements,
+                            ];
+                        }
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Build a human-readable failure reason explaining WHY retry failed.
+     */
+    private function buildRichFailureReason(
+        Subject $subject,
+        Collection $rooms,
+        Collection $existingSchedules,
+        array $bounds,
+        int $meetingsNeeded
+    ): string {
+        $compatibleRooms = $this->compatibleRooms($rooms, $subject);
+
+        if ($compatibleRooms->isEmpty()) {
+            $requiresLab = $this->subjectRequiresLab($subject);
+            return $requiresLab
+                ? "No compatible laboratory room available for {$subject->subject_code}"
+                : "No compatible lecture room available for {$subject->subject_code}";
+        }
+
+        // Check if faculty availability is the blocker
+        if ($subject->faculty_id && $subject->faculty) {
+            $faculty     = $subject->faculty;
+            $availability = $faculty->getAttribute('availability');
+
+            if (!empty($availability) && is_array($availability)) {
+                $activeDays = $this->activeDays();
+                $hasAnyWindow = collect($activeDays)->contains(function (string $day) use ($availability) {
+                    return !empty($availability[$day] ?? $availability[strtolower($day)] ?? []);
+                });
+
+                if (!$hasAnyWindow) {
+                    return "No faculty available: {$faculty->full_name} has no availability set for active scheduling days";
+                }
+            }
+        }
+
+        // Check if section has no free slots by scanning all day/time combos
+        $minutes     = $this->minutesPerMeeting($subject);
+        $activeDays  = $this->activeDays();
+        $blockedDays = 0;
+
+        foreach ($activeDays as $day) {
+            $dayFull = true;
+
+            foreach ($this->sectionWindows($subject->section, $bounds) as $window) {
+                if ($window['start']->copy()->addMinutes($minutes)->gt($window['end'])) {
+                    continue;
+                }
+
+                $period = \Carbon\CarbonPeriod::create(
+                    $window['start'],
+                    self::SLOT_MINUTES . ' minutes',
+                    $window['end']->copy()->subMinutes($minutes)
+                );
+
+                foreach ($period as $slotStart) {
+                    $slotEnd = $slotStart->copy()->addMinutes($minutes);
+                    $start   = $slotStart->format('H:i:s');
+                    $end     = $slotEnd->format('H:i:s');
+
+                    if ($this->conflicts->overlapsLunchBreak($start, $end)) {
+                        continue;
+                    }
+
+                    if ($this->sectionAvailable($existingSchedules, $subject, $day, $start, $end)) {
+                        $dayFull = false;
+                        break 2;
+                    }
+                }
+            }
+
+            if ($dayFull) {
+                $blockedDays++;
+            }
+        }
+
+        if ($blockedDays >= count($activeDays)) {
+            return "Section {$subject->section} has no remaining free schedule slots across all active days";
+        }
+
+        if ($blockedDays >= $meetingsNeeded) {
+            return "No valid {$meetingsNeeded}-day combination found — section {$subject->section} is too congested for {$subject->subject_code}";
+        }
+
+        // Faculty conflict is the likely blocker
+        if ($subject->faculty_id) {
+            return "No valid paired-day combinations found — faculty may be unavailable or fully loaded for the required {$meetingsNeeded} meeting(s) per week";
+        }
+
+        return "No valid {$meetingsNeeded}-meeting/week combination found for {$subject->subject_code} — try reducing meetings per week or check room and section availability";
+    }
+
     public function previewManualScheduleEdit(int $subjectId, array $filters, array $overrides = [], array $pendingItems = [], ?int $userId = null): array
     {
         set_time_limit(300);
 
         $subject = $this->activeSubjectQuery()
-            ->select('id', 'edp_code', 'subject_code', 'description', 'section', 'major', 'year_level', 'department', 'units', 'duration_hours', 'type', 'subject_type', 'specialization', 'meetings_per_week', 'faculty_id')
+            ->select($this->subjectSelectColumns())
             ->with('faculty:id,full_name,availability')
             ->find($subjectId);
 
@@ -788,7 +1249,7 @@ class AutoScheduleService
 
         $roomId = filled($overrides['room_id'] ?? null) ? (int) $overrides['room_id'] : null;
         $rooms = Room::query()
-            ->select('id', 'room_name', 'type', 'capacity', 'specialization', 'floor')
+            ->select($this->roomSelectColumns())
             ->available()
             ->when($roomId, fn ($query) => $query->whereKey($roomId))
             ->get()
@@ -1394,6 +1855,14 @@ class AutoScheduleService
                 return null;
             }
 
+            if ($subject->faculty_id && $subject->relationLoaded('faculty') && $subject->faculty) {
+                $availability = $this->conflicts->checkFacultyAvailability($subject->faculty, $day, $start, $end, null, null);
+
+                if (($availability['status'] ?? true) === false) {
+                    return null;
+                }
+            }
+
             $placements[] = [
                 'room' => $room,
                 'day' => $day,
@@ -1721,11 +2190,31 @@ class AutoScheduleService
 
     private function roomTypeMatches(Room $room, Subject $subject): bool
     {
+        $preferred = strtoupper((string) ($subject->preferred_room_type ?? ''));
+
+        if ($preferred !== '') {
+            if (str_contains($preferred, 'LECTURE')) {
+                return $this->roomIsLecture($room);
+            }
+
+            if (str_contains($preferred, 'LAB')) {
+                return $this->roomIsLab($room);
+            }
+        }
+
         return $this->subjectRequiresLab($subject) === $this->roomIsLab($room);
     }
 
     private function subjectRequiresLab(Subject $subject): bool
     {
+        if ((bool) ($subject->requires_lab ?? false)) {
+            return true;
+        }
+
+        if (str_contains(strtoupper((string) ($subject->preferred_room_type ?? '')), 'LAB')) {
+            return true;
+        }
+
         $haystack = strtoupper(trim(implode(' ', [
             (string) $subject->type,
             (string) ($subject->subject_type ?? ''),
@@ -1750,7 +2239,11 @@ class AutoScheduleService
 
     private function roomSpecializations(Room $room): array
     {
-        $specialization = strtoupper((string) $room->specialization);
+        $specialization = strtoupper(trim(implode(',', [
+            (string) $room->specialization,
+            (string) ($room->department_owner ?? ''),
+            (string) ($room->room_type ?? ''),
+        ])));
 
         return collect(preg_split('/[,|\/;]+/', $specialization) ?: [])
             ->map(fn (string $value) => trim($value))
@@ -1810,7 +2303,7 @@ class AutoScheduleService
         $specializations = $this->roomSpecializations($room);
 
         if (!$specializations) {
-            return true;
+            return ! $this->roomIsSpecialized($room);
         }
 
         return (bool) collect($specializations)->first(fn (string $value) => in_array($value, self::GENERAL_ROOM_SPECIALIZATIONS, true));
@@ -1818,12 +2311,158 @@ class AutoScheduleService
 
     private function roomIsLab(Room $room): bool
     {
-        $haystack = strtoupper(trim("{$room->type} {$room->room_name} {$room->specialization}"));
+        $haystack = $this->roomText($room);
 
         return str_contains($haystack, 'LAB')
             || str_contains($haystack, 'LABORATORY')
             || str_contains($haystack, 'COM LAB')
-            || str_contains($haystack, 'COMPUTER');
+            || str_contains($haystack, 'COMPUTER')
+            || str_contains($haystack, 'WORKSHOP')
+            || str_contains($haystack, 'KITCHEN')
+            || str_contains($haystack, 'HOSPITALITY');
+    }
+
+    private function roomIsLecture(Room $room): bool
+    {
+        $haystack = $this->roomText($room);
+
+        return str_contains($haystack, 'LECTURE')
+            || str_contains($haystack, 'CLASSROOM')
+            || (!$this->roomIsLab($room) && !$this->roomIsSpecialized($room));
+    }
+
+    private function roomIsTechnologyLab(Room $room): bool
+    {
+        $haystack = $this->roomText($room);
+
+        return $this->roomIsLab($room)
+            && $this->containsAny($haystack, ['ICT', 'COMPUTER', 'COM LAB', 'WORKSHOP', 'CCS', 'IT', 'ACT']);
+    }
+
+    private function roomIsHospitalityLab(Room $room): bool
+    {
+        $haystack = $this->roomText($room);
+
+        return $this->roomIsLab($room)
+            && $this->containsAny($haystack, ['HRM', 'HM', 'TM', 'SHTM', 'KITCHEN', 'HOSPITALITY', 'CULINARY']);
+    }
+
+    private function roomIsSpecialized(Room $room): bool
+    {
+        if ((bool) ($room->is_specialized ?? false)) {
+            return true;
+        }
+
+        return $this->containsAny($this->roomText($room), [
+            'LAB',
+            'LABORATORY',
+            'COMPUTER',
+            'ICT',
+            'WORKSHOP',
+            'KITCHEN',
+            'HOSPITALITY',
+            'FORENSIC',
+            'BALLISTICS',
+        ]);
+    }
+
+    private function roomText(Room $room): string
+    {
+        return strtoupper(trim(implode(' ', [
+            (string) ($room->room_name ?? ''),
+            (string) ($room->type ?? ''),
+            (string) ($room->room_type ?? ''),
+            (string) ($room->specialization ?? ''),
+            (string) ($room->department_owner ?? ''),
+        ])));
+    }
+
+    private function subjectText(Subject $subject): string
+    {
+        return strtoupper(trim(implode(' ', [
+            (string) ($subject->type ?? ''),
+            (string) ($subject->subject_type ?? ''),
+            (string) ($subject->subject_code ?? ''),
+            (string) ($subject->description ?? ''),
+            (string) ($subject->specialization ?? ''),
+            (string) ($subject->major ?? ''),
+            (string) ($subject->department ?? ''),
+            (string) ($subject->preferred_room_type ?? ''),
+        ])));
+    }
+
+    private function isTechnologyMajor(Subject $subject): bool
+    {
+        return strtoupper((string) $subject->type) === 'MAJOR'
+            && count(array_intersect($this->subjectDepartmentAliases($subject), ['CCS', 'IT', 'ACT'])) > 0;
+    }
+
+    private function isEducationSubject(Subject $subject): bool
+    {
+        return count(array_intersect($this->subjectDepartmentAliases($subject), ['CTE', 'ED'])) > 0;
+    }
+
+    private function isHospitalityPracticalSubject(Subject $subject): bool
+    {
+        if (count(array_intersect($this->subjectDepartmentAliases($subject), ['SHTM', 'HM', 'TM'])) === 0) {
+            return false;
+        }
+
+        return $this->subjectRequiresLab($subject)
+            || $this->containsAny($this->subjectText($subject), ['PRACTICAL', 'KITCHEN', 'CULINARY', 'LAB', 'HOSPITALITY']);
+    }
+
+    private function subjectDepartmentAliases(Subject $subject): array
+    {
+        return collect([
+            Department::normalizeCode((string) $subject->department),
+            Department::normalizeCode((string) $subject->major),
+            ...Department::aliasesFor((string) $subject->department),
+            ...Department::aliasesFor((string) $subject->major),
+        ])
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function roomAllowsSubjectDepartment(Room $room, Subject $subject): bool
+    {
+        $allowed = $this->roomAllowedDepartments($room);
+
+        if (!$allowed) {
+            return true;
+        }
+
+        return count(array_intersect($allowed, $this->subjectDepartmentAliases($subject))) > 0;
+    }
+
+    private function roomOwnerMatchesSubject(Room $room, Subject $subject): bool
+    {
+        $owner = Department::normalizeCode((string) ($room->department_owner ?? ''));
+
+        return $owner !== null
+            && count(array_intersect(Department::aliasesFor($owner), $this->subjectDepartmentAliases($subject))) > 0;
+    }
+
+    private function roomAllowedDepartments(Room $room): array
+    {
+        $departments = $room->allowed_departments ?? [];
+
+        if (is_string($departments)) {
+            $decoded = json_decode($departments, true);
+            $departments = json_last_error() === JSON_ERROR_NONE
+                ? $decoded
+                : preg_split('/[,|\/;]+/', $departments);
+        }
+
+        return collect($departments ?? [])
+            ->map(fn ($code) => Department::normalizeCode((string) $code))
+            ->filter()
+            ->flatMap(fn (string $code) => Department::aliasesFor($code) ?: [$code])
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function isAcceptableGeneralLab(Room $room, array $subjectSpecializations): bool
@@ -1907,7 +2546,6 @@ class AutoScheduleService
     {
         return trim((string) $room->room_name) !== ''
             && trim((string) $room->type) !== ''
-            && trim((string) $room->specialization) !== ''
             && is_numeric($room->capacity)
             && (int) $room->capacity > 0;
     }
@@ -1982,7 +2620,8 @@ class AutoScheduleService
         ?string $preferredStart = null,
         array $preferredDays = [],
         ?int $preferredRoomId = null,
-        ?string $preferredRoomHint = null
+        ?string $preferredRoomHint = null,
+        ?string $preferredEnd = null
     ): ?array {
         $meetingsNeeded = max(1, min($this->activeDayCount(), max($meetingsNeeded, count($preferredDays))));
         $minutes = $this->minutesPerMeeting($subject);
@@ -2008,7 +2647,7 @@ class AutoScheduleService
                     continue;
                 }
 
-                if ($preferredStart) {
+                if ($preferredStart && !$preferredEnd) {
                     $slotStart = Carbon::parse($preferredStart);
                     $slotEnd = $slotStart->copy()->addMinutes($minutes);
                     $start = $slotStart->format('H:i:s');
@@ -2040,6 +2679,12 @@ class AutoScheduleService
                 }
 
                 foreach ($this->sectionWindows($subject->section, $bounds) as $window) {
+                    $window = $this->limitWindowToPreferredRange($window, $preferredStart, $preferredEnd);
+
+                    if (!$window) {
+                        continue;
+                    }
+
                     if ($window['start']->copy()->addMinutes($minutes)->gt($window['end'])) {
                         continue;
                     }
@@ -2102,6 +2747,28 @@ class AutoScheduleService
         }
 
         return false;
+    }
+
+    private function limitWindowToPreferredRange(array $window, ?string $preferredStart, ?string $preferredEnd): ?array
+    {
+        if (!$preferredStart && !$preferredEnd) {
+            return $window;
+        }
+
+        $start = $window['start']->copy();
+        $end = $window['end']->copy();
+
+        if ($preferredStart) {
+            $start = $start->max(Carbon::parse($preferredStart));
+        }
+
+        if ($preferredEnd) {
+            $end = $end->min(Carbon::parse($preferredEnd));
+        }
+
+        return $start->lt($end)
+            ? ['start' => $start, 'end' => $end]
+            : null;
     }
 
     private function findPatternAtPreferredStart(

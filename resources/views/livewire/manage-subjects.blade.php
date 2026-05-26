@@ -816,6 +816,28 @@
         @enderror
 
         {{-- ✅ SUBMIT BUTTON - WITH wire:loading.attr="disabled" TO PREVENT DOUBLE SUBMISSION --}}
+        <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
+            <div class="grid grid-cols-2 gap-2">
+                <label class="flex items-center gap-2 rounded-xl bg-white px-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+                    <input type="checkbox" wire:model.live="requires_lab" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900">
+                    Requires Lab
+                </label>
+                <select wire:model.live="preferred_room_type" class="w-full bg-white dark:bg-slate-900 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
+                    <option value="">Auto Room Type</option>
+                    <option value="LECTURE">Lecture</option>
+                    <option value="LAB">Lab</option>
+                    <option value="ICT LAB">ICT Lab</option>
+                    <option value="COMPUTER LAB">Computer Lab</option>
+                    <option value="WORKSHOP LAB">Workshop Lab</option>
+                    <option value="HRM KITCHEN">HRM Kitchen</option>
+                    <option value="HOSPITALITY LAB">Hospitality Lab</option>
+                </select>
+            </div>
+            <p class="mt-2 text-[9px] font-bold text-slate-400">
+                These fields guide AI room filtering without changing the scheduling workflow.
+            </p>
+        </div>
+
         <button 
             type="submit" 
             wire:loading.attr="disabled"

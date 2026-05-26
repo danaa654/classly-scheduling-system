@@ -30,6 +30,9 @@ class ManageRooms extends Component
     public $capacity = 40;
     public $specialization = '';
     public $floor = '';
+    public $department_owner = '';
+    public $allowed_departments = [];
+    public bool $is_specialized = false;
     
     public $showModal = false;
     public $bulkOpen = false; 
@@ -49,6 +52,10 @@ class ManageRooms extends Component
             'capacity'  => 'required|integer|min:1',
             'specialization' => 'nullable|string',
             'floor' => 'nullable|string',
+            'department_owner' => 'nullable|string|max:30',
+            'allowed_departments' => 'array',
+            'allowed_departments.*' => 'string',
+            'is_specialized' => 'boolean',
         ];
     }
 
@@ -213,8 +220,11 @@ class ManageRooms extends Component
                     'room_name' => $data['room_name'],
                     'capacity'  => (int)$data['capacity'],
                     'type'      => $data['type'],
+                    'room_type' => $data['type'],
                     'specialization' => $data['specialization'],
                     'floor'     => $data['floor'],
+                    'department_owner' => $this->inferDepartmentOwner($data['specialization'], $data['room_name']),
+                    'is_specialized' => strtoupper($data['type']) === 'LAB' || $data['specialization'] !== '',
                 ]);
                 $count++;
             }
@@ -278,8 +288,21 @@ class ManageRooms extends Component
         }
     }
 
+    private function inferDepartmentOwner(?string $specialization, ?string $roomName): ?string
+    {
+        $text = strtoupper(trim((string) $specialization.' '.(string) $roomName));
+
+        return match (true) {
+            str_contains($text, 'CCS') || str_contains($text, 'IT') || str_contains($text, 'ACT') || str_contains($text, 'ICT') || str_contains($text, 'COMPUTER') => 'CCS',
+            str_contains($text, 'CTE') || str_contains($text, 'ED') || str_contains($text, 'EDUCATION') => 'CTE',
+            str_contains($text, 'SHTM') || str_contains($text, 'HM') || str_contains($text, 'TM') || str_contains($text, 'HRM') || str_contains($text, 'KITCHEN') => 'SHTM',
+            str_contains($text, 'COC') || str_contains($text, 'FB') || str_contains($text, 'LD') || str_contains($text, 'QD') || str_contains($text, 'FORENSIC') => 'COC',
+            default => null,
+        };
+    }
+
     // Modal & CRUD methods...
-    public function openModal() { $this->resetValidation(); $this->reset(['room_id', 'room_name', 'isEditMode', 'capacity', 'type', 'specialization', 'floor']); $this->type = 'LECTURE'; $this->capacity = 40; $this->showModal = true; }
+    public function openModal() { $this->resetValidation(); $this->reset(['room_id', 'room_name', 'isEditMode', 'capacity', 'type', 'specialization', 'floor', 'department_owner', 'allowed_departments', 'is_specialized']); $this->type = 'LECTURE'; $this->capacity = 40; $this->allowed_departments = []; $this->is_specialized = false; $this->showModal = true; }
 
     public function saveRoom() 
     {
@@ -288,9 +311,13 @@ class ManageRooms extends Component
         Room::create([
             'room_name' => $this->room_name, 
             'type'      => strtoupper($this->type),
+            'room_type' => strtoupper($this->type),
             'capacity'  => $this->capacity,
             'specialization' => $this->specialization,
             'floor'     => $this->floor,
+            'department_owner' => $this->department_owner ?: null,
+            'allowed_departments' => array_values($this->allowed_departments ?? []),
+            'is_specialized' => (bool) $this->is_specialized,
         ]);
 
         // Notify others
@@ -317,6 +344,9 @@ class ManageRooms extends Component
         $this->capacity = $room->capacity; 
         $this->specialization = $room->specialization ?? '';
         $this->floor = $room->floor ?? '';
+        $this->department_owner = $room->department_owner ?? '';
+        $this->allowed_departments = $room->allowed_departments ?? [];
+        $this->is_specialized = (bool) $room->is_specialized;
         $this->isEditMode = true; 
         $this->showModal = true;
     }
@@ -327,9 +357,13 @@ class ManageRooms extends Component
         Room::findOrFail($this->room_id)->update([
             'room_name' => $this->room_name, 
             'type' => strtoupper($this->type), 
+            'room_type' => strtoupper($this->type),
             'capacity' => $this->capacity,
             'specialization' => $this->specialization,
             'floor' => $this->floor,
+            'department_owner' => $this->department_owner ?: null,
+            'allowed_departments' => array_values($this->allowed_departments ?? []),
+            'is_specialized' => (bool) $this->is_specialized,
         ]);
         $this->showModal = false; 
         $this->isEditMode = false;

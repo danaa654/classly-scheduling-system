@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Faculty;
+use App\Models\Department;
 use App\Models\Room;
 use App\Models\Schedule;
 use App\Models\Setting;
@@ -11,6 +12,8 @@ use App\Services\Scheduling\AutoGenerateScheduler;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 
 class ScheduleConflictService
 {
@@ -180,7 +183,7 @@ class ScheduleConflictService
             return $this->pass();
         }
 
-        $requestedRoom ??= $conflict->room ?: Room::select('id', 'room_name', 'type', 'capacity', 'specialization')->find($roomId);
+        $requestedRoom ??= $conflict->room ?: Room::select($this->roomSelectColumns(['floor']))->find($roomId);
         $roomName = $requestedRoom?->room_name ?? $conflict->room?->room_name ?? 'This room';
         $subjectCode = $conflict->subject?->subject_code ?? 'another subject';
 
@@ -573,9 +576,25 @@ class ScheduleConflictService
             );
         }
 
+        if (in_array($type, ['faculty_conflict', 'faculty_availability_conflict', 'room_conflict', 'section_conflict'], true)) {
+            $suggestions = array_merge(
+                $suggestions,
+                $this->facultySuggestions($subject, $room, $day, $startTime, $endTime, $ignoreScheduleId)
+            );
+        }
+
         return collect($suggestions)
             ->unique(fn (array $suggestion) => ($suggestion['type'] ?? '') . '|' . ($suggestion['label'] ?? ''))
-            ->take(6)
+            ->sortByDesc(fn (array $suggestion) => $suggestion['score'] ?? 0)
+            ->take(8)
+            ->map(function (array $suggestion) {
+                unset($suggestion['sort']);
+
+                return array_merge([
+                    'match_label' => $this->rankLabel((int) ($suggestion['score'] ?? 0)),
+                    'badge' => strtoupper((string) ($suggestion['type'] ?? 'suggestion')),
+                ], $suggestion);
+            })
             ->values()
             ->all();
     }
@@ -588,28 +607,27 @@ class ScheduleConflictService
         string $endTime,
         ?int $ignoreScheduleId
     ): array {
-        $preferredType = $this->subjectRequiresLab($subject)
-            ? 'lab'
-            : $this->canonicalRoomType($requestedRoom);
-
-        return Room::query()
-            ->select('id', 'room_name', 'type', 'capacity', 'specialization', 'floor')
+        $scheduler = app(AutoGenerateScheduler::class);
+        $rooms = Room::query()
+            ->select($this->roomSelectColumns())
             ->available()
             ->whereKeyNot($requestedRoom->id)
             ->orderBy('room_name')
-            ->get()
-            ->filter(fn (Room $room) => $this->canonicalRoomType($room) === $preferredType)
-            ->filter(fn (Room $room) => $this->roomCanHostSubject($room, $subject))
-            ->filter(fn (Room $room) => $this->roomAvailable($room->id, $day, $startTime, $endTime, $ignoreScheduleId))
-            ->take(3)
-            ->map(fn (Room $room) => [
+            ->get();
+
+        return $scheduler->findCompatibleRooms($subject, $rooms)
+            ->filter(fn (array $candidate) => $this->roomAvailable($candidate['room']->id, $day, $startTime, $endTime, $ignoreScheduleId))
+            ->filter(fn (array $candidate) => $this->facultyAndSectionAvailable($subject, $day, $startTime, $endTime, $ignoreScheduleId))
+            ->take(4)
+            ->map(fn (array $candidate) => [
                 'type' => 'room',
-                'label' => "{$room->room_name} available at the same time",
-                'room_id' => $room->id,
-                'room_name' => $room->room_name,
+                'label' => "{$candidate['room']->room_name} available at the same time",
+                'room_id' => $candidate['room']->id,
+                'room_name' => $candidate['room']->room_name,
                 'day' => $day,
                 'start_time' => $this->normalizeTime($startTime),
                 'end_time' => $this->normalizeTime($endTime),
+                'score' => (int) ($candidate['score'] ?? 0) + 70,
             ])
             ->values()
             ->all();
@@ -631,6 +649,7 @@ class ScheduleConflictService
         $requestedDayIndex = array_search($day, $activeDays, true);
         $requestedDayIndex = $requestedDayIndex === false ? 0 : $requestedDayIndex;
         $requestedStartMinutes = Carbon::parse($startTime)->diffInMinutes(Carbon::parse('00:00:00'));
+        $requestedPeriod = Carbon::parse($startTime)->lt(Carbon::parse(self::LUNCH_START)) ? 'morning' : 'afternoon';
         $candidates = [];
 
         foreach ($activeDays as $dayIndex => $candidateDay) {
@@ -666,6 +685,24 @@ class ScheduleConflictService
                 $candidateStartMinutes = $slotStart->diffInMinutes(Carbon::parse('00:00:00'));
                 $dayDistance = abs($dayIndex - $requestedDayIndex);
                 $timeDistance = abs($candidateStartMinutes - $requestedStartMinutes);
+                $candidatePeriod = $slotStart->lt(Carbon::parse(self::LUNCH_START)) ? 'morning' : 'afternoon';
+                $score = 95;
+
+                if ($candidateDay === $day) {
+                    $score += 20;
+                }
+
+                if ($requestedPeriod === 'morning' && $candidatePeriod === 'afternoon') {
+                    $score += 35;
+                }
+
+                if ($this->facultyDailyHoursValid($subject, $candidateDay, $candidateStart, $candidateEnd, $ignoreScheduleId)) {
+                    $score += 20;
+                }
+
+                if (!$this->wouldCreateLongFacultyRun($subject, $candidateDay, $candidateStart, $candidateEnd, $ignoreScheduleId)) {
+                    $score += 15;
+                }
 
                 $candidates[] = [
                     'type' => 'time',
@@ -675,7 +712,8 @@ class ScheduleConflictService
                     'day' => $candidateDay,
                     'start_time' => $candidateStart,
                     'end_time' => $candidateEnd,
-                    'sort' => ($dayDistance * 10000) + $timeDistance,
+                    'sort' => ($dayDistance * 10000) + $timeDistance - ($score * 20),
+                    'score' => $score,
                 ];
             }
         }
@@ -683,11 +721,46 @@ class ScheduleConflictService
         return collect($candidates)
             ->sortBy('sort')
             ->take(4)
-            ->map(function (array $suggestion) {
-                unset($suggestion['sort']);
+            ->values()
+            ->all();
+    }
 
-                return $suggestion;
+    private function facultySuggestions(
+        Subject $subject,
+        Room $room,
+        string $day,
+        string $startTime,
+        string $endTime,
+        ?int $ignoreScheduleId
+    ): array {
+        return Faculty::query()
+            ->approved()
+            ->select('id', 'full_name', 'department', 'faculty_scope', 'can_teach_minor', 'max_units', 'availability')
+            ->with(['schedules' => fn ($query) => $query->activeTerm()->with('subject:id,units')])
+            ->orderBy('full_name')
+            ->get()
+            ->filter(fn (Faculty $faculty) => $faculty->isEligibleForSubject($subject))
+            ->filter(fn (Faculty $faculty) => $this->facultyAvailable($faculty->id, $day, $startTime, $endTime, $ignoreScheduleId))
+            ->filter(fn (Faculty $faculty) => $this->facultyAvailabilityAllows($faculty, $day, $startTime, $endTime))
+            ->filter(fn (Faculty $faculty) => $this->facultyWorkloadAllows($faculty, $subject))
+            ->map(function (Faculty $faculty) use ($subject, $room, $day, $startTime, $endTime, $ignoreScheduleId) {
+                $score = $this->facultyRecommendationScore($faculty, $subject, $room, $day, $startTime, $endTime, $ignoreScheduleId);
+
+                return [
+                    'type' => 'faculty',
+                    'label' => "{$faculty->full_name} is available for {$this->formatTimeRange($startTime, $endTime)}",
+                    'faculty_id' => $faculty->id,
+                    'faculty_name' => $faculty->full_name,
+                    'room_id' => $room->id,
+                    'room_name' => $room->room_name,
+                    'day' => $day,
+                    'start_time' => $this->normalizeTime($startTime),
+                    'end_time' => $this->normalizeTime($endTime),
+                    'score' => $score,
+                ];
             })
+            ->sortByDesc('score')
+            ->take(4)
             ->values()
             ->all();
     }
@@ -731,6 +804,196 @@ class ScheduleConflictService
         }
 
         return true;
+    }
+
+    private function facultyAndSectionAvailable(Subject $subject, string $day, string $startTime, string $endTime, ?int $ignoreScheduleId): bool
+    {
+        if (!$this->sectionAvailable($subject, $day, $startTime, $endTime, $ignoreScheduleId)) {
+            return false;
+        }
+
+        if ($subject->faculty_id && !$this->facultyAvailable((int) $subject->faculty_id, $day, $startTime, $endTime, $ignoreScheduleId)) {
+            return false;
+        }
+
+        if ($subject->faculty_id && $subject->relationLoaded('faculty') && $subject->faculty) {
+            return $this->facultyAvailabilityAllows($subject->faculty, $day, $startTime, $endTime);
+        }
+
+        return true;
+    }
+
+    private function facultyAvailabilityAllows(Faculty $faculty, string $day, string $startTime, string $endTime): bool
+    {
+        $previous = $this->includeSuggestions;
+        $this->includeSuggestions = false;
+
+        try {
+            $availability = $this->checkFacultyAvailability($faculty, $day, $startTime, $endTime);
+
+            return ($availability['status'] ?? true) !== false;
+        } finally {
+            $this->includeSuggestions = $previous;
+        }
+    }
+
+    private function facultyWorkloadAllows(Faculty $faculty, Subject $subject): bool
+    {
+        $currentUnits = $faculty->schedules
+            ->pluck('subject')
+            ->filter()
+            ->unique('id')
+            ->sum(fn (Subject $assignedSubject) => (int) ($assignedSubject->units ?? 0));
+
+        return ($currentUnits + (int) ($subject->units ?? 0)) <= (int) ($faculty->max_units ?? 21);
+    }
+
+    private function facultyDailyHoursValid(Subject $subject, string $day, string $startTime, string $endTime, ?int $ignoreScheduleId, ?int $facultyId = null): bool
+    {
+        $facultyId ??= $subject->faculty_id ? (int) $subject->faculty_id : null;
+
+        if (!$facultyId) {
+            return true;
+        }
+
+        $maxDailyHours = (float) Setting::getValue('max_daily_hours_per_faculty', 8);
+        $newHours = Carbon::parse($startTime)->diffInMinutes(Carbon::parse($endTime)) / 60;
+        $existingHours = Schedule::activeTerm()
+            ->where('faculty_id', $facultyId)
+            ->when($ignoreScheduleId, fn (Builder $query) => $query->whereKeyNot($ignoreScheduleId))
+            ->where('day', $day)
+            ->get()
+            ->sum(fn (Schedule $schedule) => Carbon::parse($schedule->start_time)->diffInMinutes(Carbon::parse($schedule->end_time)) / 60);
+
+        return ($existingHours + $newHours) <= $maxDailyHours;
+    }
+
+    private function wouldCreateLongFacultyRun(Subject $subject, string $day, string $startTime, string $endTime, ?int $ignoreScheduleId, ?int $facultyId = null): bool
+    {
+        $facultyId ??= $subject->faculty_id ? (int) $subject->faculty_id : null;
+
+        if (!$facultyId) {
+            return false;
+        }
+
+        $blocks = Schedule::activeTerm()
+            ->where('faculty_id', $facultyId)
+            ->when($ignoreScheduleId, fn (Builder $query) => $query->whereKeyNot($ignoreScheduleId))
+            ->where('day', $day)
+            ->get(['start_time', 'end_time'])
+            ->map(fn (Schedule $schedule) => [
+                'start' => Carbon::parse($schedule->start_time),
+                'end' => Carbon::parse($schedule->end_time),
+            ])
+            ->push([
+                'start' => Carbon::parse($startTime),
+                'end' => Carbon::parse($endTime),
+            ])
+            ->sortBy('start')
+            ->values();
+
+        $runStart = null;
+        $runEnd = null;
+
+        foreach ($blocks as $block) {
+            if (!$runStart) {
+                $runStart = $block['start']->copy();
+                $runEnd = $block['end']->copy();
+                continue;
+            }
+
+            if ($block['start']->diffInMinutes($runEnd, false) >= -30) {
+                $runEnd = $block['end']->gt($runEnd) ? $block['end']->copy() : $runEnd;
+            } else {
+                if ($runStart->diffInMinutes($runEnd) > 240) {
+                    return true;
+                }
+
+                $runStart = $block['start']->copy();
+                $runEnd = $block['end']->copy();
+            }
+        }
+
+        return $runStart && $runStart->diffInMinutes($runEnd) > 240;
+    }
+
+    private function facultyRecommendationScore(
+        Faculty $faculty,
+        Subject $subject,
+        Room $room,
+        string $day,
+        string $startTime,
+        string $endTime,
+        ?int $ignoreScheduleId
+    ): int {
+        $score = 80;
+
+        if (Department::codesMatch($faculty->department, $subject->department)) {
+            $score += 70;
+        }
+
+        if (Department::codesMatch($faculty->department, $subject->major)) {
+            $score += 25;
+        }
+
+        if ($faculty->isGenEd() && $this->subjectIsMinorOrGenEd($subject)) {
+            $score += 40;
+        }
+
+        if ($this->facultyDailyHoursValid($subject, $day, $startTime, $endTime, $ignoreScheduleId, $faculty->id)) {
+            $score += 25;
+        }
+
+        if (!$this->wouldCreateLongFacultyRun($subject, $day, $startTime, $endTime, $ignoreScheduleId, $faculty->id)) {
+            $score += 15;
+        }
+
+        if ($this->roomCanHostSubject($room, $subject)) {
+            $score += 10;
+        }
+
+        return $score;
+    }
+
+    private function subjectIsMinorOrGenEd(Subject $subject): bool
+    {
+        $type = strtolower(trim((string) $subject->type));
+        $subjectType = strtolower(trim((string) ($subject->subject_type ?? '')));
+        $department = Department::normalizeCode($subject->department);
+        $major = Department::normalizeCode($subject->major);
+
+        return $type === 'minor'
+            || $subjectType === 'minor'
+            || $department === 'GENED'
+            || $major === 'GENED'
+            || str_contains(strtoupper((string) $subject->subject_code), 'NSTP')
+            || str_contains(strtoupper((string) $subject->subject_code), 'PATHFIT');
+    }
+
+    private function rankLabel(int $score): string
+    {
+        if ($score >= 170) {
+            return 'BEST MATCH';
+        }
+
+        if ($score >= 110) {
+            return 'GOOD MATCH';
+        }
+
+        return 'FALLBACK';
+    }
+
+    private function roomSelectColumns(array $extra = []): array
+    {
+        $columns = ['id', 'room_name', 'type', 'capacity', 'specialization'];
+
+        foreach (array_merge(['floor', 'room_type', 'allowed_departments', 'department_owner', 'is_specialized'], $extra) as $column) {
+            if (Schema::hasColumn('rooms', $column)) {
+                $columns[] = $column;
+            }
+        }
+
+        return array_values(array_unique($columns));
     }
 
     private function roomAvailable(int $roomId, string $day, string $startTime, string $endTime, ?int $ignoreScheduleId = null): bool
@@ -880,6 +1143,10 @@ class ScheduleConflictService
             return true;
         }
 
+        if (str_contains(strtoupper((string) ($subject->preferred_room_type ?? '')), 'LAB')) {
+            return true;
+        }
+
         $haystack = strtoupper(trim(implode(' ', [
             (string) $subject->type,
             (string) ($subject->subject_type ?? ''),
@@ -899,12 +1166,20 @@ class ScheduleConflictService
 
     private function roomIsLab(Room $room): bool
     {
-        $haystack = strtoupper(trim("{$room->type} {$room->room_name} {$room->specialization}"));
+        $haystack = strtoupper(trim(implode(' ', [
+            (string) ($room->type ?? ''),
+            (string) ($room->room_type ?? ''),
+            (string) ($room->room_name ?? ''),
+            (string) ($room->specialization ?? ''),
+        ])));
 
         return str_contains($haystack, 'LAB')
             || str_contains($haystack, 'LABORATORY')
             || str_contains($haystack, 'COM LAB')
-            || str_contains($haystack, 'COMPUTER');
+            || str_contains($haystack, 'COMPUTER')
+            || str_contains($haystack, 'WORKSHOP')
+            || str_contains($haystack, 'KITCHEN')
+            || str_contains($haystack, 'HOSPITALITY');
     }
 
     private function canonicalRoomType(Room $room): string

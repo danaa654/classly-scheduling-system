@@ -106,6 +106,11 @@
                                         @if($room->specialization)
                                         <span class="text-[9px] text-slate-500 dark:text-slate-400 italic">{{ $room->specialization }}</span>
                                         @endif
+                                        @if($room->department_owner || $room->is_specialized)
+                                            <span class="text-[9px] font-black uppercase tracking-widest text-indigo-500 dark:text-indigo-300">
+                                                {{ $room->department_owner ?: 'Shared' }} {{ $room->is_specialized ? '/ Specialized' : '' }}
+                                            </span>
+                                        @endif
                                     </div>
                                 </td>
                                 
@@ -145,7 +150,7 @@
     {{-- --- ADD/EDIT MODAL --- --}}
     <div x-show="open" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 dark:bg-slate-950/80 backdrop-blur-md" x-cloak x-transition>
     {{-- Main Modal Card --}}
-    <div class="bg-white dark:bg-slate-900 w-full max-w-lg rounded-[3rem] p-12 shadow-2xl border border-slate-200 dark:border-slate-800 transition-colors duration-500" @click.away="open = false">
+    <div class="bg-white dark:bg-slate-900 w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-[3rem] p-12 shadow-2xl border border-slate-200 dark:border-slate-800 transition-colors duration-500 custom-scrollbar" @click.away="open = false">
         
         <div class="flex items-center justify-between mb-8">
             <h3 class="text-3xl font-black text-slate-800 dark:text-slate-100 tracking-tighter">
@@ -193,6 +198,36 @@
                     <input type="text" wire:model="specialization" placeholder="e.g. FB, LD, QD" 
                            class="w-full px-6 py-4 bg-slate-50 dark:bg-slate-800 border-none dark:text-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 shadow-inner dark:placeholder-slate-600">
                 </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <label class="block text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest mb-2 ml-2">Department Owner</label>
+                    <select wire:model="department_owner" class="w-full px-6 py-4 bg-slate-50 dark:bg-slate-800 border-none dark:text-slate-200 rounded-2xl font-bold focus:ring-2 focus:ring-blue-500 shadow-inner uppercase text-xs">
+                        <option value="">Shared</option>
+                        <option value="CCS">CCS</option>
+                        <option value="CTE">CTE</option>
+                        <option value="COC">COC</option>
+                        <option value="SHTM">SHTM</option>
+                    </select>
+                </div>
+                <label class="flex items-center gap-3 rounded-2xl bg-slate-50 px-4 py-4 text-[10px] font-black uppercase tracking-widest text-slate-500 shadow-inner dark:bg-slate-800 dark:text-slate-300">
+                    <input type="checkbox" wire:model="is_specialized" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900">
+                    Specialized Room
+                </label>
+            </div>
+
+            <div>
+                <label class="block text-[10px] font-black uppercase text-slate-400 dark:text-slate-500 tracking-widest mb-2 ml-2">Allowed Departments</label>
+                <div class="grid grid-cols-4 gap-2">
+                    @foreach(['CCS', 'CTE', 'COC', 'SHTM'] as $deptOption)
+                        <label class="flex items-center gap-2 rounded-xl bg-slate-50 px-3 py-3 text-[10px] font-black uppercase text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                            <input type="checkbox" value="{{ $deptOption }}" wire:model="allowed_departments" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900">
+                            {{ $deptOption }}
+                        </label>
+                    @endforeach
+                </div>
+                <p class="mt-2 ml-2 text-[9px] font-bold text-slate-400">Leave empty for shared rooms. Specialized rooms should list the departments allowed to use them.</p>
             </div>
 
             {{-- Actions --}}

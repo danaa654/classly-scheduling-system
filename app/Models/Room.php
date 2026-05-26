@@ -14,10 +14,16 @@ class Room extends Model
         'capacity',
         'specialization',
         'floor',
+        'room_type',
+        'allowed_departments',
+        'department_owner',
+        'is_specialized',
     ];
 
     protected $casts = [
         'capacity' => 'integer',
+        'allowed_departments' => 'array',
+        'is_specialized' => 'boolean',
     ];
 
     // ============================================================
@@ -48,6 +54,18 @@ class Room extends Model
     }
 
     protected function floor(): Attribute
+    {
+        return Attribute::make(get: fn ($value) => self::cleanText($value));
+    }
+
+    protected function roomType(): Attribute
+    {
+        return Attribute::make(
+            get: fn ($value) => self::cleanText($value ?: ($this->attributes['type'] ?? null))
+        );
+    }
+
+    protected function departmentOwner(): Attribute
     {
         return Attribute::make(get: fn ($value) => self::cleanText($value));
     }
@@ -296,5 +314,24 @@ class Room extends Model
     public function compatibilityScoreForSubject(Subject $subject): int
     {
         return app(\App\Services\AutoScheduleService::class)->compatibilityScore($this, $subject);
+    }
+
+    public function allowedDepartmentCodes(): array
+    {
+        $departments = $this->allowed_departments;
+
+        if (is_string($departments)) {
+            $decoded = json_decode($departments, true);
+            $departments = json_last_error() === JSON_ERROR_NONE
+                ? $decoded
+                : preg_split('/[,|\/;]+/', $departments);
+        }
+
+        return collect($departments ?? [])
+            ->map(fn ($code) => Department::normalizeCode((string) $code))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
     }
 }

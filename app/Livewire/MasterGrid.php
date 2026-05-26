@@ -58,6 +58,12 @@ class MasterGrid extends Component
     public ?int $retrySubjectId = null;
     public array $pendingGeneratedSchedules = [];
     public array $failedRetryInputs = [];
+    public array $selectedFailedSubjects = [];
+    public bool $selectAllFailedSubjects = false;
+    public array $bulkFailedInputs = [
+        'meetings_per_week' => '',
+    ];
+    public bool $autoFixingConflicts = false;
     public array $generatedScheduleEditInputs = [];
     public array $compatibleRoomsForEdit = [];
     public array $compatibleFacultyForEdit = [];
@@ -65,6 +71,7 @@ class MasterGrid extends Component
     public array $conflictData = [];
     public array $recommendations = [];
     public array $conflictContext = [];
+    public ?int $applyingSuggestionIndex = null;
     public ?string $editingGeneratedScheduleKey = null;
     public $generateDepartment = null;
     public $generateMajor = null;
@@ -417,6 +424,10 @@ class MasterGrid extends Component
 
     public function useConflictSuggestion(int $index): void
     {
+        if ($this->applyingSuggestionIndex !== null) {
+            return;
+        }
+
         $suggestion = $this->recommendations[$index] ?? null;
 
         if (!is_array($suggestion)) {
@@ -428,36 +439,42 @@ class MasterGrid extends Component
             return;
         }
 
-        $mode = $this->conflictContext['mode'] ?? null;
+        $this->applyingSuggestionIndex = $index;
 
-        if ($mode === 'generated_edit' && $this->editingGeneratedScheduleKey) {
-            $this->applySuggestionToGeneratedEdit($suggestion);
-            $this->closeConflictModal();
-            $this->showEditScheduleModal = true;
+        try {
+            $mode = $this->conflictContext['mode'] ?? null;
 
-            $this->dispatch('toast', [
-                'type' => 'info',
-                'message' => 'Suggestion applied.',
-                'detail' => 'Review the temporary edit, then apply it again.'
-            ]);
-            return;
-        }
+            if ($mode === 'generated_edit' && $this->editingGeneratedScheduleKey) {
+                $this->applySuggestionToGeneratedEdit($suggestion);
+                $this->closeConflictModal();
+                $this->showEditScheduleModal = true;
 
-        if ($mode === 'assign' && !empty($this->conflictContext['subject_id'])) {
-            $subjectId = (int) $this->conflictContext['subject_id'];
-            $day = $suggestion['day'] ?? null;
-            $startTime = $suggestion['start_time'] ?? null;
-
-            $this->setSelectedRoomFromSuggestion((int) ($suggestion['room_id'] ?? $this->selectedRoomId));
-            $this->closeConflictModal();
-
-            if ($day && $startTime) {
-                $this->assignSubject($subjectId, $day, Carbon::parse($startTime)->format(self::TIME_FORMAT_24H));
+                $this->dispatch('toast', [
+                    'type' => 'success',
+                    'message' => 'Suggestion applied.',
+                    'detail' => 'Review the temporary edit, then apply it again.'
+                ]);
                 return;
             }
-        }
 
-        $this->closeConflictModal();
+            if ($mode === 'assign' && !empty($this->conflictContext['subject_id'])) {
+                $subjectId = (int) $this->conflictContext['subject_id'];
+                $day = $suggestion['day'] ?? null;
+                $startTime = $suggestion['start_time'] ?? null;
+
+                $this->setSelectedRoomFromSuggestion((int) ($suggestion['room_id'] ?? $this->selectedRoomId));
+                $this->closeConflictModal();
+
+                if ($day && $startTime) {
+                    $this->assignSubject($subjectId, $day, Carbon::parse($startTime)->format(self::TIME_FORMAT_24H));
+                    return;
+                }
+            }
+
+            $this->closeConflictModal();
+        } finally {
+            $this->applyingSuggestionIndex = null;
+        }
     }
 
     private function applySuggestionToGeneratedEdit(array $suggestion): void
@@ -496,6 +513,12 @@ class MasterGrid extends Component
                     $meetingsPerWeek
                 );
             }
+        }
+
+        if (array_key_exists('faculty_id', $suggestion)) {
+            $this->generatedScheduleEditInputs['faculty_id'] = filled($suggestion['faculty_id'])
+                ? (string) $suggestion['faculty_id']
+                : '';
         }
     }
 
@@ -648,6 +671,9 @@ class MasterGrid extends Component
         $this->generationSummary = null;
         $this->pendingGeneratedSchedules = [];
         $this->failedRetryInputs = [];
+        $this->selectedFailedSubjects = [];
+        $this->selectAllFailedSubjects = false;
+        $this->resetBulkFailedInputs();
         $this->generatedScheduleEditInputs = [];
         $this->compatibleRoomsForEdit = [];
         $this->compatibleFacultyForEdit = [];
@@ -694,6 +720,9 @@ class MasterGrid extends Component
         $this->generationSummary = null;
         $this->pendingGeneratedSchedules = [];
         $this->failedRetryInputs = [];
+        $this->selectedFailedSubjects = [];
+        $this->selectAllFailedSubjects = false;
+        $this->resetBulkFailedInputs();
         $this->showGenerateModal = false;
         $this->showSummaryModal = false;
         $this->showSavingModal = false;
@@ -912,6 +941,9 @@ class MasterGrid extends Component
                 ];
             })
             ->all();
+        $this->selectedFailedSubjects = [];
+        $this->selectAllFailedSubjects = false;
+        $this->resetBulkFailedInputs();
 
         $this->showGenerateModal = false;
         $this->showGeneratingModal = false;
@@ -971,10 +1003,7 @@ class MasterGrid extends Component
         }
 
         $subjectId = $this->retrySubjectId;
-        $overrides = $this->failedRetryInputs[$subjectId] ?? [];
-        $meetings = max(1, min($this->maxMeetingDays(), (int) ($overrides['meetings_per_week'] ?? 1)));
-
-        $overrides = ['meetings_per_week' => $meetings];
+        $overrides = $this->failedSubjectRetryOverrides($subjectId);
 
         try {
             $retry = app(AutoGenerateScheduler::class)->previewSubjectSchedule(
@@ -1038,6 +1067,11 @@ class MasterGrid extends Component
         )), 0, 20);
 
         unset($this->failedRetryInputs[$subjectId]);
+        $this->selectedFailedSubjects = array_values(array_filter(
+            $this->selectedFailedSubjects,
+            fn ($selectedId) => (int) $selectedId !== $subjectId
+        ));
+        $this->selectAllFailedSubjects = false;
 
         $this->showRetryingModal = false;
         $this->showSummaryModal = true;
@@ -1298,6 +1332,164 @@ class MasterGrid extends Component
         $this->generationSummary = null;
         $this->pendingGeneratedSchedules = [];
         $this->failedRetryInputs = [];
+        $this->selectedFailedSubjects = [];
+        $this->selectAllFailedSubjects = false;
+        $this->resetBulkFailedInputs();
+    }
+
+    public function updatedSelectAllFailedSubjects(bool $selected): void
+    {
+        $this->selectedFailedSubjects = $selected
+            ? collect($this->generationSummary['failed_items'] ?? [])->pluck('subject_id')->map(fn ($id) => (string) $id)->all()
+            : [];
+    }
+
+    public function clearFailedSelection(): void
+    {
+        $this->selectedFailedSubjects = [];
+        $this->selectAllFailedSubjects = false;
+        $this->resetBulkFailedInputs();
+    }
+
+    public function applyBulkFailedChanges(): void
+    {
+        $subjectIds = collect($this->selectedFailedSubjects)->map(fn ($id) => (int) $id)->filter()->unique();
+
+        if ($subjectIds->isEmpty()) {
+            $this->dispatch('toast', [
+                'type' => 'warning',
+                'message' => 'No failed subjects selected.',
+                'detail' => 'Select at least one failed subject before applying bulk changes.'
+            ]);
+            return;
+        }
+
+        foreach ($subjectIds as $subjectId) {
+            $this->failedRetryInputs[$subjectId] ??= [];
+
+            if (filled($this->bulkFailedInputs['meetings_per_week'] ?? null)) {
+                $this->failedRetryInputs[$subjectId]['meetings_per_week'] = $this->bulkFailedInputs['meetings_per_week'];
+            }
+        }
+
+        $this->dispatch('toast', [
+            'type' => 'success',
+            'message' => 'Bulk changes applied.',
+            'detail' => $subjectIds->count().' failed subject(s) received the retry preferences.'
+        ]);
+    }
+
+    public function autoFixAllConflicts(): void
+    {
+        if (!$this->canModifyGeneratedSchedules() || !$this->generationSummary || $this->autoFixingConflicts) {
+            return;
+        }
+
+        $failedItems = collect($this->generationSummary['failed_items'] ?? []);
+
+        if ($failedItems->isEmpty()) {
+            $this->dispatch('toast', [
+                'type' => 'info',
+                'message' => 'No conflicts to auto-fix.',
+                'detail' => 'The current generation summary has no failed subjects.'
+            ]);
+            return;
+        }
+
+        $this->autoFixingConflicts = true;
+        $fixed = 0;
+        $remainingReasons = [];
+
+        try {
+            foreach ($failedItems as $item) {
+                $subjectId = (int) ($item['subject_id'] ?? 0);
+
+                if (!$subjectId) {
+                    continue;
+                }
+
+                $retry = app(AutoGenerateScheduler::class)->previewSubjectSchedule(
+                    $subjectId,
+                    $this->generationSummary['filters'] ?? [],
+                    $this->failedSubjectRetryOverrides($subjectId),
+                    $this->pendingGeneratedSchedules,
+                    auth()->id()
+                );
+
+                if (($retry['scheduled'] ?? 0) <= 0) {
+                    $remainingReasons = array_merge($remainingReasons, $retry['failure_reasons'] ?? [$item['reason'] ?? 'No valid slot found.']);
+                    continue;
+                }
+
+                $retryItems = array_map(function (array $scheduledItem) {
+                    $scheduledItem['auto_fixed'] = true;
+
+                    return $scheduledItem;
+                }, array_values($retry['scheduled_items'] ?? []));
+
+                $this->pendingGeneratedSchedules = array_values(array_merge($this->pendingGeneratedSchedules, $retryItems));
+                $this->generationSummary['scheduled_items'] = array_values(array_merge(
+                    $this->generationSummary['scheduled_items'] ?? [],
+                    $this->summarizeScheduledItemsForDisplay($retryItems)
+                ));
+
+                $subjectCode = $retryItems[0]['subject_code'] ?? null;
+                $this->generationSummary['failed_items'] = array_values(array_filter(
+                    $this->generationSummary['failed_items'] ?? [],
+                    fn (array $failedItem) => (int) $failedItem['subject_id'] !== $subjectId
+                ));
+                $this->generationSummary['failure_reasons'] = array_values(array_filter(
+                    $this->generationSummary['failure_reasons'] ?? [],
+                    fn (string $reason) => !$subjectCode || !str_starts_with($reason, "{$subjectCode}:")
+                ));
+
+                unset($this->failedRetryInputs[$subjectId]);
+                $fixed++;
+                $this->mergeGenerationWarnings($retry);
+            }
+
+            $this->refreshGenerationScheduledSummary();
+            $this->generationSummary['failed'] = count($this->generationSummary['failed_items'] ?? []);
+            $this->selectedFailedSubjects = [];
+            $this->selectAllFailedSubjects = false;
+
+            $this->dispatch('toast', [
+                'type' => $fixed > 0 ? ($remainingReasons ? 'warning' : 'success') : 'warning',
+                'message' => "Auto-fix complete: {$fixed} fixed, ".count($remainingReasons).' remaining.',
+                'detail' => $remainingReasons ? collect($remainingReasons)->take(2)->implode(' ') : 'Resolved conflicts were added to the pending schedule preview.'
+            ]);
+        } catch (\Throwable $e) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Auto-fix failed.',
+                'detail' => $e->getMessage(),
+            ]);
+        } finally {
+            $this->autoFixingConflicts = false;
+        }
+    }
+
+    private function failedSubjectRetryOverrides(int $subjectId): array
+    {
+        $inputs = $this->failedRetryInputs[$subjectId] ?? [];
+        $meetings = max(1, min($this->maxMeetingDays(), (int) ($inputs['meetings_per_week'] ?? 1)));
+
+        return [
+            'meetings_per_week'   => $meetings,
+            'preferred_time_start' => null,
+            'preferred_time_end'   => null,
+            'preferred_start_time' => null,
+            'preferred_room_type'  => null,
+            'faculty_id'           => null,
+            'preferred_days'       => [],
+        ];
+    }
+
+    private function resetBulkFailedInputs(): void
+    {
+        $this->bulkFailedInputs = [
+            'meetings_per_week' => '',
+        ];
     }
 
     private function currentGenerationFilters(): array
@@ -1536,6 +1728,7 @@ class MasterGrid extends Component
         return Schedule::create([
             'subject_id' => $subject->id,
             'room_id' => $room->id,
+            'faculty_id' => $subject->faculty_id,
             'user_id' => auth()->id() ?? 1,
             'department' => $subject->department,
             'major' => $subject->major,

@@ -299,7 +299,9 @@
                                                 <p class="break-words text-base font-black text-slate-950 dark:text-white">{{ $item['subject_code'] }}</p>
                                                 <p class="mt-0.5 break-words font-black uppercase tracking-wide text-slate-500">EDP: {{ $item['edp_code'] }}</p>
                                             </div>
-                                            <span class="shrink-0 rounded-full bg-emerald-100 px-3 py-1 text-[9px] font-black uppercase text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">Ready</span>
+                                            <span class="shrink-0 rounded-full {{ !empty($item['auto_fixed']) ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300' }} px-3 py-1 text-[9px] font-black uppercase">
+                                                {{ !empty($item['auto_fixed']) ? 'Auto-Fixed' : 'Ready' }}
+                                            </span>
                                         </div>
                                         <p class="mt-3 break-words text-sm font-black text-slate-800 dark:text-slate-100">{{ $item['subject_name'] ?? 'No subject name' }}</p>
                                         <div class="mt-4 grid gap-2 font-bold text-slate-600 dark:text-slate-300 sm:grid-cols-2">
@@ -336,27 +338,57 @@
                         </section>
 
                         <section>
-                            <h4 class="mb-3 text-xs font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">Failed / Warnings</h4>
+                            <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                <h4 class="text-xs font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">Failed / Warnings</h4>
+                                @if(!empty($generationSummary['failed_items']))
+                                    <label class="inline-flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                                        <input type="checkbox" wire:model.live="selectAllFailedSubjects" class="rounded border-slate-600 bg-slate-900 text-red-500 focus:ring-red-500">
+                                        Select All Failed
+                                    </label>
+                                @endif
+                            </div>
+
+                            @if(count($selectedFailedSubjects) > 0)
+                                <div class="sticky top-0 z-10 mb-3 rounded-2xl border border-indigo-400/40 bg-slate-950/95 p-4 text-xs shadow-2xl shadow-indigo-950/20 backdrop-blur-xl">
+                                    <div class="flex flex-col gap-3">
+                                        <div class="flex items-center justify-between gap-3">
+                                            <p class="font-black uppercase tracking-widest text-indigo-200">{{ count($selectedFailedSubjects) }} subjects selected</p>
+                                            <button type="button" wire:click="clearFailedSelection" class="text-[10px] font-black uppercase tracking-widest text-slate-400 transition hover:text-white">Clear Selection</button>
+                                        </div>
+                                        <div>
+                                            <input type="number" min="1" max="{{ $maxMeetingDays ?? 1 }}" wire:model.live="bulkFailedInputs.meetings_per_week" placeholder="Meetings per week" class="w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 font-black text-white placeholder-slate-500 outline-none focus:border-indigo-300">
+                                        </div>
+                                        <button type="button" wire:click="applyBulkFailedChanges" wire:loading.attr="disabled" wire:target="applyBulkFailedChanges" class="rounded-xl bg-indigo-500 px-4 py-3 text-[10px] font-black uppercase tracking-widest text-white shadow-lg shadow-indigo-500/20 transition hover:bg-indigo-400 disabled:opacity-60">
+                                            <span wire:loading.remove wire:target="applyBulkFailedChanges">Apply Changes</span>
+                                            <span wire:loading wire:target="applyBulkFailedChanges">Applying...</span>
+                                        </button>
+                                    </div>
+                                </div>
+                            @endif
+
                             <div class="space-y-3">
                                 @forelse($generationSummary['failed_items'] ?? [] as $item)
                                     <div class="rounded-2xl border border-red-400/40 bg-slate-950/80 p-4 text-xs shadow-2xl shadow-red-950/20 backdrop-blur-xl">
-                                        <div class="space-y-1">
-                                            <p class="break-words text-sm font-black text-red-300">{{ $item['subject_code'] }}</p>
-                                            <p class="break-words font-black uppercase tracking-wide text-red-400">EDP: {{ $item['edp_code'] }}</p>
-                                            <p class="break-words text-base font-black text-white">{{ $item['subject_name'] }}</p>
-                                            <p class="break-words font-bold text-red-200">Reason: {{ $item['reason'] }}</p>
+                                        <div class="flex items-start gap-3">
+                                            <input type="checkbox" wire:model.live="selectedFailedSubjects" value="{{ $item['subject_id'] }}" class="mt-1 rounded border-slate-600 bg-slate-900 text-red-500 focus:ring-red-500">
+                                            <div class="min-w-0 flex-1 space-y-1">
+                                                <div class="flex flex-wrap items-center gap-2">
+                                                    <p class="break-words text-sm font-black text-red-300">{{ $item['subject_code'] }}</p>
+                                                    <span class="rounded-full bg-red-500/15 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-red-200">Failed</span>
+                                                </div>
+                                                <p class="break-words font-black uppercase tracking-wide text-red-400">EDP: {{ $item['edp_code'] }}</p>
+                                                <p class="break-words text-base font-black text-white">{{ $item['subject_name'] }}</p>
+                                                <p class="break-words font-bold text-red-200">Reason: {{ $item['reason'] }}</p>
+                                            </div>
                                         </div>
                                         <p class="mt-4 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
                                             Duration comes from Manage Subjects. The AI will choose the best room, paired days, and time automatically.
                                         </p>
 
-                                        <div class="mt-4 grid grid-cols-1 gap-3">
+                                        <div class="mt-4">
                                             <label class="space-y-1.5">
                                                 <span class="block text-[9px] font-black uppercase tracking-widest text-slate-500">Meetings Per Week</span>
                                                 <input type="number" min="1" max="{{ $maxMeetingDays ?? 1 }}" step="1" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.meetings_per_week" class="w-full rounded-xl border border-red-500/50 bg-slate-900/90 px-3 py-3 text-sm font-black text-white outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-500/10">
-                                                <p class="text-[10px] font-bold text-slate-500">
-                                                    The scheduler will automatically find the room, start time, and clean paired days.
-                                                </p>
                                             </label>
                                         </div>
 
@@ -404,15 +436,32 @@
                         Cancel
                     </button>
                     @if($canModifyGenerated ?? false)
-                        <button
-                            wire:click="confirmGeneratedSchedules"
-                            wire:loading.attr="disabled"
-                            wire:target="confirmGeneratedSchedules"
-                            @disabled(empty($pendingGeneratedSchedules))
-                            class="rounded-xl bg-slate-950 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-slate-950/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950 dark:hover:bg-indigo-100">
-                            <span wire:loading.remove wire:target="confirmGeneratedSchedules">Save Generated Schedule</span>
-                            <span wire:loading wire:target="confirmGeneratedSchedules">Preparing Save...</span>
-                        </button>
+                        <div class="flex flex-col gap-3 sm:flex-row">
+                            <button
+                                wire:click="autoFixAllConflicts"
+                                wire:loading.attr="disabled"
+                                wire:target="autoFixAllConflicts"
+                                @disabled(empty($generationSummary['failed_items']))
+                                class="rounded-xl bg-emerald-600 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50">
+                                <span wire:loading.remove wire:target="autoFixAllConflicts">Auto Fix All Conflicts</span>
+                                <span wire:loading wire:target="autoFixAllConflicts" class="inline-flex items-center gap-2">
+                                    <svg class="h-4 w-4 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                    </svg>
+                                    Auto Fixing...
+                                </span>
+                            </button>
+                            <button
+                                wire:click="confirmGeneratedSchedules"
+                                wire:loading.attr="disabled"
+                                wire:target="confirmGeneratedSchedules"
+                                @disabled(empty($pendingGeneratedSchedules))
+                                class="rounded-xl bg-slate-950 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-slate-950/20 transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-white dark:text-slate-950 dark:hover:bg-indigo-100">
+                                <span wire:loading.remove wire:target="confirmGeneratedSchedules">Save Generated Schedule</span>
+                                <span wire:loading wire:target="confirmGeneratedSchedules">Preparing Save...</span>
+                            </button>
+                        </div>
                     @else
                         <div class="rounded-xl border border-white/10 bg-white/5 px-5 py-3 text-xs font-black uppercase tracking-widest text-slate-400">
                             View Only
@@ -629,12 +678,15 @@
 
                         <div class="mt-3 space-y-2">
                             @forelse($recommendations as $index => $suggestion)
-                                <div class="flex flex-col gap-3 rounded-lg border border-white/80 bg-white/85 p-3 shadow-sm dark:border-slate-800 dark:bg-slate-900/80 sm:flex-row sm:items-center sm:justify-between">
+                                <div class="flex flex-col gap-3 rounded-lg border border-white/80 bg-white/85 p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900/80 sm:flex-row sm:items-center sm:justify-between">
                                     <div class="flex min-w-0 items-start gap-3">
                                         <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-black text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">&check;</span>
                                         <div class="min-w-0">
                                             <p class="text-sm font-black text-slate-900 dark:text-white">{{ $suggestion['label'] ?? 'Alternative schedule available' }}</p>
-                                            <p class="mt-1 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">{{ str($suggestion['type'] ?? 'suggestion')->replace('_', ' ')->title() }}</p>
+                                            <div class="mt-2 flex flex-wrap gap-1.5">
+                                                <span class="rounded-md bg-blue-100 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-blue-700 dark:bg-blue-500/15 dark:text-blue-300">{{ $suggestion['badge'] ?? str($suggestion['type'] ?? 'suggestion')->upper() }}</span>
+                                                <span class="rounded-md bg-emerald-100 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">{{ $suggestion['match_label'] ?? 'Good Match' }}</span>
+                                            </div>
                                         </div>
                                     </div>
                                     <button
@@ -642,9 +694,15 @@
                                         wire:click.stop="useConflictSuggestion({{ $index }})"
                                         wire:loading.attr="disabled"
                                         wire:target="useConflictSuggestion"
-                                        class="shrink-0 rounded-lg bg-blue-700 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-lg shadow-blue-900/20 transition hover:bg-blue-600 disabled:opacity-60">
+                                        class="shrink-0 rounded-lg bg-blue-700 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-lg shadow-blue-900/20 transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60 disabled:animate-pulse">
                                         <span wire:loading.remove wire:target="useConflictSuggestion">Use Suggestion</span>
-                                        <span wire:loading wire:target="useConflictSuggestion">Applying...</span>
+                                        <span wire:loading wire:target="useConflictSuggestion" class="inline-flex items-center gap-2">
+                                            <svg class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                            Applying...
+                                        </span>
                                     </button>
                                 </div>
                             @empty
@@ -705,4 +763,3 @@
         }
     }
 </style>
-
