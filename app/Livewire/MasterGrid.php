@@ -58,6 +58,7 @@ class MasterGrid extends Component
     public ?int $retrySubjectId = null;
     public array $pendingGeneratedSchedules = [];
     public array $failedRetryInputs = [];
+    public array $retryFailureDetails = [];
     public array $selectedFailedSubjects = [];
     public bool $selectAllFailedSubjects = false;
     public array $bulkFailedInputs = [
@@ -72,6 +73,7 @@ class MasterGrid extends Component
     public array $recommendations = [];
     public array $conflictContext = [];
     public ?int $applyingSuggestionIndex = null;
+    public ?string $applyingSuggestionId = null;
     public ?string $editingGeneratedScheduleKey = null;
     public $generateDepartment = null;
     public $generateMajor = null;
@@ -406,7 +408,22 @@ class MasterGrid extends Component
 
     private function showScheduleConflict(array $conflictData, array $context = []): void
     {
-        $conflictData['suggestions'] = array_values($conflictData['suggestions'] ?? []);
+        $conflictData['suggestions'] = collect($conflictData['suggestions'] ?? [])
+            ->values()
+            ->map(function (array $suggestion, int $index) {
+                $suggestion['id'] ??= md5(json_encode([
+                    $index,
+                    $suggestion['type'] ?? 'suggestion',
+                    $suggestion['room_id'] ?? null,
+                    $suggestion['faculty_id'] ?? null,
+                    $suggestion['day'] ?? null,
+                    $suggestion['start_time'] ?? null,
+                    $suggestion['end_time'] ?? null,
+                ]));
+
+                return $suggestion;
+            })
+            ->all();
         $conflictData['details'] = $conflictData['details'] ?? [];
         $conflictData['conflicting_schedule'] = $conflictData['conflicting_schedule'] ?? null;
 
@@ -420,11 +437,13 @@ class MasterGrid extends Component
     {
         $this->showConflictModal = false;
         $this->conflictContext = [];
+        $this->applyingSuggestionIndex = null;
+        $this->applyingSuggestionId = null;
     }
 
     public function useConflictSuggestion(int $index): void
     {
-        if ($this->applyingSuggestionIndex !== null) {
+        if ($this->applyingSuggestionId !== null) {
             return;
         }
 
@@ -440,6 +459,7 @@ class MasterGrid extends Component
         }
 
         $this->applyingSuggestionIndex = $index;
+        $this->applyingSuggestionId = (string) ($suggestion['id'] ?? $index);
 
         try {
             $mode = $this->conflictContext['mode'] ?? null;
@@ -474,6 +494,7 @@ class MasterGrid extends Component
             $this->closeConflictModal();
         } finally {
             $this->applyingSuggestionIndex = null;
+            $this->applyingSuggestionId = null;
         }
     }
 
@@ -519,6 +540,11 @@ class MasterGrid extends Component
             $this->generatedScheduleEditInputs['faculty_id'] = filled($suggestion['faculty_id'])
                 ? (string) $suggestion['faculty_id']
                 : '';
+        }
+
+        if (array_key_exists('session_fallback', $suggestion)) {
+            $this->generatedScheduleEditInputs['session_fallback'] = (bool) $suggestion['session_fallback'];
+            $this->generatedScheduleEditInputs['allow_session_fallback'] = (bool) $suggestion['session_fallback'];
         }
     }
 
@@ -673,6 +699,7 @@ class MasterGrid extends Component
         $this->failedRetryInputs = [];
         $this->selectedFailedSubjects = [];
         $this->selectAllFailedSubjects = false;
+        $this->retryFailureDetails = [];
         $this->resetBulkFailedInputs();
         $this->generatedScheduleEditInputs = [];
         $this->compatibleRoomsForEdit = [];
@@ -1006,7 +1033,7 @@ class MasterGrid extends Component
         $overrides = $this->failedSubjectRetryOverrides($subjectId);
 
         try {
-            $retry = app(AutoGenerateScheduler::class)->previewSubjectSchedule(
+            $retry = app(AutoGenerateScheduler::class)->retryFailedSubject(
                 $subjectId,
                 $this->generationSummary['filters'] ?? [],
                 $overrides,
@@ -1026,13 +1053,32 @@ class MasterGrid extends Component
         }
 
         if (($retry['scheduled'] ?? 0) <= 0) {
+            $message = collect($retry['failure_reasons'] ?? [])->first() ?? ($retry['message'] ?? 'No valid slot found.');
+            $this->retryFailureDetails = [
+                'subject_id' => $subjectId,
+                'message' => $message,
+                'searched' => $retry['searched'] ?? [
+                    'all morning slots',
+                    'all afternoon slots',
+                    'all compatible rooms',
+                    'all available faculty',
+                ],
+                'recommendations' => $retry['recommendations'] ?? [],
+            ];
+            $this->generationSummary['failed_items'] = array_values(array_map(function (array $item) use ($subjectId, $message) {
+                if ((int) ($item['subject_id'] ?? 0) === $subjectId) {
+                    $item['reason'] = $message;
+                }
+
+                return $item;
+            }, $this->generationSummary['failed_items'] ?? []));
             $this->showRetryingModal = false;
             $this->showSummaryModal = true;
             $this->retrySubjectId = null;
             $this->dispatch('toast', [
                 'type' => 'warning',
                 'message' => 'Retry failed.',
-                'detail' => collect($retry['failure_reasons'] ?? [])->first() ?? 'No valid slot found.'
+                'detail' => $message
             ]);
             return;
         }
@@ -1040,6 +1086,7 @@ class MasterGrid extends Component
         $firstScheduled = $retry['scheduled_items'][0] ?? null;
         $subjectCode = $firstScheduled['subject_code'] ?? null;
         $retryItems = array_values($retry['scheduled_items'] ?? []);
+        $this->retryFailureDetails = [];
 
         $this->pendingGeneratedSchedules = array_values(array_merge(
             $this->pendingGeneratedSchedules,
@@ -1408,7 +1455,7 @@ class MasterGrid extends Component
                     continue;
                 }
 
-                $retry = app(AutoGenerateScheduler::class)->previewSubjectSchedule(
+                $retry = app(AutoGenerateScheduler::class)->retryFailedSubject(
                     $subjectId,
                     $this->generationSummary['filters'] ?? [],
                     $this->failedSubjectRetryOverrides($subjectId),
@@ -1480,8 +1527,8 @@ class MasterGrid extends Component
             'preferred_time_end'   => null,
             'preferred_start_time' => null,
             'preferred_room_type'  => null,
-            'faculty_id'           => null,
             'preferred_days'       => [],
+            'allow_session_fallback' => true,
         ];
     }
 

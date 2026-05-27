@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Notification;
 use App\Notifications\SubjectUpdatedNotification;
 use App\Models\Subject;
 use App\Models\Activity;
+use App\Models\Schedule;
 use App\Models\Setting;
 use App\Services\EdpCodeService;
 use Illuminate\Support\Facades\DB;
@@ -48,6 +49,10 @@ class ManageSubjects extends Component
     public $selectAll = false;
     public $showDuplicateConfirmModal = false;
     public $duplicateCandidateId = null;
+    public bool $showProtectedDeleteModal = false;
+    public bool $protectedDeleteSecondStep = false;
+    public ?int $protectedDeleteSubjectId = null;
+    public array $protectedDeleteImpact = [];
 
     protected $listeners = ['refreshComponent' => '$refresh'];
 
@@ -1048,6 +1053,21 @@ class ManageSubjects extends Component
                 return;
             }
 
+            $protectedCount = Schedule::activeTerm()
+                ->whereIn('subject_id', $this->selectedSubjects)
+                ->where('status', Schedule::STATUS_FINALIZED)
+                ->distinct('subject_id')
+                ->count('subject_id');
+
+            if ($protectedCount > 0) {
+                $this->dispatch('toast', [
+                    'type' => 'error',
+                    'message' => 'Finalized Subjects Protected',
+                    'detail' => "{$protectedCount} selected subject(s) are finalized in official schedules. Delete them individually to complete the double confirmation.",
+                ]);
+                return;
+            }
+
             $this->activeSubjectsQuery()->whereIn('id', $this->selectedSubjects)->delete();
 
             Activity::create([
@@ -1094,7 +1114,83 @@ class ManageSubjects extends Component
         }
     }
 
-    public function deleteSubject($id)
+    public function confirmDeleteSubject($id): void
+    {
+        if ($this->catalogMode !== 'active') {
+            $this->dispatch('toast', [
+                'type'    => 'warning',
+                'message' => 'Archive is read only',
+                'detail'  => 'Archived subjects cannot be edited or deleted from this view.',
+            ]);
+            return;
+        }
+
+        $subject = $this->activeSubjectsQuery()->findOrFail($id);
+
+        if (! $this->validateDepartmentAccess($subject->department)) {
+            $this->dispatch('toast', [
+                'type'    => 'error',
+                'message' => 'Access Denied',
+                'detail'  => 'You do not have permission to delete subjects in this department.',
+            ]);
+            return;
+        }
+
+        $finalizedSchedules = Schedule::activeTerm()
+            ->where('subject_id', $subject->id)
+            ->where('status', Schedule::STATUS_FINALIZED)
+            ->with(['room:id,room_name', 'faculty:id,full_name'])
+            ->get();
+
+        if ($finalizedSchedules->isEmpty()) {
+            $this->deleteSubject($id, true);
+            return;
+        }
+
+        $this->protectedDeleteSubjectId = $subject->id;
+        $this->protectedDeleteSecondStep = false;
+        $this->protectedDeleteImpact = [
+            'subject_code' => $subject->subject_code,
+            'description' => $subject->description,
+            'count' => $finalizedSchedules->count(),
+            'schedules' => $finalizedSchedules
+                ->take(5)
+                ->map(fn (Schedule $schedule) => [
+                    'day' => $schedule->day,
+                    'time' => $schedule->time_display,
+                    'room' => $schedule->room?->room_name ?? 'Unassigned',
+                    'faculty' => $schedule->faculty?->full_name ?? 'Unassigned',
+                ])
+                ->all(),
+        ];
+        $this->showProtectedDeleteModal = true;
+    }
+
+    public function advanceProtectedDeleteConfirmation(): void
+    {
+        $this->protectedDeleteSecondStep = true;
+    }
+
+    public function cancelProtectedDelete(): void
+    {
+        $this->showProtectedDeleteModal = false;
+        $this->protectedDeleteSecondStep = false;
+        $this->protectedDeleteSubjectId = null;
+        $this->protectedDeleteImpact = [];
+    }
+
+    public function deleteProtectedSubject(): void
+    {
+        if (! $this->protectedDeleteSubjectId || ! $this->protectedDeleteSecondStep) {
+            return;
+        }
+
+        $id = $this->protectedDeleteSubjectId;
+        $this->cancelProtectedDelete();
+        $this->deleteSubject($id, true);
+    }
+
+    public function deleteSubject($id, bool $confirmedProtected = false)
     {
         if ($this->catalogMode !== 'active') {
             $this->dispatch('toast', [
@@ -1114,6 +1210,16 @@ class ManageSubjects extends Component
                 'message' => 'Access Denied',
                 'detail'  => 'You do not have permission to delete subjects in this department.',
             ]);
+            return;
+        }
+
+        $hasFinalizedSchedule = Schedule::activeTerm()
+            ->where('subject_id', $subject->id)
+            ->where('status', Schedule::STATUS_FINALIZED)
+            ->exists();
+
+        if ($hasFinalizedSchedule && ! $confirmedProtected) {
+            $this->confirmDeleteSubject($id);
             return;
         }
 

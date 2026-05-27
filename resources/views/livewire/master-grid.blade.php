@@ -366,37 +366,56 @@
                                 </div>
                             @endif
 
+                            @if(!empty($retryFailureDetails))
+                                <div class="mb-3 rounded-xl border border-amber-400/40 bg-amber-500/10 p-3 text-xs text-amber-100">
+                                    <p class="font-black uppercase tracking-widest text-amber-200">Retry explanation</p>
+                                    <p class="mt-2 font-bold leading-5">{{ $retryFailureDetails['message'] ?? 'No valid schedule found.' }}</p>
+                                    <div class="mt-2 flex flex-wrap gap-1.5">
+                                        @foreach($retryFailureDetails['searched'] ?? [] as $searched)
+                                            <span class="rounded-full bg-slate-950/60 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-amber-100">{{ $searched }}</span>
+                                        @endforeach
+                                    </div>
+                                    @if(!empty($retryFailureDetails['recommendations']))
+                                        <div class="mt-3 grid gap-2 sm:grid-cols-2">
+                                            @foreach($retryFailureDetails['recommendations'] as $recommendation)
+                                                <div class="rounded-lg border border-white/10 bg-slate-950/50 p-2">
+                                                    <p class="font-black uppercase tracking-wide text-white">{{ $recommendation['label'] ?? 'Recommendation' }}</p>
+                                                    <p class="mt-1 font-semibold text-slate-300">{{ $recommendation['detail'] ?? '' }}</p>
+                                                </div>
+                                            @endforeach
+                                        </div>
+                                    @endif
+                                </div>
+                            @endif
+
                             <div class="space-y-3">
                                 @forelse($generationSummary['failed_items'] ?? [] as $item)
-                                    <div class="rounded-2xl border border-red-400/40 bg-slate-950/80 p-4 text-xs shadow-2xl shadow-red-950/20 backdrop-blur-xl">
-                                        <div class="flex items-start gap-3">
+                                    <div class="rounded-xl border border-red-400/40 bg-slate-950/80 p-3 text-xs shadow-xl shadow-red-950/10 backdrop-blur-xl">
+                                        <div class="flex items-start gap-2.5">
                                             <input type="checkbox" wire:model.live="selectedFailedSubjects" value="{{ $item['subject_id'] }}" class="mt-1 rounded border-slate-600 bg-slate-900 text-red-500 focus:ring-red-500">
-                                            <div class="min-w-0 flex-1 space-y-1">
-                                                <div class="flex flex-wrap items-center gap-2">
+                                            <div class="min-w-0 flex-1">
+                                                <div class="flex flex-wrap items-center gap-1.5">
                                                     <p class="break-words text-sm font-black text-red-300">{{ $item['subject_code'] }}</p>
                                                     <span class="rounded-full bg-red-500/15 px-2 py-1 text-[8px] font-black uppercase tracking-widest text-red-200">Failed</span>
                                                 </div>
-                                                <p class="break-words font-black uppercase tracking-wide text-red-400">EDP: {{ $item['edp_code'] }}</p>
-                                                <p class="break-words text-base font-black text-white">{{ $item['subject_name'] }}</p>
-                                                <p class="break-words font-bold text-red-200">Reason: {{ $item['reason'] }}</p>
+                                                <p class="mt-0.5 break-words font-black uppercase tracking-wide text-red-400">EDP: {{ $item['edp_code'] }}</p>
+                                                <p class="mt-1 break-words text-sm font-black text-white">{{ $item['subject_name'] }}</p>
+                                                <p class="mt-1 break-words font-bold text-red-200">Reason: {{ $item['reason'] }}</p>
                                             </div>
                                         </div>
-                                        <p class="mt-4 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[10px] font-bold uppercase tracking-widest text-slate-400">
-                                            Duration comes from Manage Subjects. The AI will choose the best room, paired days, and time automatically.
-                                        </p>
 
-                                        <div class="mt-4">
+                                        <div class="mt-3">
                                             <label class="space-y-1.5">
                                                 <span class="block text-[9px] font-black uppercase tracking-widest text-slate-500">Meetings Per Week</span>
-                                                <input type="number" min="1" max="{{ $maxMeetingDays ?? 1 }}" step="1" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.meetings_per_week" class="w-full rounded-xl border border-red-500/50 bg-slate-900/90 px-3 py-3 text-sm font-black text-white outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-500/10">
+                                                <input type="number" min="1" max="{{ $maxMeetingDays ?? 1 }}" step="1" wire:model.live="failedRetryInputs.{{ $item['subject_id'] }}.meetings_per_week" class="w-full rounded-lg border border-red-500/50 bg-slate-900/90 px-3 py-2 text-sm font-black text-white outline-none transition focus:border-red-300 focus:ring-4 focus:ring-red-500/10">
                                             </label>
                                         </div>
 
                                         @if($canModifyGenerated ?? false)
-                                            <div class="sticky bottom-0 -mx-4 -mb-4 mt-4 border-t border-red-500/20 bg-slate-950/95 p-4 backdrop-blur-xl">
-                                                <button wire:click="retryFailedSubject({{ $item['subject_id'] }})" wire:loading.attr="disabled" wire:target="retryFailedSubject" class="w-full rounded-xl bg-red-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60">
-                                                    <span wire:loading.remove wire:target="retryFailedSubject">Edit & Retry</span>
-                                                    <span wire:loading wire:target="retryFailedSubject">Retrying...</span>
+                                            <div class="mt-3">
+                                                <button wire:click="retryFailedSubject({{ $item['subject_id'] }})" wire:loading.attr="disabled" wire:target="retryFailedSubject({{ $item['subject_id'] }})" class="w-full rounded-lg bg-red-600 px-4 py-2.5 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-red-600/20 transition hover:bg-red-500 disabled:cursor-not-allowed disabled:opacity-60">
+                                                    <span wire:loading.remove wire:target="retryFailedSubject({{ $item['subject_id'] }})">Edit &amp; Retry</span>
+                                                    <span wire:loading wire:target="retryFailedSubject({{ $item['subject_id'] }})">Retrying...</span>
                                                 </button>
                                             </div>
                                         @else
@@ -678,6 +697,7 @@
 
                         <div class="mt-3 space-y-2">
                             @forelse($recommendations as $index => $suggestion)
+                                @php($suggestionId = (string) ($suggestion['id'] ?? $index))
                                 <div class="flex flex-col gap-3 rounded-lg border border-white/80 bg-white/85 p-3 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-slate-800 dark:bg-slate-900/80 sm:flex-row sm:items-center sm:justify-between">
                                     <div class="flex min-w-0 items-start gap-3">
                                         <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xs font-black text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">&check;</span>
@@ -693,10 +713,11 @@
                                         type="button"
                                         wire:click.stop="useConflictSuggestion({{ $index }})"
                                         wire:loading.attr="disabled"
-                                        wire:target="useConflictSuggestion"
+                                        wire:target="useConflictSuggestion({{ $index }})"
+                                        @disabled($applyingSuggestionId === $suggestionId)
                                         class="shrink-0 rounded-lg bg-blue-700 px-4 py-2 text-[10px] font-black uppercase tracking-widest text-white shadow-lg shadow-blue-900/20 transition hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-60 disabled:animate-pulse">
-                                        <span wire:loading.remove wire:target="useConflictSuggestion">Use Suggestion</span>
-                                        <span wire:loading wire:target="useConflictSuggestion" class="inline-flex items-center gap-2">
+                                        <span wire:loading.remove wire:target="useConflictSuggestion({{ $index }})">Use Suggestion</span>
+                                        <span wire:loading wire:target="useConflictSuggestion({{ $index }})" class="inline-flex items-center gap-2">
                                             <svg class="h-3.5 w-3.5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                                                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>

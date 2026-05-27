@@ -238,7 +238,7 @@
                                        
                                         @if($catalogMode === 'active')
                                             <button wire:click="editSubject({{ $subject->id }})" class="text-blue-700 dark:text-indigo-400 font-extrabold text-xs uppercase hover:underline">Edit</button>
-                                            <button wire:click="deleteSubject({{ $subject->id }})" wire:confirm="Are you sure?" class="text-red-500 dark:text-red-600 font-extrabold text-xs uppercase hover:text-red-700 transition-colors">Delete</button>
+                                            <button wire:click="confirmDeleteSubject({{ $subject->id }})" class="text-red-500 dark:text-red-600 font-extrabold text-xs uppercase hover:text-red-700 transition-colors">Delete</button>
                                         @else
                                             <span class="text-slate-400 font-extrabold text-xs uppercase">Archived</span>
                                         @endif
@@ -412,6 +412,47 @@
             </div>
         </div>
     </main>
+
+    @if($showProtectedDeleteModal)
+        <div class="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/75 p-6 backdrop-blur-xl">
+            <div class="w-full max-w-lg overflow-hidden rounded-3xl border border-red-500/50 bg-white shadow-2xl dark:bg-slate-950">
+                <div class="bg-red-600 px-7 py-5 text-white">
+                    <p class="text-xs font-black uppercase tracking-[0.24em]">Finalized Subject Warning</p>
+                    <h2 class="mt-1 text-xl font-black uppercase tracking-tight">{{ $protectedDeleteImpact['subject_code'] ?? 'Subject' }}</h2>
+                </div>
+                <div class="space-y-4 p-7">
+                    <p class="text-sm font-bold text-slate-700 dark:text-slate-200">
+                        This subject is already finalized and currently used in official schedules.
+                    </p>
+                    <div class="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-800 dark:border-red-900/60 dark:bg-red-950/25 dark:text-red-200">
+                        Schedule impact: {{ $protectedDeleteImpact['count'] ?? 0 }} finalized schedule row(s) will be removed with this subject.
+                    </div>
+                    @if(!empty($protectedDeleteImpact['schedules']))
+                        <div class="space-y-2">
+                            @foreach($protectedDeleteImpact['schedules'] as $schedule)
+                                <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-600 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300">
+                                    {{ $schedule['day'] }} {{ $schedule['time'] }} - {{ $schedule['room'] }} - {{ $schedule['faculty'] }}
+                                </div>
+                            @endforeach
+                        </div>
+                    @endif
+                    @if($protectedDeleteSecondStep)
+                        <div class="rounded-2xl border-2 border-red-500 bg-red-600/10 p-4 text-sm font-black uppercase tracking-widest text-red-700 dark:text-red-200">
+                            Second confirmation required. This cannot be treated as a normal catalog cleanup.
+                        </div>
+                    @endif
+                </div>
+                <div class="flex gap-3 border-t border-slate-200 bg-slate-50 p-5 dark:border-slate-800 dark:bg-slate-900">
+                    <button wire:click="cancelProtectedDelete" class="flex-1 rounded-xl bg-slate-200 px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600">Cancel</button>
+                    @if($protectedDeleteSecondStep)
+                        <button wire:click="deleteProtectedSubject" class="flex-1 rounded-xl bg-red-700 px-4 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-red-700/20 hover:bg-red-600">Yes Delete Subject</button>
+                    @else
+                        <button wire:click="advanceProtectedDeleteConfirmation" class="flex-1 rounded-xl bg-red-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-red-600/20 hover:bg-red-500">Yes Delete Subject</button>
+                    @endif
+                </div>
+            </div>
+        </div>
+    @endif
 
     {{-- Hidden Delete Confirmation Modal --}}
     <div 

@@ -226,11 +226,17 @@ class AutoScheduleService
                         'duration_hours' => $scheduleData['duration_hours'],
                         'meetings_per_week' => $subject->meetings_per_week,
                         'pairing_key' => $pairingKey,
+                        'session_fallback' => (bool) ($placement['session_fallback'] ?? false),
                     ];
 
                     if ($placement['fallback']) {
                         $result['warnings']++;
                         $result['fallback_warnings'][] = $this->cleanText("{$subject->subject_code} used fallback room {$placement['room']->room_name}.");
+                    }
+
+                    if (!empty($placement['session_fallback'])) {
+                        $result['warnings']++;
+                        $result['fallback_warnings'][] = $this->cleanText("{$subject->subject_code} used afternoon fallback because preferred morning slots were unavailable.");
                     }
                 }
             }
@@ -339,7 +345,10 @@ class AutoScheduleService
                     break;
                 }
 
-                if (!$this->conflicts->respectsSectionSession($subject->section, $start, $end)) {
+                $allowSessionFallback = (bool) ($item['session_fallback'] ?? $item['fallback_session'] ?? false)
+                    || $this->isSectionFallbackSlot($subject->section, $start, $end);
+
+                if (!$this->conflicts->respectsSectionSession($subject->section, $start, $end, $allowSessionFallback)) {
                     $result['failure_reasons'][] = "{$subject->subject_code}: generated slot violates section session rules";
                     $groupFailed = true;
                     break;
@@ -611,6 +620,38 @@ class AutoScheduleService
         return $slots;
     }
 
+    public function findAvailableMorningSlots(Subject $subject, Collection $rooms, Collection $existingSchedules, int $meetingsNeeded = 1): array
+    {
+        $bounds = Setting::getDayBounds();
+        $bounds['end'] = min($bounds['end'], self::LUNCH_START);
+
+        $pattern = $this->findFreshLinkedMeetingPattern($subject, $rooms, $existingSchedules, $bounds, $meetingsNeeded, true);
+
+        return $pattern['placements'] ?? [];
+    }
+
+    public function findAvailableAfternoonSlots(Subject $subject, Collection $rooms, Collection $existingSchedules, int $meetingsNeeded = 1): array
+    {
+        $bounds = Setting::getDayBounds();
+        $bounds['start'] = max($bounds['start'], self::LUNCH_END);
+
+        $pattern = $this->findFreshLinkedMeetingPattern($subject, $rooms, $existingSchedules, $bounds, $meetingsNeeded, true);
+
+        return $pattern['placements'] ?? [];
+    }
+
+    public function generateFallbackSchedules(Subject $subject, Collection $rooms, Collection $existingSchedules, int $meetingsNeeded = 1): array
+    {
+        return match (strtoupper((string) $subject->section)) {
+            'A' => $this->findAvailableAfternoonSlots($subject, $rooms, $existingSchedules, $meetingsNeeded),
+            'B' => $this->findAvailableMorningSlots($subject, $rooms, $existingSchedules, $meetingsNeeded),
+            default => array_merge(
+                $this->findAvailableMorningSlots($subject, $rooms, $existingSchedules, $meetingsNeeded),
+                $this->findAvailableAfternoonSlots($subject, $rooms, $existingSchedules, $meetingsNeeded)
+            ),
+        };
+    }
+
     private function roomSelectColumns(): array
     {
         $columns = ['id', 'room_name', 'type', 'capacity', 'specialization', 'floor'];
@@ -807,11 +848,17 @@ class AutoScheduleService
                 'duration_hours' => round(Carbon::parse($placement['start'])->diffInMinutes(Carbon::parse($placement['end'])) / 60, 2),
                 'meetings_per_week' => $subject->meetings_per_week,
                 'pairing_key' => $pairingKey,
+                'session_fallback' => (bool) ($placement['session_fallback'] ?? false),
             ];
 
             if ($placement['fallback']) {
                 $result['warnings']++;
                 $result['fallback_warnings'][] = $this->cleanText("{$subject->subject_code} used fallback room {$placement['room']->room_name}.");
+            }
+
+            if (!empty($placement['session_fallback'])) {
+                $result['warnings']++;
+                $result['fallback_warnings'][] = $this->cleanText("{$subject->subject_code} used afternoon fallback because preferred morning slots were unavailable.");
             }
         }
 
@@ -885,6 +932,8 @@ class AutoScheduleService
             'failed_items'      => [],
             'fallback_warnings' => [],
             'scheduled_items'   => [],
+            'searched'          => $this->retrySearchScope($subject),
+            'recommendations'   => [],
             'filters'           => [
                 'department' => strtoupper((string) ($filters['department'] ?? $subject->department)),
                 'major'      => strtoupper((string) ($filters['major']      ?? $subject->major)),
@@ -897,6 +946,9 @@ class AutoScheduleService
             \Illuminate\Support\Facades\Log::warning('[RetryGeneration] No valid rooms available', ['subject_code' => $subject->subject_code]);
             $this->recordFailure($result, $subject, 'No valid rooms found in the room registry');
             $result['failed'] = count($result['failed_items']);
+            $result['success'] = false;
+            $result['message'] = 'No valid rooms found in the room registry';
+            $result['recommendations'] = [];
             return $result;
         }
 
@@ -916,6 +968,9 @@ class AutoScheduleService
             \Illuminate\Support\Facades\Log::warning('[RetryGeneration] No compatible rooms', ['subject_code' => $subject->subject_code, 'requires_lab' => $requiresLab]);
             $this->recordFailure($result, $subject, $reason);
             $result['failed'] = count($result['failed_items']);
+            $result['success'] = false;
+            $result['message'] = $reason;
+            $result['recommendations'] = [];
             return $result;
         }
 
@@ -983,7 +1038,27 @@ class AutoScheduleService
         // ── 8. Run FULL generation (no anchor, no cached state) ───────────────
         //       Call findConsistentRoomAndTime directly, bypassing findAnchoredLinkedPattern,
         //       so the engine tries every room × day-pattern × time-slot combination fresh.
-        $linkedPattern = $this->findFreshLinkedMeetingPattern($subject, $rooms, $existingSchedules, $bounds, $meetingsNeeded);
+        $linkedPattern = null;
+        $scheduledSubject = $subject;
+
+        foreach ($this->retryFacultyCandidates($subject) as $candidateFaculty) {
+            $candidateSubject = clone $subject;
+
+            if ($candidateFaculty) {
+                $candidateSubject->faculty_id = $candidateFaculty->id;
+                $candidateSubject->setRelation('faculty', $candidateFaculty);
+            } elseif (!$subject->faculty_id) {
+                $candidateSubject->faculty_id = null;
+                $candidateSubject->unsetRelation('faculty');
+            }
+
+            $linkedPattern = $this->findFreshLinkedMeetingPattern($candidateSubject, $rooms, $existingSchedules, $bounds, $meetingsNeeded);
+
+            if ($linkedPattern) {
+                $scheduledSubject = $candidateSubject;
+                break;
+            }
+        }
 
         // ── 9. Handle failure with rich diagnostics ───────────────────────────
         if (!$linkedPattern) {
@@ -994,6 +1069,9 @@ class AutoScheduleService
             ]);
             $this->recordFailure($result, $subject, $reason);
             $result['failed'] = count($result['failed_items']);
+            $result['success'] = false;
+            $result['message'] = $reason;
+            $result['recommendations'] = $this->retryFailureRecommendations($subject, $rooms, $meetingsNeeded);
             return $result;
         }
 
@@ -1017,15 +1095,16 @@ class AutoScheduleService
                 'day'               => $placement['day'],
                 'start_time'        => Carbon::parse($placement['start'])->format('h:i A'),
                 'end_time'          => Carbon::parse($placement['end'])->format('h:i A'),
-                'faculty_id'        => $subject->faculty_id,
-                'instructor'        => $this->cleanText($subject->faculty?->full_name ?? 'Unassigned'),
+                'faculty_id'        => $scheduledSubject->faculty_id,
+                'instructor'        => $this->cleanText($scheduledSubject->faculty?->full_name ?? 'Unassigned'),
                 'raw_start_time'    => $placement['start'],
                 'raw_end_time'      => $placement['end'],
                 'subject_id'        => $subject->id,
                 'room_id'           => $placement['room']->id,
                 'duration_hours'    => $durationHours,
-                'meetings_per_week' => $subject->meetings_per_week,
+                'meetings_per_week' => $scheduledSubject->meetings_per_week,
                 'pairing_key'       => $pairingKey,
+                'session_fallback'  => (bool) ($placement['session_fallback'] ?? false),
             ];
 
             if ($placement['fallback']) {
@@ -1034,9 +1113,18 @@ class AutoScheduleService
                     "{$subject->subject_code} used fallback room {$placement['room']->room_name}."
                 );
             }
+
+            if (!empty($placement['session_fallback'])) {
+                $result['warnings']++;
+                $result['fallback_warnings'][] = $this->cleanText(
+                    "{$subject->subject_code} used afternoon fallback because preferred morning slots were unavailable."
+                );
+            }
         }
 
         $result['failed'] = count($result['failed_items']);
+        $result['success'] = true;
+        $result['message'] = 'Retry generated a compatible schedule.';
 
         \Illuminate\Support\Facades\Log::info('[RetryGeneration] Retry success', [
             'subject_code' => $subject->subject_code,
@@ -1045,6 +1133,75 @@ class AutoScheduleService
         ]);
 
         return $result;
+    }
+
+    private function retrySearchScope(Subject $subject): array
+    {
+        return [
+            'all morning slots',
+            'all afternoon slots',
+            'alternative paired days',
+            'all compatible rooms',
+            $subject->faculty_id ? 'current and alternative available faculty' : 'available faculty options',
+        ];
+    }
+
+    private function retryFailureRecommendations(Subject $subject, Collection $rooms, int $meetingsNeeded): array
+    {
+        $recommendations = [
+            [
+                'label' => 'Reduce meetings per week',
+                'detail' => "Try {$subject->subject_code} with fewer than {$meetingsNeeded} meeting(s) per week.",
+                'match_label' => 'FALLBACK',
+            ],
+            [
+                'label' => 'Add faculty availability',
+                'detail' => 'Open more morning or afternoon availability for an eligible instructor.',
+                'match_label' => 'GOOD MATCH',
+            ],
+            [
+                'label' => 'Assign an additional compatible room',
+                'detail' => 'Add another room that matches the subject type, capacity, and department.',
+                'match_label' => 'GOOD MATCH',
+            ],
+            [
+                'label' => 'Allow evening schedule',
+                'detail' => 'Extend schedule hours in Global Settings if evening classes are acceptable.',
+                'match_label' => 'FALLBACK',
+            ],
+        ];
+
+        if ($this->compatibleRooms($rooms, $subject)->isEmpty()) {
+            array_unshift($recommendations, [
+                'label' => 'Fix room compatibility first',
+                'detail' => 'No room currently matches this subject requirement.',
+                'match_label' => 'BEST MATCH',
+            ]);
+        }
+
+        return $recommendations;
+    }
+
+    private function retryFacultyCandidates(Subject $subject): Collection
+    {
+        $candidates = collect();
+
+        if ($subject->faculty_id && $subject->faculty) {
+            $candidates->push($subject->faculty);
+        } elseif (!$subject->faculty_id) {
+            $candidates->push(null);
+        }
+
+        Faculty::query()
+            ->approved()
+            ->select('id', 'full_name', 'department', 'faculty_scope', 'max_units', 'availability', 'can_teach_minor')
+            ->orderBy('full_name')
+            ->get()
+            ->filter(fn (Faculty $faculty) => !$subject->faculty_id || (int) $faculty->id !== (int) $subject->faculty_id)
+            ->filter(fn (Faculty $faculty) => $faculty->isEligibleForSubject($subject))
+            ->each(fn (Faculty $faculty) => $candidates->push($faculty));
+
+        return $candidates->unique(fn ($faculty) => $faculty?->id ?? 'unassigned')->values();
     }
 
     /**
@@ -1056,7 +1213,8 @@ class AutoScheduleService
         Collection $rooms,
         Collection $existingSchedules,
         ?array $bounds = null,
-        ?int $meetingsNeeded = null
+        ?int $meetingsNeeded = null,
+        bool $allowSessionFallback = true
     ): ?array {
         $bounds        = $bounds ?? Setting::getDayBounds();
         $meetingsNeeded = max(1, min($this->activeDayCount(), $meetingsNeeded ?? (int) $subject->meetings_per_week));
@@ -1074,50 +1232,55 @@ class AutoScheduleService
             return null;
         }
 
-        foreach ($compatibleRooms as $candidate) {
-            $room = $candidate['room'];
+        foreach ($this->sectionWindowPasses($subject->section, $bounds, $allowSessionFallback) as $windows) {
+            foreach ($compatibleRooms as $candidate) {
+                $room = $candidate['room'];
 
-            foreach ($this->meetingDayPatterns($meetingsNeeded) as $days) {
-                foreach ($this->sectionWindows($subject->section, $bounds) as $window) {
-                    if ($window['start']->copy()->addMinutes($minutes)->gt($window['end'])) {
-                        continue;
-                    }
-
-                    $period = \Carbon\CarbonPeriod::create(
-                        $window['start'],
-                        self::SLOT_MINUTES . ' minutes',
-                        $window['end']->copy()->subMinutes($minutes)
-                    );
-
-                    foreach ($period as $slotStart) {
-                        $slotEnd = $slotStart->copy()->addMinutes($minutes);
-                        $start   = $slotStart->format('H:i:s');
-                        $end     = $slotEnd->format('H:i:s');
-
-                        if ($this->conflicts->overlapsLunchBreak($start, $end)) {
+                foreach ($this->meetingDayPatterns($meetingsNeeded) as $days) {
+                    foreach ($windows as $window) {
+                        if ($window['start']->copy()->addMinutes($minutes)->gt($window['end'])) {
                             continue;
                         }
 
-                        if (!$this->conflicts->respectsSectionSession($subject->section, $start, $end)) {
-                            continue;
-                        }
-
-                        $placements = $this->buildPlacementsForDays(
-                            $existingSchedules,
-                            $subject,
-                            $room,
-                            $days,
-                            $start,
-                            $end,
-                            $candidate['score'],
-                            $candidate['fallback']
+                        $period = \Carbon\CarbonPeriod::create(
+                            $window['start'],
+                            self::SLOT_MINUTES . ' minutes',
+                            $window['end']->copy()->subMinutes($minutes)
                         );
 
-                        if ($placements) {
-                            return [
-                                'pairing_key' => $this->makePairingKey($subject),
-                                'placements'  => $placements,
-                            ];
+                        foreach ($period as $slotStart) {
+                            $slotEnd = $slotStart->copy()->addMinutes($minutes);
+                            $start   = $slotStart->format('H:i:s');
+                            $end     = $slotEnd->format('H:i:s');
+
+                            if ($this->conflicts->overlapsLunchBreak($start, $end)) {
+                                continue;
+                            }
+
+                            $sessionFallback = $this->isSectionFallbackSlot($subject->section, $start, $end);
+
+                            if (!$this->conflicts->respectsSectionSession($subject->section, $start, $end, $allowSessionFallback)) {
+                                continue;
+                            }
+
+                            $placements = $this->buildPlacementsForDays(
+                                $existingSchedules,
+                                $subject,
+                                $room,
+                                $days,
+                                $start,
+                                $end,
+                                $candidate['score'],
+                                $candidate['fallback'],
+                                $sessionFallback
+                            );
+
+                            if ($placements) {
+                                return [
+                                    'pairing_key' => $this->makePairingKey($subject),
+                                    'placements'  => $placements,
+                                ];
+                            }
                         }
                     }
                 }
@@ -1146,6 +1309,16 @@ class AutoScheduleService
                 : "No compatible lecture room available for {$subject->subject_code}";
         }
 
+        if (strtoupper((string) $subject->section) === 'A'
+            && !$this->findConsistentRoomAndTime($subject, $rooms, $existingSchedules, $bounds, $meetingsNeeded, 0, false)) {
+            return 'No compatible morning schedules available. The AI also searched afternoon fallback slots, alternative paired days, compatible rooms, and eligible faculty, but every option still conflicts.';
+        }
+
+        if (strtoupper((string) $subject->section) === 'B'
+            && !$this->findConsistentRoomAndTime($subject, $rooms, $existingSchedules, $bounds, $meetingsNeeded, 0, false)) {
+            return 'No compatible afternoon schedules available. The AI also searched morning fallback slots, alternative paired days, compatible rooms, and eligible faculty, but every option still conflicts.';
+        }
+
         // Check if faculty availability is the blocker
         if ($subject->faculty_id && $subject->faculty) {
             $faculty     = $subject->faculty;
@@ -1171,7 +1344,7 @@ class AutoScheduleService
         foreach ($activeDays as $day) {
             $dayFull = true;
 
-            foreach ($this->sectionWindows($subject->section, $bounds) as $window) {
+            foreach ($this->sectionWindows($subject->section, $bounds, true) as $window) {
                 if ($window['start']->copy()->addMinutes($minutes)->gt($window['end'])) {
                     continue;
                 }
@@ -1204,19 +1377,19 @@ class AutoScheduleService
         }
 
         if ($blockedDays >= count($activeDays)) {
-            return "Section {$subject->section} has no remaining free schedule slots across all active days";
+            return "Section {$subject->section} has no remaining free schedule slots across all active days. The AI searched morning slots, afternoon slots, paired days, compatible rooms, and available faculty.";
         }
 
         if ($blockedDays >= $meetingsNeeded) {
-            return "No valid {$meetingsNeeded}-day combination found — section {$subject->section} is too congested for {$subject->subject_code}";
+            return "No valid {$meetingsNeeded}-day combination found for {$subject->subject_code}. Section {$subject->section} is too congested across available morning and afternoon windows.";
         }
 
         // Faculty conflict is the likely blocker
         if ($subject->faculty_id) {
-            return "No valid paired-day combinations found — faculty may be unavailable or fully loaded for the required {$meetingsNeeded} meeting(s) per week";
+            return "No valid paired-day combinations found. Faculty may be unavailable or fully loaded for the required {$meetingsNeeded} meeting(s) per week.";
         }
 
-        return "No valid {$meetingsNeeded}-meeting/week combination found for {$subject->subject_code} — try reducing meetings per week or check room and section availability";
+        return "No valid {$meetingsNeeded}-meeting/week combination found for {$subject->subject_code}. Try reducing meetings per week, assigning another compatible room, opening faculty availability, or allowing evening schedules.";
     }
 
     public function previewManualScheduleEdit(int $subjectId, array $filters, array $overrides = [], array $pendingItems = [], ?int $userId = null): array
@@ -1327,6 +1500,18 @@ class AutoScheduleService
 
         $start = Carbon::parse($preferredStart)->format('H:i:s');
         $end = Carbon::parse($preferredStart)->addMinutes($this->minutesPerMeeting($subject))->format('H:i:s');
+        $sessionFallback = $this->isSectionFallbackSlot($subject->section, $start, $end);
+        $allowSessionFallback = (bool) ($overrides['session_fallback'] ?? $overrides['allow_session_fallback'] ?? false);
+
+        if ($sessionFallback && !$allowSessionFallback) {
+            $allowSessionFallback = $this->sectionFallbackShouldBeAllowed(
+                $subject,
+                $rooms,
+                $existingSchedules,
+                Setting::getDayBounds(),
+                $meetingsNeeded
+            );
+        }
 
         $conflict = $this->validateManualPlacementPattern(
             $subject,
@@ -1335,7 +1520,8 @@ class AutoScheduleService
             $days,
             $start,
             $end,
-            Setting::getDayBounds()
+            Setting::getDayBounds(),
+            $allowSessionFallback
         );
 
         if ($conflict) {
@@ -1354,7 +1540,8 @@ class AutoScheduleService
             $start,
             $end,
             $this->compatibilityScore($room, $subject),
-            false
+            false,
+            $sessionFallback
         );
 
         $linkedPattern = $placements ? [
@@ -1394,11 +1581,17 @@ class AutoScheduleService
                 'duration_hours' => $durationHours,
                 'meetings_per_week' => $meetingsNeeded,
                 'pairing_key' => $pairingKey,
+                'session_fallback' => (bool) ($placement['session_fallback'] ?? false),
             ];
 
             if ($placement['fallback']) {
                 $result['warnings']++;
                 $result['fallback_warnings'][] = $this->cleanText("{$subject->subject_code} used fallback room {$placement['room']->room_name}.");
+            }
+
+            if (!empty($placement['session_fallback'])) {
+                $result['warnings']++;
+                $result['fallback_warnings'][] = $this->cleanText("{$subject->subject_code} used afternoon fallback because preferred morning slots were unavailable.");
             }
         }
 
@@ -1427,7 +1620,8 @@ class AutoScheduleService
         Collection $existingSchedules,
         array $bounds,
         ?int $meetingsNeeded = null,
-        int $meetingIndex = 0
+        int $meetingIndex = 0,
+        bool $allowSessionFallback = true
     ): ?array {
         $meetingsNeeded = max(1, min($this->activeDayCount(), $meetingsNeeded ?? (int) $subject->meetings_per_week));
 
@@ -1443,50 +1637,55 @@ class AutoScheduleService
             return null;
         }
 
-        foreach ($compatibleRooms as $candidate) {
-            $room = $candidate['room'];
+        foreach ($this->sectionWindowPasses($subject->section, $bounds, $allowSessionFallback) as $windows) {
+            foreach ($compatibleRooms as $candidate) {
+                $room = $candidate['room'];
 
-            foreach ($this->meetingDayPatterns($meetingsNeeded) as $days) {
-                foreach ($this->sectionWindows($subject->section, $bounds) as $window) {
-                    if ($window['start']->copy()->addMinutes($minutes)->gt($window['end'])) {
-                        continue;
-                    }
-
-                    $period = CarbonPeriod::create(
-                        $window['start'],
-                        self::SLOT_MINUTES . ' minutes',
-                        $window['end']->copy()->subMinutes($minutes)
-                    );
-
-                    foreach ($period as $slotStart) {
-                        $slotEnd = $slotStart->copy()->addMinutes($minutes);
-                        $start = $slotStart->format('H:i:s');
-                        $end = $slotEnd->format('H:i:s');
-
-                        if ($this->conflicts->overlapsLunchBreak($start, $end)) {
+                foreach ($this->meetingDayPatterns($meetingsNeeded) as $days) {
+                    foreach ($windows as $window) {
+                        if ($window['start']->copy()->addMinutes($minutes)->gt($window['end'])) {
                             continue;
                         }
 
-                        if (!$this->conflicts->respectsSectionSession($subject->section, $start, $end)) {
-                            continue;
-                        }
-
-                        $placements = $this->buildPlacementsForDays(
-                            $existingSchedules,
-                            $subject,
-                            $room,
-                            $days,
-                            $start,
-                            $end,
-                            $candidate['score'],
-                            $candidate['fallback']
+                        $period = CarbonPeriod::create(
+                            $window['start'],
+                            self::SLOT_MINUTES . ' minutes',
+                            $window['end']->copy()->subMinutes($minutes)
                         );
 
-                        if ($placements) {
-                            return [
-                                'pairing_key' => $this->makePairingKey($subject),
-                                'placements' => $placements,
-                            ];
+                        foreach ($period as $slotStart) {
+                            $slotEnd = $slotStart->copy()->addMinutes($minutes);
+                            $start = $slotStart->format('H:i:s');
+                            $end = $slotEnd->format('H:i:s');
+
+                            if ($this->conflicts->overlapsLunchBreak($start, $end)) {
+                                continue;
+                            }
+
+                            $sessionFallback = $this->isSectionFallbackSlot($subject->section, $start, $end);
+
+                            if (!$this->conflicts->respectsSectionSession($subject->section, $start, $end, $allowSessionFallback)) {
+                                continue;
+                            }
+
+                            $placements = $this->buildPlacementsForDays(
+                                $existingSchedules,
+                                $subject,
+                                $room,
+                                $days,
+                                $start,
+                                $end,
+                                $candidate['score'],
+                                $candidate['fallback'],
+                                $sessionFallback
+                            );
+
+                            if ($placements) {
+                                return [
+                                    'pairing_key' => $this->makePairingKey($subject),
+                                    'placements' => $placements,
+                                ];
+                            }
                         }
                     }
                 }
@@ -1573,7 +1772,8 @@ class AutoScheduleService
         array $days,
         string $start,
         string $end,
-        array $bounds
+        array $bounds,
+        bool $allowSessionFallback = false
     ): ?array {
         if (!$this->isRoomCompatible($room, $subject, allowMinorLabFallback: true)) {
             return $this->manualConflict(
@@ -1631,11 +1831,11 @@ class AutoScheduleService
                 );
             }
 
-            if (!$this->conflicts->respectsSectionSession($subject->section, $start, $end)) {
+            if (!$this->conflicts->respectsSectionSession($subject->section, $start, $end, $allowSessionFallback)) {
                 return $this->manualConflict(
                     'BLOCKED_TIME',
                     'Section Time Conflict',
-                    "Section {$subject->section} cannot be scheduled during this time.",
+                    "Section {$subject->section} cannot be scheduled during this time unless morning options are unavailable.",
                     $subject,
                     $day,
                     $start,
@@ -1830,7 +2030,8 @@ class AutoScheduleService
         string $start,
         string $end,
         int $score,
-        bool $fallback
+        bool $fallback,
+        bool $sessionFallback = false
     ): ?array {
         if (count($days) !== count(array_unique($days))) {
             return null;
@@ -1870,6 +2071,7 @@ class AutoScheduleService
                 'end' => $end,
                 'score' => $score,
                 'fallback' => $fallback,
+                'session_fallback' => $sessionFallback,
             ];
         }
 
@@ -2130,7 +2332,26 @@ class AutoScheduleService
         return array_merge(array_slice($ordered, $offset), array_slice($ordered, 0, $offset));
     }
 
-    private function sectionWindows(?string $section, array $bounds): array
+    private function sectionWindowPasses(?string $section, array $bounds, bool $allowSessionFallback = true): array
+    {
+        $strictWindows = $this->sectionWindows($section, $bounds, false);
+
+        if (!$allowSessionFallback || !in_array(strtoupper((string) $section), ['A', 'B'], true)) {
+            return $strictWindows ? [$strictWindows] : [];
+        }
+
+        $section = strtoupper((string) $section);
+        $fallbackWindows = array_values(array_filter(
+            $this->sectionWindows($section, $bounds, true),
+            fn (array $window) => $section === 'A'
+                ? $window['start']->gte(Carbon::parse(self::LUNCH_END))
+                : $window['end']->lte(Carbon::parse(self::LUNCH_START))
+        ));
+
+        return array_values(array_filter([$strictWindows, $fallbackWindows]));
+    }
+
+    private function sectionWindows(?string $section, array $bounds, bool $allowSessionFallback = false): array
     {
         $dayStart = Carbon::parse($bounds['start']);
         $dayEnd = Carbon::parse($bounds['end']);
@@ -2148,12 +2369,48 @@ class AutoScheduleService
         ];
 
         $windows = match (strtoupper((string) $section)) {
-            'A' => [$morning],
-            'B' => [$afternoon],
+            'A' => $allowSessionFallback ? [$morning, $afternoon] : [$morning],
+            'B' => $allowSessionFallback ? [$afternoon, $morning] : [$afternoon],
             default => [$morning, $afternoon],
         };
 
         return array_values(array_filter($windows, fn (array $window) => $window['start']->lt($window['end'])));
+    }
+
+    private function isSectionFallbackSlot(?string $section, string $start, string $end): bool
+    {
+        $section = strtoupper((string) $section);
+        $slotStart = Carbon::parse($start);
+        $slotEnd = Carbon::parse($end);
+
+        return ($section === 'A'
+                && $slotStart->gte(Carbon::parse(self::LUNCH_END))
+                && $slotEnd->gt(Carbon::parse(self::LUNCH_END)))
+            || ($section === 'B'
+                && $slotStart->lt(Carbon::parse(self::LUNCH_START))
+                && $slotEnd->lte(Carbon::parse(self::LUNCH_START)));
+    }
+
+    private function sectionFallbackShouldBeAllowed(
+        Subject $subject,
+        Collection $rooms,
+        Collection $existingSchedules,
+        array $bounds,
+        int $meetingsNeeded
+    ): bool {
+        if (!in_array(strtoupper((string) $subject->section), ['A', 'B'], true)) {
+            return false;
+        }
+
+        return !$this->findConsistentRoomAndTime(
+            $subject,
+            $rooms,
+            $existingSchedules,
+            $bounds,
+            $meetingsNeeded,
+            0,
+            false
+        );
     }
 
     private function roomAvailable(Collection $schedules, int $roomId, string $day, string $start, string $end): bool
@@ -2653,7 +2910,9 @@ class AutoScheduleService
                     $start = $slotStart->format('H:i:s');
                     $end = $slotEnd->format('H:i:s');
 
-                    if (!$this->timeFitsAnySectionWindow($subject, $bounds, $start, $end)) {
+                    $sessionFallback = $this->isSectionFallbackSlot($subject->section, $start, $end);
+
+                    if (!$this->timeFitsAnySectionWindow($subject, $bounds, $start, $end, true)) {
                         continue;
                     }
 
@@ -2665,7 +2924,8 @@ class AutoScheduleService
                         $start,
                         $end,
                         $candidate['score'],
-                        $candidate['fallback']
+                        $candidate['fallback'],
+                        $sessionFallback
                     );
 
                     if ($placements) {
@@ -2678,49 +2938,53 @@ class AutoScheduleService
                     continue;
                 }
 
-                foreach ($this->sectionWindows($subject->section, $bounds) as $window) {
-                    $window = $this->limitWindowToPreferredRange($window, $preferredStart, $preferredEnd);
+                foreach ($this->sectionWindowPasses($subject->section, $bounds, true) as $windows) {
+                    foreach ($windows as $window) {
+                        $window = $this->limitWindowToPreferredRange($window, $preferredStart, $preferredEnd);
 
-                    if (!$window) {
-                        continue;
-                    }
-
-                    if ($window['start']->copy()->addMinutes($minutes)->gt($window['end'])) {
-                        continue;
-                    }
-
-                    $period = CarbonPeriod::create(
-                        $window['start'],
-                        self::SLOT_MINUTES . ' minutes',
-                        $window['end']->copy()->subMinutes($minutes)
-                    );
-
-                    foreach ($period as $slotStart) {
-                        $slotEnd = $slotStart->copy()->addMinutes($minutes);
-                        $start = $slotStart->format('H:i:s');
-                        $end = $slotEnd->format('H:i:s');
-
-                        if ($this->conflicts->overlapsLunchBreak($start, $end)
-                            || !$this->conflicts->respectsSectionSession($subject->section, $start, $end)) {
+                        if (!$window) {
                             continue;
                         }
 
-                        $placements = $this->buildPlacementsForDays(
-                            $existingSchedules,
-                            $subject,
-                            $room,
-                            $days,
-                            $start,
-                            $end,
-                            $candidate['score'],
-                            $candidate['fallback']
+                        if ($window['start']->copy()->addMinutes($minutes)->gt($window['end'])) {
+                            continue;
+                        }
+
+                        $period = CarbonPeriod::create(
+                            $window['start'],
+                            self::SLOT_MINUTES . ' minutes',
+                            $window['end']->copy()->subMinutes($minutes)
                         );
 
-                        if ($placements) {
-                            return [
-                                'pairing_key' => $this->makePairingKey($subject),
-                                'placements' => $placements,
-                            ];
+                        foreach ($period as $slotStart) {
+                            $slotEnd = $slotStart->copy()->addMinutes($minutes);
+                            $start = $slotStart->format('H:i:s');
+                            $end = $slotEnd->format('H:i:s');
+                            $sessionFallback = $this->isSectionFallbackSlot($subject->section, $start, $end);
+
+                            if ($this->conflicts->overlapsLunchBreak($start, $end)
+                                || !$this->conflicts->respectsSectionSession($subject->section, $start, $end, true)) {
+                                continue;
+                            }
+
+                            $placements = $this->buildPlacementsForDays(
+                                $existingSchedules,
+                                $subject,
+                                $room,
+                                $days,
+                                $start,
+                                $end,
+                                $candidate['score'],
+                                $candidate['fallback'],
+                                $sessionFallback
+                            );
+
+                            if ($placements) {
+                                return [
+                                    'pairing_key' => $this->makePairingKey($subject),
+                                    'placements' => $placements,
+                                ];
+                            }
                         }
                     }
                 }
@@ -2730,17 +2994,17 @@ class AutoScheduleService
         return null;
     }
 
-    private function timeFitsAnySectionWindow(Subject $subject, array $bounds, string $start, string $end): bool
+    private function timeFitsAnySectionWindow(Subject $subject, array $bounds, string $start, string $end, bool $allowSessionFallback = false): bool
     {
         if ($this->conflicts->overlapsLunchBreak($start, $end)
-            || !$this->conflicts->respectsSectionSession($subject->section, $start, $end)) {
+            || !$this->conflicts->respectsSectionSession($subject->section, $start, $end, $allowSessionFallback)) {
             return false;
         }
 
         $slotStart = Carbon::parse($start);
         $slotEnd = Carbon::parse($end);
 
-        foreach ($this->sectionWindows($subject->section, $bounds) as $window) {
+        foreach ($this->sectionWindows($subject->section, $bounds, $allowSessionFallback) as $window) {
             if ($slotStart->gte($window['start']) && $slotEnd->lte($window['end'])) {
                 return true;
             }
@@ -2791,8 +3055,10 @@ class AutoScheduleService
             return null;
         }
 
+        $sessionFallback = $this->isSectionFallbackSlot($subject->section, $start, $end);
+
         if ($this->conflicts->overlapsLunchBreak($start, $end)
-            || !$this->conflicts->respectsSectionSession($subject->section, $start, $end)) {
+            || !$this->conflicts->respectsSectionSession($subject->section, $start, $end, true)) {
             return null;
         }
 
@@ -2806,7 +3072,8 @@ class AutoScheduleService
                     $start,
                     $end,
                     $candidate['score'],
-                    $candidate['fallback']
+                    $candidate['fallback'],
+                    $sessionFallback
                 );
 
                 if ($placements) {

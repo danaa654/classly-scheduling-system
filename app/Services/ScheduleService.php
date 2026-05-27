@@ -2,10 +2,15 @@
 
 namespace App\Services;
 
+use App\Models\Faculty;
 use App\Models\Schedule;
+use App\Models\ScheduleRevisionRequest;
 use App\Models\Room;
 use App\Models\Setting;
+use App\Models\Subject;
+use App\Models\User;
 use Carbon\Carbon;
+use Illuminate\Support\Facades\DB;
 
 class ScheduleService
 {
@@ -70,5 +75,69 @@ class ScheduleService
         
         // Ensure result is mathematically sound (between 0 and 100)
         return max(0, min(100, round($percentage, 1)));
+    }
+
+    public function generateRevisionRequest(
+        Subject $subject,
+        ?Faculty $currentFaculty,
+        Faculty $requestedFaculty,
+        array $scheduleIds,
+        User $requester,
+        string $reason
+    ): ScheduleRevisionRequest {
+        $period = Setting::getAcademicPeriod();
+
+        return ScheduleRevisionRequest::create([
+            'subject_id' => $subject->id,
+            'requested_by' => $requester->id,
+            'current_faculty_id' => $currentFaculty?->id,
+            'requested_faculty_id' => $requestedFaculty->id,
+            'schedule_ids' => array_values(array_unique(array_map('intval', $scheduleIds))),
+            'reason' => trim($reason),
+            'status' => ScheduleRevisionRequest::STATUS_PENDING,
+            'semester' => $period['semester'],
+            'school_year' => $period['school_year'],
+            'workspace_key' => $period['workspace_key'],
+        ]);
+    }
+
+    public function approveRevisionRequest(ScheduleRevisionRequest $request, User $reviewer): void
+    {
+        DB::transaction(function () use ($request, $reviewer) {
+            if ($request->status !== ScheduleRevisionRequest::STATUS_PENDING) {
+                return;
+            }
+
+            $scheduleIds = collect($request->schedule_ids ?? [])
+                ->map(fn ($id) => (int) $id)
+                ->filter()
+                ->values();
+
+            Schedule::activeTerm($request->semester, $request->school_year)
+                ->when($scheduleIds->isNotEmpty(), fn ($query) => $query->whereIn('id', $scheduleIds))
+                ->when($scheduleIds->isEmpty(), fn ($query) => $query->where('subject_id', $request->subject_id))
+                ->where('status', Schedule::STATUS_FINALIZED)
+                ->update(['faculty_id' => $request->requested_faculty_id]);
+
+            $request->update([
+                'status' => ScheduleRevisionRequest::STATUS_APPROVED,
+                'reviewed_by' => $reviewer->id,
+                'reviewed_at' => now(),
+            ]);
+        });
+    }
+
+    public function rejectRevisionRequest(ScheduleRevisionRequest $request, User $reviewer, ?string $note = null): void
+    {
+        if ($request->status !== ScheduleRevisionRequest::STATUS_PENDING) {
+            return;
+        }
+
+        $request->update([
+            'status' => ScheduleRevisionRequest::STATUS_REJECTED,
+            'reviewed_by' => $reviewer->id,
+            'review_note' => $note,
+            'reviewed_at' => now(),
+        ]);
     }
 }

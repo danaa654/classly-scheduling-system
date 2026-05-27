@@ -465,7 +465,7 @@ class ScheduleConflictService
         return $this->hasTimeOverlap($startTime, $endTime, self::LUNCH_START, self::LUNCH_END);
     }
 
-    public function respectsSectionSession(?string $section, string $startTime, string $endTime): bool
+    public function respectsSectionSession(?string $section, string $startTime, string $endTime, bool $allowFallback = false): bool
     {
         $section = strtoupper((string) $section);
         $start = Carbon::parse($startTime);
@@ -474,11 +474,17 @@ class ScheduleConflictService
         $lunchEnd = Carbon::parse(self::LUNCH_END);
 
         if ($section === 'A') {
-            return $start->lt($lunchStart) && $end->lte($lunchStart);
+            $isMorning = $start->lt($lunchStart) && $end->lte($lunchStart);
+            $isAfternoonFallback = $allowFallback && $start->gte($lunchEnd) && $end->gt($lunchEnd);
+
+            return $isMorning || $isAfternoonFallback;
         }
 
         if ($section === 'B') {
-            return $start->gte($lunchEnd) && $end->gt($lunchEnd);
+            $isAfternoon = $start->gte($lunchEnd) && $end->gt($lunchEnd);
+            $isMorningFallback = $allowFallback && $start->lt($lunchStart) && $end->lte($lunchStart);
+
+            return $isAfternoon || $isMorningFallback;
         }
 
         return true;
@@ -497,6 +503,215 @@ class ScheduleConflictService
                 $query->where('start_time', '<', $this->normalizeTime($endTime))
                     ->where('end_time', '>', $this->normalizeTime($startTime));
             });
+    }
+
+    public function validateEditableWorkspace(array $rows, ?string $semester = null, ?string $schoolYear = null): array
+    {
+        $conflicts = $this->detectWorkspaceConflicts($rows, $semester, $schoolYear);
+
+        return [
+            'valid' => empty($conflicts['errors']),
+            'errors' => $conflicts['errors'],
+            'conflict_keys' => $conflicts['conflict_keys'],
+            'recommendations' => $conflicts['recommendations'],
+        ];
+    }
+
+    public function detectWorkspaceConflicts(array $rows, ?string $semester = null, ?string $schoolYear = null): array
+    {
+        $errors = [];
+        $recommendations = [];
+        $conflictKeys = [];
+        $placements = [];
+        $editedIds = collect($rows)
+            ->flatMap(fn (array $row) => $row['schedule_ids'] ?? [])
+            ->map(fn ($id) => (int) $id)
+            ->filter()
+            ->unique()
+            ->values();
+
+        $subjects = Subject::whereIn('id', collect($rows)->pluck('subject_id')->filter()->unique())->get()->keyBy('id');
+        $rooms = Room::whereIn('id', collect($rows)->pluck('room_id')->filter()->unique())->get()->keyBy('id');
+        $faculties = Faculty::whereIn('id', collect($rows)->pluck('faculty_id')->filter()->unique())->get()->keyBy('id');
+
+        foreach ($rows as $row) {
+            $editKey = (string) ($row['edit_key'] ?? md5(json_encode($row)));
+            $subject = $subjects->get((int) ($row['subject_id'] ?? 0));
+            $room = $rooms->get((int) ($row['room_id'] ?? 0));
+            $faculty = filled($row['faculty_id'] ?? null) ? $faculties->get((int) $row['faculty_id']) : null;
+            $days = collect($row['days'] ?? [])
+                ->map(fn ($day) => Setting::normalizeDayName((string) $day))
+                ->filter()
+                ->unique()
+                ->values();
+            $label = $row['label'] ?? $subject?->subject_code ?? 'Schedule row';
+
+            if (blank($row['start_time'] ?? null) || blank($row['end_time'] ?? null)) {
+                $errors[] = "{$label}: choose both start and end time.";
+                $conflictKeys[$editKey] = true;
+                continue;
+            }
+
+            try {
+                $start = $this->normalizeTime((string) $row['start_time']);
+                $end = $this->normalizeTime((string) $row['end_time']);
+            } catch (\Throwable) {
+                $errors[] = "{$label}: selected time is invalid.";
+                $conflictKeys[$editKey] = true;
+                continue;
+            }
+
+            if (!$subject) {
+                $errors[] = "{$label}: subject record was not found.";
+                $conflictKeys[$editKey] = true;
+                continue;
+            }
+
+            if (!$room) {
+                $errors[] = "{$label}: choose a room before finishing edit mode.";
+                $conflictKeys[$editKey] = true;
+                continue;
+            }
+
+            if ($days->isEmpty()) {
+                $errors[] = "{$label}: choose at least one active schedule day.";
+                $conflictKeys[$editKey] = true;
+                continue;
+            }
+
+            if (!Carbon::parse($start)->lt(Carbon::parse($end))) {
+                $errors[] = "{$label}: start time must be earlier than end time.";
+                $conflictKeys[$editKey] = true;
+                continue;
+            }
+
+            if (!$this->roomCanHostSubject($room, $subject)) {
+                $errors[] = "{$label}: {$room->room_name} is not compatible with this subject.";
+                $conflictKeys[$editKey] = true;
+            }
+
+            if ($faculty && !$faculty->isEligibleForSubject($subject)) {
+                $errors[] = "{$label}: {$faculty->full_name} is not eligible to teach this subject.";
+                $conflictKeys[$editKey] = true;
+            }
+
+            foreach ($days as $day) {
+                if (!Setting::dayIsActive($day)) {
+                    $errors[] = "{$label}: {$day} is disabled in Global Settings.";
+                    $conflictKeys[$editKey] = true;
+                    continue;
+                }
+
+                if ($this->overlapsLunchBreak($start, $end)) {
+                    $errors[] = "{$label}: schedule overlaps the lunch break.";
+                    $conflictKeys[$editKey] = true;
+                    continue;
+                }
+
+                $allowSessionFallback = in_array(strtoupper((string) $subject->section), ['A', 'B'], true);
+
+                if (!$this->respectsSectionSession($subject->section, $start, $end, $allowSessionFallback)) {
+                    $errors[] = "{$label}: selected time is outside the allowed section session.";
+                    $conflictKeys[$editKey] = true;
+                    continue;
+                }
+
+                $external = Schedule::activeTerm($semester, $schoolYear)
+                    ->whereNotIn('id', $editedIds)
+                    ->where('day', $day)
+                    ->where('start_time', '<', $end)
+                    ->where('end_time', '>', $start)
+                    ->with(['subject:id,subject_code,department,major,year_level,section', 'room:id,room_name', 'faculty:id,full_name'])
+                    ->get();
+
+                if ($external->firstWhere('room_id', $room->id)) {
+                    $errors[] = "{$label}: {$room->room_name} is already occupied on {$day}.";
+                    $conflictKeys[$editKey] = true;
+                }
+
+                $sectionConflict = $external->first(function (Schedule $schedule) use ($subject) {
+                    return $this->sameStudentGroup($schedule, $subject);
+                });
+
+                if ($sectionConflict) {
+                    $errors[] = "{$label}: section {$subject->section} already has {$sectionConflict->subject?->subject_code} on {$day}.";
+                    $conflictKeys[$editKey] = true;
+                }
+
+                if ($faculty) {
+                    $facultyConflict = $external->firstWhere('faculty_id', $faculty->id);
+
+                    if ($facultyConflict) {
+                        $errors[] = "{$label}: {$faculty->full_name} is already assigned on {$day}.";
+                        $conflictKeys[$editKey] = true;
+                    }
+
+                    $availability = $this->checkFacultyAvailability($faculty, $day, $start, $end, $subject, $room);
+                    if (($availability['status'] ?? true) === false) {
+                        $errors[] = "{$label}: " . ($availability['message'] ?? "{$faculty->full_name} is not available.");
+                        $conflictKeys[$editKey] = true;
+                    }
+                }
+
+                $placements[] = [
+                    'edit_key' => $editKey,
+                    'label' => $label,
+                    'subject' => $subject,
+                    'room' => $room,
+                    'faculty' => $faculty,
+                    'day' => $day,
+                    'start' => $start,
+                    'end' => $end,
+                ];
+            }
+        }
+
+        foreach ($placements as $i => $first) {
+            for ($j = $i + 1; $j < count($placements); $j++) {
+                $second = $placements[$j];
+
+                if ($first['day'] !== $second['day'] || !$this->hasTimeOverlap($first['start'], $first['end'], $second['start'], $second['end'])) {
+                    continue;
+                }
+
+                if ((int) $first['room']->id === (int) $second['room']->id) {
+                    $errors[] = "{$first['label']} conflicts with {$second['label']}: same room on {$first['day']}.";
+                    $conflictKeys[$first['edit_key']] = true;
+                    $conflictKeys[$second['edit_key']] = true;
+                }
+
+                if ($this->sameSubjectGroup($first['subject'], $second['subject'])) {
+                    $errors[] = "{$first['label']} conflicts with {$second['label']}: same section on {$first['day']}.";
+                    $conflictKeys[$first['edit_key']] = true;
+                    $conflictKeys[$second['edit_key']] = true;
+                }
+
+                if ($first['faculty'] && $second['faculty'] && (int) $first['faculty']->id === (int) $second['faculty']->id) {
+                    $errors[] = "{$first['label']} conflicts with {$second['label']}: same faculty on {$first['day']}.";
+                    $conflictKeys[$first['edit_key']] = true;
+                    $conflictKeys[$second['edit_key']] = true;
+                }
+            }
+        }
+
+        $firstPlacement = collect($placements)->first(fn (array $placement) => isset($conflictKeys[$placement['edit_key']]));
+        if ($firstPlacement) {
+            $recommendations = $this->buildSuggestions(
+                $firstPlacement['subject'],
+                $firstPlacement['room'],
+                $firstPlacement['day'],
+                $firstPlacement['start'],
+                $firstPlacement['end'],
+                null,
+                'section_conflict'
+            );
+        }
+
+        return [
+            'errors' => array_values(array_unique($errors)),
+            'conflict_keys' => array_keys($conflictKeys),
+            'recommendations' => $recommendations,
+        ];
     }
 
     private function conflictResponse(
@@ -591,6 +806,14 @@ class ScheduleConflictService
                 unset($suggestion['sort']);
 
                 return array_merge([
+                    'id' => $suggestion['id'] ?? md5(json_encode([
+                        $suggestion['type'] ?? 'suggestion',
+                        $suggestion['room_id'] ?? null,
+                        $suggestion['faculty_id'] ?? null,
+                        $suggestion['day'] ?? null,
+                        $suggestion['start_time'] ?? null,
+                        $suggestion['end_time'] ?? null,
+                    ])),
                     'match_label' => $this->rankLabel((int) ($suggestion['score'] ?? 0)),
                     'badge' => strtoupper((string) ($suggestion['type'] ?? 'suggestion')),
                 ], $suggestion);
@@ -607,6 +830,9 @@ class ScheduleConflictService
         string $endTime,
         ?int $ignoreScheduleId
     ): array {
+        $durationMinutes = Carbon::parse($startTime)->diffInMinutes(Carbon::parse($endTime));
+        $allowSessionFallback = $this->sectionFallbackAllowedForSuggestions($subject, $requestedRoom, $ignoreScheduleId, $durationMinutes);
+
         $scheduler = app(AutoGenerateScheduler::class);
         $rooms = Room::query()
             ->select($this->roomSelectColumns())
@@ -617,18 +843,24 @@ class ScheduleConflictService
 
         return $scheduler->findCompatibleRooms($subject, $rooms)
             ->filter(fn (array $candidate) => $this->roomAvailable($candidate['room']->id, $day, $startTime, $endTime, $ignoreScheduleId))
+            ->filter(fn (array $candidate) => $this->respectsSectionSession($subject->section, $startTime, $endTime, $allowSessionFallback))
             ->filter(fn (array $candidate) => $this->facultyAndSectionAvailable($subject, $day, $startTime, $endTime, $ignoreScheduleId))
             ->take(4)
-            ->map(fn (array $candidate) => [
-                'type' => 'room',
-                'label' => "{$candidate['room']->room_name} available at the same time",
-                'room_id' => $candidate['room']->id,
-                'room_name' => $candidate['room']->room_name,
-                'day' => $day,
-                'start_time' => $this->normalizeTime($startTime),
-                'end_time' => $this->normalizeTime($endTime),
-                'score' => (int) ($candidate['score'] ?? 0) + 70,
-            ])
+            ->map(function (array $candidate) use ($subject, $day, $startTime, $endTime) {
+                $sessionFallback = $this->isSectionFallbackSlot($subject->section, $startTime, $endTime);
+
+                return [
+                    'type' => 'room',
+                    'label' => "{$candidate['room']->room_name} available at the same time",
+                    'room_id' => $candidate['room']->id,
+                    'room_name' => $candidate['room']->room_name,
+                    'day' => $day,
+                    'start_time' => $this->normalizeTime($startTime),
+                    'end_time' => $this->normalizeTime($endTime),
+                    'session_fallback' => $sessionFallback,
+                    'score' => (int) ($candidate['score'] ?? 0) + ($sessionFallback ? 45 : 70),
+                ];
+            })
             ->values()
             ->all();
     }
@@ -650,6 +882,7 @@ class ScheduleConflictService
         $requestedDayIndex = $requestedDayIndex === false ? 0 : $requestedDayIndex;
         $requestedStartMinutes = Carbon::parse($startTime)->diffInMinutes(Carbon::parse('00:00:00'));
         $requestedPeriod = Carbon::parse($startTime)->lt(Carbon::parse(self::LUNCH_START)) ? 'morning' : 'afternoon';
+        $allowSessionFallback = $this->sectionFallbackAllowedForSuggestions($subject, $room, $ignoreScheduleId, $durationMinutes);
         $candidates = [];
 
         foreach ($activeDays as $dayIndex => $candidateDay) {
@@ -678,7 +911,11 @@ class ScheduleConflictService
                     continue;
                 }
 
-                if (!$this->placementAvailable($subject, $room, $candidateDay, $candidateStart, $candidateEnd, $ignoreScheduleId)) {
+                if (!$this->respectsSectionSession($subject->section, $candidateStart, $candidateEnd, $allowSessionFallback)) {
+                    continue;
+                }
+
+                if (!$this->placementAvailable($subject, $room, $candidateDay, $candidateStart, $candidateEnd, $ignoreScheduleId, $allowSessionFallback)) {
                     continue;
                 }
 
@@ -686,14 +923,17 @@ class ScheduleConflictService
                 $dayDistance = abs($dayIndex - $requestedDayIndex);
                 $timeDistance = abs($candidateStartMinutes - $requestedStartMinutes);
                 $candidatePeriod = $slotStart->lt(Carbon::parse(self::LUNCH_START)) ? 'morning' : 'afternoon';
+                $sessionFallback = $this->isSectionFallbackSlot($subject->section, $candidateStart, $candidateEnd);
                 $score = 95;
 
                 if ($candidateDay === $day) {
                     $score += 20;
                 }
 
-                if ($requestedPeriod === 'morning' && $candidatePeriod === 'afternoon') {
-                    $score += 35;
+                if ($sessionFallback) {
+                    $score += 10;
+                } elseif ($requestedPeriod === $candidatePeriod) {
+                    $score += 25;
                 }
 
                 if ($this->facultyDailyHoursValid($subject, $candidateDay, $candidateStart, $candidateEnd, $ignoreScheduleId)) {
@@ -706,12 +946,13 @@ class ScheduleConflictService
 
                 $candidates[] = [
                     'type' => 'time',
-                    'label' => "{$candidateDay} " . $this->formatTimeRange($candidateStart, $candidateEnd),
+                    'label' => ($sessionFallback ? 'Afternoon fallback: ' : '') . "{$candidateDay} " . $this->formatTimeRange($candidateStart, $candidateEnd),
                     'room_id' => $room->id,
                     'room_name' => $room->room_name,
                     'day' => $candidateDay,
                     'start_time' => $candidateStart,
                     'end_time' => $candidateEnd,
+                    'session_fallback' => $sessionFallback,
                     'sort' => ($dayDistance * 10000) + $timeDistance - ($score * 20),
                     'score' => $score,
                 ];
@@ -733,6 +974,9 @@ class ScheduleConflictService
         string $endTime,
         ?int $ignoreScheduleId
     ): array {
+        $allowSessionFallback = $this->respectsSectionSession($subject->section, $startTime, $endTime, true)
+            && !$this->respectsSectionSession($subject->section, $startTime, $endTime, false);
+
         return Faculty::query()
             ->approved()
             ->select('id', 'full_name', 'department', 'faculty_scope', 'can_teach_minor', 'max_units', 'availability')
@@ -745,6 +989,7 @@ class ScheduleConflictService
             ->filter(fn (Faculty $faculty) => $this->facultyWorkloadAllows($faculty, $subject))
             ->map(function (Faculty $faculty) use ($subject, $room, $day, $startTime, $endTime, $ignoreScheduleId) {
                 $score = $this->facultyRecommendationScore($faculty, $subject, $room, $day, $startTime, $endTime, $ignoreScheduleId);
+                $sessionFallback = $this->isSectionFallbackSlot($subject->section, $startTime, $endTime);
 
                 return [
                     'type' => 'faculty',
@@ -756,6 +1001,7 @@ class ScheduleConflictService
                     'day' => $day,
                     'start_time' => $this->normalizeTime($startTime),
                     'end_time' => $this->normalizeTime($endTime),
+                    'session_fallback' => $sessionFallback,
                     'score' => $score,
                 ];
             })
@@ -771,7 +1017,8 @@ class ScheduleConflictService
         string $day,
         string $startTime,
         string $endTime,
-        ?int $ignoreScheduleId
+        ?int $ignoreScheduleId,
+        bool $allowSessionFallback = false
     ): bool {
         if (!Setting::dayIsActive($day)) {
             return false;
@@ -782,6 +1029,10 @@ class ScheduleConflictService
         }
 
         if ($this->overlapsLunchBreak($startTime, $endTime)) {
+            return false;
+        }
+
+        if (!$this->respectsSectionSession($subject->section, $startTime, $endTime, $allowSessionFallback)) {
             return false;
         }
 
@@ -804,6 +1055,79 @@ class ScheduleConflictService
         }
 
         return true;
+    }
+
+    private function sectionFallbackAllowedForSuggestions(
+        Subject $subject,
+        Room $room,
+        ?int $ignoreScheduleId,
+        int $durationMinutes
+    ): bool {
+        if (!in_array(strtoupper((string) $subject->section), ['A', 'B'], true)) {
+            return false;
+        }
+
+        return !$this->preferredSessionPlacementExists($subject, $room, $ignoreScheduleId, $durationMinutes);
+    }
+
+    private function preferredSessionPlacementExists(
+        Subject $subject,
+        Room $room,
+        ?int $ignoreScheduleId,
+        int $durationMinutes
+    ): bool {
+        $settings = Setting::getScheduleSettings();
+        $preferredWindows = $this->preferredSectionWindows($subject->section, $settings);
+        $rooms = app(AutoGenerateScheduler::class)
+            ->findCompatibleRooms($subject, Room::query()->select($this->roomSelectColumns())->available()->get())
+            ->pluck('room')
+            ->whenEmpty(fn (Collection $rooms) => $rooms->push($room));
+
+        if (empty($preferredWindows)) {
+            return false;
+        }
+
+        foreach ($settings['active_days'] as $candidateDay) {
+            foreach ($preferredWindows as $window) {
+                $latestStart = $window['end']->copy()->subMinutes($durationMinutes);
+
+                if ($latestStart->lt($window['start'])) {
+                    continue;
+                }
+
+                $period = CarbonPeriod::create(
+                    $window['start']->copy(),
+                    self::SLOT_MINUTES . ' minutes',
+                    $latestStart
+                );
+
+                foreach ($period as $slotStart) {
+                    $slotEnd = $slotStart->copy()->addMinutes($durationMinutes);
+                    $candidateStart = $slotStart->format('H:i:s');
+                    $candidateEnd = $slotEnd->format('H:i:s');
+
+                    foreach ($rooms as $candidateRoom) {
+                        if ($this->placementAvailable($subject, $candidateRoom, $candidateDay, $candidateStart, $candidateEnd, $ignoreScheduleId, false)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    private function isSectionFallbackSlot(?string $section, string $startTime, string $endTime): bool
+    {
+        $start = Carbon::parse($startTime);
+        $end = Carbon::parse($endTime);
+        $lunchStart = Carbon::parse(self::LUNCH_START);
+        $lunchEnd = Carbon::parse(self::LUNCH_END);
+        $section = strtoupper((string) $section);
+
+        return ($section === 'A' && $start->gte($lunchEnd) && $end->gt($lunchEnd))
+            || ($section === 'B' && $start->lt($lunchStart) && $end->lte($lunchStart));
     }
 
     private function facultyAndSectionAvailable(Subject $subject, string $day, string $startTime, string $endTime, ?int $ignoreScheduleId): bool
@@ -1135,6 +1459,54 @@ class ScheduleConflictService
     private function studentGroup(Subject $subject): string
     {
         return "{$subject->department}-{$subject->major}-{$subject->year_level}{$subject->section}";
+    }
+
+    private function sameStudentGroup(Schedule $schedule, Subject $subject): bool
+    {
+        $scheduleSubject = $schedule->subject;
+
+        $department = $scheduleSubject?->department ?? $schedule->department;
+        $major = $scheduleSubject?->major ?? $schedule->major;
+        $yearLevel = $scheduleSubject?->year_level ?? $schedule->year_level;
+        $section = $scheduleSubject?->section ?? $schedule->section;
+
+        return (string) $department === (string) $subject->department
+            && (string) $major === (string) $subject->major
+            && (int) $yearLevel === (int) $subject->year_level
+            && strtoupper((string) $section) === strtoupper((string) $subject->section);
+    }
+
+    private function sameSubjectGroup(Subject $first, Subject $second): bool
+    {
+        return (string) $first->department === (string) $second->department
+            && (string) $first->major === (string) $second->major
+            && (int) $first->year_level === (int) $second->year_level
+            && strtoupper((string) $first->section) === strtoupper((string) $second->section);
+    }
+
+    private function preferredSectionWindows(?string $section, array $settings): array
+    {
+        $dayStart = Carbon::parse($settings['start_time']);
+        $dayEnd = Carbon::parse($settings['end_time']);
+        $lunchStart = Carbon::parse(self::LUNCH_START);
+        $lunchEnd = Carbon::parse(self::LUNCH_END);
+
+        $morning = [
+            'start' => $dayStart->copy(),
+            'end' => $dayEnd->lt($lunchStart) ? $dayEnd->copy() : $lunchStart->copy(),
+        ];
+        $afternoon = [
+            'start' => $dayStart->gt($lunchEnd) ? $dayStart->copy() : $lunchEnd->copy(),
+            'end' => $dayEnd->copy(),
+        ];
+
+        $windows = match (strtoupper((string) $section)) {
+            'A' => [$morning],
+            'B' => [$afternoon],
+            default => [$morning, $afternoon],
+        };
+
+        return array_values(array_filter($windows, fn (array $window) => $window['start']->lt($window['end'])));
     }
 
     private function subjectRequiresLab(Subject $subject): bool

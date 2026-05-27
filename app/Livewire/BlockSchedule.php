@@ -4,14 +4,20 @@ namespace App\Livewire;
 
 use App\Models\Faculty;
 use App\Models\PermissionLog;
+use App\Models\Room;
 use App\Models\Schedule;
+use App\Models\ScheduleRevisionRequest;
 use App\Models\Setting;
 use App\Models\Subject;
 use App\Models\User;
+use App\Notifications\GeneralNotification;
 use App\Services\ScheduleConflictService;
+use App\Services\ScheduleService;
+use Carbon\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Notification;
 use Livewire\Component;
 
 /**
@@ -45,6 +51,7 @@ class BlockSchedule extends Component
     public string $facultySearch      = '';
     public string $assignError        = '';
     public ?int   $currentFacultyId   = null;
+    public array  $facultyAssignmentSuggestions = [];
 
     // ── Permission Toggle Modal ───────────────────────────────────────────────
     /** Controls visibility of the Admin permission toggle panel */
@@ -54,6 +61,22 @@ class BlockSchedule extends Component
     public string $flashMessage       = '';
     public string $flashType          = '';   // 'success' | 'error' | 'warning'
     public array  $finalizationErrors = [];
+
+    public bool $workspaceEditMode = false;
+    public bool $workspaceValidationActive = false;
+    public array $workspaceEdits = [];
+    public array $workspaceConflictErrors = [];
+    public array $workspaceConflictKeys = [];
+    public array $workspaceRecommendations = [];
+    public bool $showWorkspaceConflictModal = false;
+
+    public bool $showRevisionModal = false;
+    public array $revisionScheduleIds = [];
+    public ?int $revisionSubjectId = null;
+    public ?int $revisionCurrentFacultyId = null;
+    public ?int $revisionRequestedFacultyId = null;
+    public string $revisionReason = '';
+    public string $revisionError = '';
 
     // ── Department Constants ──────────────────────────────────────────────────
 
@@ -200,6 +223,32 @@ class BlockSchedule extends Component
         }
 
         return in_array($user->role, ['admin', 'registrar', 'dean', 'oic', 'associate_dean'], true);
+    }
+
+    public function canEditWorkspace(): bool
+    {
+        $role = Auth::user()?->role;
+
+        return in_array($role, ['admin', 'registrar'], true);
+    }
+
+    public function canRequestRevision(): bool
+    {
+        $role = Auth::user()?->role;
+
+        return in_array($role, ['dean', 'oic', 'associate_dean'], true);
+    }
+
+    public function canReviewRevisionRequests(): bool
+    {
+        $user = Auth::user();
+
+        if (! $user) {
+            return false;
+        }
+
+        return $user->role === 'admin'
+            || ($user->role === 'registrar' && (bool) ($user->can_finalize_schedule ?? false));
     }
 
     public function getDepartmentName(string $code): string
@@ -360,6 +409,220 @@ class BlockSchedule extends Component
 
     // ── Faculty Assignment Modal ──────────────────────────────────────────────
 
+    public function startWorkspaceEdit(): void
+    {
+        if (! $this->canEditWorkspace()) {
+            $this->flashMessage = 'Only Admin and Registrar accounts can edit the scheduling workspace.';
+            $this->flashType = 'error';
+            return;
+        }
+
+        $this->workspaceEdits = $this->buildWorkspaceEditState();
+        $this->workspaceConflictErrors = [];
+        $this->workspaceConflictKeys = [];
+        $this->workspaceRecommendations = [];
+        $this->workspaceValidationActive = false;
+        $this->showWorkspaceConflictModal = false;
+        $this->workspaceEditMode = true;
+        $this->flashMessage = 'Edit workspace enabled. Conflict detection is paused until you finish editing.';
+        $this->flashType = 'warning';
+    }
+
+    public function finishWorkspaceEdit(): void
+    {
+        if (! $this->workspaceEditMode || ! $this->canEditWorkspace()) {
+            return;
+        }
+
+        $validation = app(ScheduleConflictService::class)->validateEditableWorkspace(
+            $this->workspaceRowsForValidation(),
+            $this->semester,
+            $this->schoolYear
+        );
+
+        if (! ($validation['valid'] ?? false)) {
+            $this->workspaceConflictErrors = $validation['errors'] ?? [];
+            $this->workspaceConflictKeys = array_fill_keys($validation['conflict_keys'] ?? [], true);
+            $this->workspaceRecommendations = $validation['recommendations'] ?? [];
+            $this->workspaceValidationActive = true;
+            $this->showWorkspaceConflictModal = true;
+            $this->flashMessage = 'Conflicts found. Your edits are still temporary; resolve the highlighted rows before saving.';
+            $this->flashType = 'error';
+            return;
+        }
+
+        DB::transaction(fn () => $this->persistWorkspaceEdits());
+
+        $this->workspaceEditMode = false;
+        $this->workspaceValidationActive = false;
+        $this->workspaceEdits = [];
+        $this->workspaceConflictErrors = [];
+        $this->workspaceConflictKeys = [];
+        $this->workspaceRecommendations = [];
+        $this->showWorkspaceConflictModal = false;
+        $this->flashMessage = 'Workspace edits saved and conflict detection completed.';
+        $this->flashType = 'success';
+    }
+
+    public function closeWorkspaceConflictModal(): void
+    {
+        $this->showWorkspaceConflictModal = false;
+    }
+
+    private function buildWorkspaceEditState(): array
+    {
+        $dayOrder = Setting::getActiveDays();
+
+        return $this->currentBlockSchedules()
+            ->where('status', '!=', Schedule::STATUS_FINALIZED)
+            ->groupBy(fn (Schedule $schedule) => $schedule->pairing_key ?: implode('|', [
+                $schedule->subject_id,
+                $schedule->room_id,
+                $schedule->start_time,
+                $schedule->end_time,
+            ]))
+            ->mapWithKeys(function (Collection $group, string $pairingKey) use ($dayOrder) {
+                $first = $group->first();
+                $days = $group->pluck('day')
+                    ->filter()
+                    ->unique()
+                    ->sortBy(fn ($day) => array_search($day, $dayOrder, true))
+                    ->values()
+                    ->all();
+                $editKey = $this->workspaceEditKey($pairingKey);
+
+                return [
+                    $editKey => [
+                        'edit_key' => $editKey,
+                        'pairing_key' => $pairingKey,
+                        'schedule_ids' => $group->pluck('id')->all(),
+                        'subject_id' => $first->subject_id,
+                        'room_id' => $first->room_id,
+                        'faculty_id' => $first->faculty_id,
+                        'day_string' => implode(', ', $days),
+                        'start_time' => Carbon::parse($first->start_time)->format('H:i'),
+                        'end_time' => Carbon::parse($first->end_time)->format('H:i'),
+                        'label' => $first->subject?->subject_code ?? 'Schedule row',
+                    ],
+                ];
+            })
+            ->all();
+    }
+
+    private function workspaceRowsForValidation(): array
+    {
+        return collect($this->workspaceEdits)
+            ->map(function (array $row) {
+                $row['days'] = $this->parseWorkspaceDays($row['day_string'] ?? '');
+                $row['room_id'] = filled($row['room_id'] ?? null) ? (int) $row['room_id'] : null;
+                $row['faculty_id'] = filled($row['faculty_id'] ?? null) ? (int) $row['faculty_id'] : null;
+
+                return $row;
+            })
+            ->values()
+            ->all();
+    }
+
+    private function persistWorkspaceEdits(): void
+    {
+        foreach ($this->workspaceRowsForValidation() as $row) {
+            $subject = Subject::find($row['subject_id'] ?? null);
+            $roomId = (int) ($row['room_id'] ?? 0);
+            $facultyId = filled($row['faculty_id'] ?? null) ? (int) $row['faculty_id'] : null;
+            $days = array_values($row['days'] ?? []);
+            $scheduleIds = array_values($row['schedule_ids'] ?? []);
+
+            if (! $subject || ! $roomId || empty($days)) {
+                continue;
+            }
+
+            $start = Carbon::parse($row['start_time'])->format('H:i:s');
+            $end = Carbon::parse($row['end_time'])->format('H:i:s');
+            $pairingKey = $row['pairing_key'] ?? ('workspace-' . $subject->id);
+
+            foreach ($days as $index => $day) {
+                $schedule = isset($scheduleIds[$index])
+                    ? Schedule::activeTerm($this->semester, $this->schoolYear)->whereKey($scheduleIds[$index])->first()
+                    : new Schedule([
+                        'subject_id' => $subject->id,
+                        'department' => $subject->department,
+                        'major' => $subject->major,
+                        'year_level' => $subject->year_level,
+                        'section' => $subject->section,
+                        'pairing_key' => $pairingKey,
+                        'edp_code' => $subject->edp_code,
+                        'semester' => $this->semester,
+                        'school_year' => $this->schoolYear,
+                        'academic_year' => $this->schoolYear,
+                        'workspace_key' => Setting::workspaceKey($this->schoolYear, $this->semester),
+                        'is_archived' => false,
+                    ]);
+
+                if (! $schedule || $schedule->status === Schedule::STATUS_FINALIZED) {
+                    continue;
+                }
+
+                $schedule->fill([
+                    'room_id' => $roomId,
+                    'faculty_id' => $facultyId,
+                    'day' => $day,
+                    'start_time' => $start,
+                    'end_time' => $end,
+                    'duration_hours' => round(Carbon::parse($start)->diffInMinutes(Carbon::parse($end)) / 60, 2),
+                    'meetings_per_week' => count($days),
+                    'status' => $facultyId ? Schedule::STATUS_FACULTY_ASSIGNED : Schedule::STATUS_PARTIAL,
+                ])->save();
+            }
+
+            $extraIds = array_slice($scheduleIds, count($days));
+            if (! empty($extraIds)) {
+                Schedule::activeTerm($this->semester, $this->schoolYear)
+                    ->whereIn('id', $extraIds)
+                    ->where('status', '!=', Schedule::STATUS_FINALIZED)
+                    ->delete();
+            }
+        }
+    }
+
+    private function parseWorkspaceDays(string $value): array
+    {
+        return collect(preg_split('/[,|\/]+/', $value) ?: [])
+            ->map(fn ($day) => Setting::normalizeDayName(trim($day)))
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function workspaceEditKey(string $pairingKey): string
+    {
+        return md5($pairingKey);
+    }
+
+    private function currentBlockSchedules(): Collection
+    {
+        return Schedule::activeTerm($this->semester, $this->schoolYear)
+            ->whereIn('status', [
+                Schedule::STATUS_PARTIAL,
+                Schedule::STATUS_FACULTY_ASSIGNED,
+                Schedule::STATUS_FINALIZED,
+            ])
+            ->where('section', $this->selectedSection)
+            ->with(['subject', 'room', 'faculty'])
+            ->get()
+            ->filter(function (Schedule $schedule) {
+                if (! $schedule->subject) {
+                    return false;
+                }
+
+                return (
+                    $schedule->subject->department === $this->selectedDepartment
+                    || $schedule->subject->major === $this->selectedDepartment
+                ) && (int) $schedule->subject->year_level === (int) $this->selectedYear;
+            })
+            ->values();
+    }
+
     /**
      * Open the inline faculty assignment modal for a schedule group.
      */
@@ -371,14 +634,13 @@ class BlockSchedule extends Component
             return;
         }
 
-        // Block editing finalized schedules
-        $isFinalized = Schedule::whereIn('id', $scheduleIds)
+        $hasFinalizedRows = Schedule::whereIn('id', $scheduleIds)
             ->where('status', Schedule::STATUS_FINALIZED)
             ->exists();
 
-        if ($isFinalized) {
-            $this->flashMessage = 'Finalized schedules are read-only. Ask an administrator to reopen.';
-            $this->flashType    = 'error';
+        if ($hasFinalizedRows && $this->canRequestRevision() && ! $this->canReviewRevisionRequests()) {
+            $this->flashMessage = 'Finalized faculty changes must be submitted as revision requests.';
+            $this->flashType = 'warning';
             return;
         }
 
@@ -387,6 +649,7 @@ class BlockSchedule extends Component
         $this->modalSubjectId   = $subjectId;
         $this->facultySearch    = '';
         $this->assignError      = '';
+        $this->facultyAssignmentSuggestions = [];
         $this->currentFacultyId = Schedule::find($scheduleIds[0] ?? null)?->faculty_id;
         $this->showFacultyModal = true;
     }
@@ -399,7 +662,158 @@ class BlockSchedule extends Component
         $this->modalSubjectId    = null;
         $this->facultySearch     = '';
         $this->assignError       = '';
+        $this->facultyAssignmentSuggestions = [];
         $this->currentFacultyId  = null;
+    }
+
+    public function openRevisionModal(array $scheduleIds, int $subjectId): void
+    {
+        if (! $this->canRequestRevision()) {
+            $this->flashMessage = 'Only Dean, OIC, and Associate Dean accounts can request faculty revisions.';
+            $this->flashType = 'error';
+            return;
+        }
+
+        $schedule = Schedule::whereIn('id', $scheduleIds)
+            ->where('status', Schedule::STATUS_FINALIZED)
+            ->first();
+
+        if (! $schedule) {
+            $this->flashMessage = 'Revision requests are only required for finalized schedules.';
+            $this->flashType = 'warning';
+            return;
+        }
+
+        $this->revisionScheduleIds = $scheduleIds;
+        $this->revisionSubjectId = $subjectId;
+        $this->revisionCurrentFacultyId = $schedule->faculty_id;
+        $this->revisionRequestedFacultyId = null;
+        $this->revisionReason = '';
+        $this->revisionError = '';
+        $this->showRevisionModal = true;
+    }
+
+    public function closeRevisionModal(): void
+    {
+        $this->showRevisionModal = false;
+        $this->revisionScheduleIds = [];
+        $this->revisionSubjectId = null;
+        $this->revisionCurrentFacultyId = null;
+        $this->revisionRequestedFacultyId = null;
+        $this->revisionReason = '';
+        $this->revisionError = '';
+    }
+
+    public function submitRevisionRequest(): void
+    {
+        $user = Auth::user();
+        $subject = Subject::find($this->revisionSubjectId);
+        $requestedFaculty = $this->revisionRequestedFacultyId
+            ? Faculty::approved()->find($this->revisionRequestedFacultyId)
+            : null;
+        $currentFaculty = $this->revisionCurrentFacultyId
+            ? Faculty::find($this->revisionCurrentFacultyId)
+            : null;
+
+        if (! $user || ! $this->canRequestRevision() || ! $subject || ! $requestedFaculty) {
+            $this->revisionError = 'Choose a valid requested faculty member.';
+            return;
+        }
+
+        if (trim($this->revisionReason) === '') {
+            $this->revisionError = 'A reason is required for finalized schedule revisions.';
+            return;
+        }
+
+        if (! $requestedFaculty->isEligibleForSubject($subject)) {
+            $this->revisionError = "{$requestedFaculty->full_name} is not eligible for {$subject->subject_code}.";
+            return;
+        }
+
+        $existingPending = ScheduleRevisionRequest::forWorkspace($this->semester, $this->schoolYear)
+            ->where('subject_id', $subject->id)
+            ->where('requested_faculty_id', $requestedFaculty->id)
+            ->pending()
+            ->exists();
+
+        if ($existingPending) {
+            $this->revisionError = 'A matching revision request is already pending review.';
+            return;
+        }
+
+        $request = app(ScheduleService::class)->generateRevisionRequest(
+            $subject,
+            $currentFaculty,
+            $requestedFaculty,
+            $this->revisionScheduleIds,
+            $user,
+            $this->revisionReason
+        );
+
+        $recipients = User::where('role', 'admin')
+            ->orWhere(function ($query) {
+                $query->where('role', 'registrar')
+                    ->where('can_finalize_schedule', true);
+            })
+            ->get();
+
+        if ($recipients->isNotEmpty()) {
+            Notification::send($recipients, new GeneralNotification([
+                'title' => 'Schedule Revision Requested',
+                'message' => "{$user->name} requested {$subject->subject_code} faculty revision to {$requestedFaculty->full_name}.",
+                'type' => 'warning',
+                'url' => route('block-schedule'),
+                'sender_name' => $user->name,
+            ]));
+        }
+
+        $this->closeRevisionModal();
+        $this->flashMessage = "Revision request #{$request->id} submitted for approval.";
+        $this->flashType = 'success';
+    }
+
+    public function approveRevisionRequest(int $requestId): void
+    {
+        if (! $this->canReviewRevisionRequests()) {
+            $this->flashMessage = 'You do not have permission to approve revision requests.';
+            $this->flashType = 'error';
+            return;
+        }
+
+        $request = ScheduleRevisionRequest::pending()->find($requestId);
+
+        if (! $request) {
+            $this->flashMessage = 'Revision request not found or already reviewed.';
+            $this->flashType = 'warning';
+            return;
+        }
+
+        app(ScheduleService::class)->approveRevisionRequest($request, Auth::user());
+
+        $this->flashMessage = 'Revision approved. The finalized faculty assignment has been updated.';
+        $this->flashType = 'success';
+    }
+
+    public function rejectRevisionRequest(int $requestId): void
+    {
+        if (! $this->canReviewRevisionRequests()) {
+            $this->flashMessage = 'You do not have permission to reject revision requests.';
+            $this->flashType = 'error';
+            return;
+        }
+
+        $request = ScheduleRevisionRequest::pending()->find($requestId);
+
+        if (! $request) {
+            $this->flashMessage = 'Revision request not found or already reviewed.';
+            $this->flashType = 'warning';
+            return;
+        }
+
+        app(ScheduleService::class)->rejectRevisionRequest($request, Auth::user());
+
+        $this->flashMessage = 'Revision request rejected.';
+        $this->flashType = 'warning';
     }
 
     /**
@@ -407,6 +821,8 @@ class BlockSchedule extends Component
      */
     public function assignFaculty(int $facultyId): void
     {
+        $this->facultyAssignmentSuggestions = [];
+
         if (! $this->canAssignFaculty()) {
             $this->assignError = 'You do not have permission to assign faculty.';
             return;
@@ -439,9 +855,51 @@ class BlockSchedule extends Component
         }
 
         // ── Time conflict check across all schedule slots in the group ───────
-        $schedules = Schedule::whereIn('id', $this->modalScheduleIds)->get();
+        $schedules = Schedule::whereIn('id', $this->modalScheduleIds)
+            ->with(['subject:id,subject_code,department,major,year_level,section', 'room:id,room_name'])
+            ->get();
+
+        if ($schedules->isEmpty()) {
+            $this->assignError = 'No schedule rows found for this subject.';
+            return;
+        }
+
+        $conflictService = app(ScheduleConflictService::class);
 
         foreach ($schedules as $slot) {
+            $roomConflict = Schedule::activeTerm($this->semester, $this->schoolYear)
+                ->where('room_id', $slot->room_id)
+                ->where('day', $slot->day)
+                ->whereNotIn('id', $this->modalScheduleIds)
+                ->where('start_time', '<', $slot->end_time)
+                ->where('end_time', '>', $slot->start_time)
+                ->with('subject:id,subject_code')
+                ->first();
+
+            if ($roomConflict) {
+                $this->assignError = "Room conflict detected: {$slot->room?->room_name} is already occupied on {$slot->day} during this time slot.";
+                $this->facultyAssignmentSuggestions = $this->facultyAssignmentRecommendations($subject, $schedules, $facultyId);
+                return;
+            }
+
+            $sectionConflict = Schedule::activeTerm($this->semester, $this->schoolYear)
+                ->where('day', $slot->day)
+                ->whereNotIn('id', $this->modalScheduleIds)
+                ->where('department', $slot->department)
+                ->where('major', $slot->major)
+                ->where('year_level', $slot->year_level)
+                ->where('section', $slot->section)
+                ->where('start_time', '<', $slot->end_time)
+                ->where('end_time', '>', $slot->start_time)
+                ->with('subject:id,subject_code')
+                ->first();
+
+            if ($sectionConflict) {
+                $this->assignError = "Section conflict detected: {$slot->section} already has another class on {$slot->day} during this time slot.";
+                $this->facultyAssignmentSuggestions = $this->facultyAssignmentRecommendations($subject, $schedules, $facultyId);
+                return;
+            }
+
             $clash = Schedule::activeTerm($this->semester, $this->schoolYear)
                 ->where('faculty_id', $facultyId)
                 ->where('day', $slot->day)
@@ -456,17 +914,38 @@ class BlockSchedule extends Component
                 $this->assignError = "Conflict detected: {$faculty->full_name} is already assigned "
                     . "to {$conflictCode} on {$slot->day} during this time slot. "
                     . "Please choose a different faculty.";
+                $this->facultyAssignmentSuggestions = $this->facultyAssignmentRecommendations($subject, $schedules, $facultyId);
+                return;
+            }
+
+            $availability = $conflictService->checkFacultyAvailability(
+                $faculty,
+                $slot->day,
+                (string) $slot->start_time,
+                (string) $slot->end_time,
+                $subject,
+                $slot->room,
+                $slot->id
+            );
+
+            if (($availability['status'] ?? true) === false) {
+                $this->assignError = $availability['message'] ?? "{$faculty->full_name} is not available for one or more selected schedule slots.";
+                $this->facultyAssignmentSuggestions = $this->facultyAssignmentRecommendations($subject, $schedules, $facultyId);
                 return;
             }
         }
 
         // ── Persist assignment ────────────────────────────────────────────────
-        DB::transaction(function () use ($facultyId, $subject) {
-            Schedule::whereIn('id', $this->modalScheduleIds)
-                ->update([
-                    'faculty_id' => $facultyId,
-                    'status'     => Schedule::STATUS_FACULTY_ASSIGNED,
-                ]);
+        DB::transaction(function () use ($facultyId, $schedules) {
+            foreach ($schedules as $slot) {
+                $updates = ['faculty_id' => $facultyId];
+
+                if ($slot->status !== Schedule::STATUS_FINALIZED) {
+                    $updates['status'] = Schedule::STATUS_FACULTY_ASSIGNED;
+                }
+
+                $slot->update($updates);
+            }
         });
 
         $this->flashMessage = "✓ {$faculty->full_name} assigned to {$subject->subject_code}.";
@@ -486,6 +965,15 @@ class BlockSchedule extends Component
 
         if (empty($this->modalScheduleIds)) {
             $this->assignError = 'No schedule selected.';
+            return;
+        }
+
+        $hasFinalizedRows = Schedule::whereIn('id', $this->modalScheduleIds)
+            ->where('status', Schedule::STATUS_FINALIZED)
+            ->exists();
+
+        if ($hasFinalizedRows) {
+            $this->assignError = 'Finalized schedules need a replacement faculty instead of removing the assignment.';
             return;
         }
 
@@ -603,6 +1091,21 @@ class BlockSchedule extends Component
             return $errors;
         }
 
+        $scheduledSubjectIds = $schedules->pluck('subject_id')->filter()->unique()->values();
+        $unscheduledSubjects = Subject::activeTerm($this->semester, $this->schoolYear)
+            ->where('section', $this->selectedSection)
+            ->where('year_level', (int) $this->selectedYear)
+            ->where(function ($q) {
+                $q->where('department', $this->selectedDepartment)
+                    ->orWhere('major', $this->selectedDepartment);
+            })
+            ->when($scheduledSubjectIds->isNotEmpty(), fn ($q) => $q->whereNotIn('id', $scheduledSubjectIds))
+            ->get(['id', 'subject_code']);
+
+        foreach ($unscheduledSubjects as $subject) {
+            $errors[] = "Not scheduled: {$subject->subject_code} has no room, time, or faculty assignment.";
+        }
+
         // Check 1: All subjects must have a faculty assigned
         $unassigned = $schedules->whereNull('faculty_id');
         foreach ($unassigned as $slot) {
@@ -705,6 +1208,76 @@ class BlockSchedule extends Component
 
     // ── Render ────────────────────────────────────────────────────────────────
 
+    private function facultyAssignmentRecommendations(Subject $subject, Collection $schedules, ?int $excludeFacultyId = null): array
+    {
+        return Faculty::approved()
+            ->select(['id', 'full_name', 'department', 'faculty_scope', 'max_units', 'availability', 'can_teach_minor'])
+            ->orderBy('full_name')
+            ->get()
+            ->filter(fn (Faculty $faculty) => (int) $faculty->id !== (int) $excludeFacultyId)
+            ->filter(fn (Faculty $faculty) => $faculty->isEligibleForSubject($subject))
+            ->filter(fn (Faculty $faculty) => $this->facultyCanTakeScheduleGroup($faculty, $subject, $schedules))
+            ->map(function (Faculty $faculty) use ($subject) {
+                $currentUnits = $this->getFacultyCurrentUnits((int) $faculty->id);
+                $maxUnits = (int) ($faculty->max_units ?? 21);
+                $score = 100 + max(0, 30 - $currentUnits);
+
+                if ($faculty->department === $subject->department || $faculty->department === $subject->major) {
+                    $score += 40;
+                }
+
+                return [
+                    'id' => $faculty->id,
+                    'name' => $faculty->full_name,
+                    'department' => $faculty->displayDepartment(),
+                    'load' => $currentUnits + (int) ($subject->units ?? 0),
+                    'max_units' => $maxUnits,
+                    'match_label' => $score >= 140 ? 'BEST MATCH' : ($score >= 115 ? 'GOOD MATCH' : 'FALLBACK'),
+                    'score' => $score,
+                ];
+            })
+            ->sortByDesc('score')
+            ->take(5)
+            ->values()
+            ->all();
+    }
+
+    private function facultyCanTakeScheduleGroup(Faculty $faculty, Subject $subject, Collection $schedules): bool
+    {
+        $conflictService = app(ScheduleConflictService::class);
+
+        foreach ($schedules as $slot) {
+            $clash = Schedule::activeTerm($this->semester, $this->schoolYear)
+                ->where('faculty_id', $faculty->id)
+                ->where('day', $slot->day)
+                ->whereNotIn('id', $this->modalScheduleIds)
+                ->where('start_time', '<', $slot->end_time)
+                ->where('end_time', '>', $slot->start_time)
+                ->exists();
+
+            if ($clash) {
+                return false;
+            }
+
+            $availability = $conflictService->checkFacultyAvailability(
+                $faculty,
+                $slot->day,
+                (string) $slot->start_time,
+                (string) $slot->end_time,
+                $subject,
+                $slot->room,
+                $slot->id
+            );
+
+            if (($availability['status'] ?? true) === false) {
+                return false;
+            }
+        }
+
+        return ($this->getFacultyCurrentUnits((int) $faculty->id) + (int) ($subject->units ?? 0))
+            <= (int) ($faculty->max_units ?? 21);
+    }
+
     public function render()
     {
         $available = $this->getAvailableDepartments();
@@ -713,26 +1286,7 @@ class BlockSchedule extends Component
             $this->selectedDepartment = array_key_first($available) ?? 'IT';
         }
 
-        $allSchedules = Schedule::activeTerm($this->semester, $this->schoolYear)
-            ->whereIn('status', [
-                Schedule::STATUS_PARTIAL,
-                Schedule::STATUS_FACULTY_ASSIGNED,
-                Schedule::STATUS_FINALIZED,
-            ])
-            ->where('section', $this->selectedSection)
-            ->with(['subject', 'room', 'faculty'])
-            ->get();
-
-        $filteredSchedules = $allSchedules->filter(function ($schedule) {
-            if (! $schedule->subject) {
-                return false;
-            }
-
-            return (
-                $schedule->subject->department === $this->selectedDepartment
-                || $schedule->subject->major    === $this->selectedDepartment
-            ) && (int) $schedule->subject->year_level === (int) $this->selectedYear;
-        })->values();
+        $filteredSchedules = $this->currentBlockSchedules();
 
         $dayOrder = Setting::getActiveDays();
 
@@ -749,6 +1303,7 @@ class BlockSchedule extends Component
             })
             ->map(function ($group, $pairingKey) use ($dayOrder) {
                 $first = $group->first();
+                $editKey = $this->workspaceEditKey((string) $pairingKey);
                 $days  = $group->pluck('day')
                     ->filter()
                     ->unique()
@@ -760,7 +1315,12 @@ class BlockSchedule extends Component
                 $hasConflict    = false;
                 $conflictReason = '';
 
-                if ($first->faculty_id) {
+                if ($this->workspaceEditMode && ! $this->workspaceValidationActive) {
+                    $hasConflict = false;
+                } elseif ($this->workspaceValidationActive && isset($this->workspaceConflictKeys[$editKey])) {
+                    $hasConflict = true;
+                    $conflictReason = 'Workspace edit needs review';
+                } elseif ($first->faculty_id) {
                     foreach ($group as $slot) {
                         $clash = Schedule::activeTerm($this->semester, $this->schoolYear)
                             ->where('faculty_id', $first->faculty_id)
@@ -780,6 +1340,7 @@ class BlockSchedule extends Component
 
                 return (object) [
                     'pairing_key'     => $pairingKey,
+                    'edit_key'        => $editKey,
                     'ids'             => $group->pluck('id')->all(),
                     'subject'         => $first->subject,
                     'room'            => $first->room,
@@ -804,6 +1365,67 @@ class BlockSchedule extends Component
             })
             ->values();
 
+        $scheduledSubjectIds = $filteredSchedules->pluck('subject_id')->filter()->unique()->values();
+        $unscheduledSubjects = Subject::activeTerm($this->semester, $this->schoolYear)
+            ->where('section', $this->selectedSection)
+            ->where('year_level', (int) $this->selectedYear)
+            ->where(function ($query) {
+                $query->where('department', $this->selectedDepartment)
+                    ->orWhere('major', $this->selectedDepartment);
+            })
+            ->when($scheduledSubjectIds->isNotEmpty(), fn ($query) => $query->whereNotIn('id', $scheduledSubjectIds))
+            ->orderBy('subject_code')
+            ->get();
+
+        $unscheduledRows = $unscheduledSubjects
+            ->map(fn (Subject $subject) => (object) [
+                'pairing_key'     => 'not-scheduled-' . $subject->id,
+                'edit_key'        => 'not-scheduled-' . $subject->id,
+                'ids'             => [],
+                'subject'         => $subject,
+                'room'            => null,
+                'faculty'         => null,
+                'status'          => 'not_scheduled',
+                'start_time'      => null,
+                'end_time'        => null,
+                'days'            => [],
+                'day_display'     => 'NOT SCHEDULED',
+                'sort_day'        => null,
+                'has_conflict'    => false,
+                'conflict_reason' => '',
+            ]);
+
+        $scheduleRows = $scheduleRows
+            ->concat($unscheduledRows)
+            ->sort(function ($a, $b) use ($dayOrder) {
+                $aDay = $a->sort_day ? array_search($a->sort_day, $dayOrder, true) : PHP_INT_MAX;
+                $bDay = $b->sort_day ? array_search($b->sort_day, $dayOrder, true) : PHP_INT_MAX;
+                $aDay = $aDay === false ? PHP_INT_MAX : $aDay;
+                $bDay = $bDay === false ? PHP_INT_MAX : $bDay;
+
+                return $aDay <=> $bDay
+                    ?: strcmp((string) ($a->start_time ?? '99:99:99'), (string) ($b->start_time ?? '99:99:99'))
+                    ?: strcmp((string) ($a->subject?->subject_code ?? ''), (string) ($b->subject?->subject_code ?? ''));
+            })
+            ->values();
+
+        $subjectIdsForRows = $scheduleRows->pluck('subject.id')->filter()->unique()->values();
+        $revisionRequestsBySubject = $subjectIdsForRows->isNotEmpty()
+            ? ScheduleRevisionRequest::forWorkspace($this->semester, $this->schoolYear)
+                ->whereIn('subject_id', $subjectIdsForRows)
+                ->latest()
+                ->get()
+                ->groupBy('subject_id')
+            : collect();
+
+        $scheduleRows = $scheduleRows->map(function ($row) use ($revisionRequestsBySubject) {
+            $row->revision_request = $revisionRequestsBySubject
+                ->get($row->subject?->id, collect())
+                ->first();
+
+            return $row;
+        });
+
         $schedules      = $filteredSchedules->whereIn('day', $dayOrder)->groupBy('day');
         $departmentName = $this->getDepartmentName($this->selectedDepartment);
 
@@ -815,6 +1437,16 @@ class BlockSchedule extends Component
 
         $modalFaculty = $this->showFacultyModal ? $this->getEligibleFacultyForModal() : collect();
         $modalSubject = $this->modalSubjectId ? Subject::find($this->modalSubjectId) : null;
+        $revisionSubject = $this->revisionSubjectId ? Subject::find($this->revisionSubjectId) : null;
+        $revisionFacultyOptions = $revisionSubject
+            ? Faculty::approved()
+                ->orderBy('full_name')
+                ->get()
+                ->filter(fn (Faculty $faculty) => $faculty->isEligibleForSubject($revisionSubject))
+                ->values()
+            : collect();
+        $roomOptions = Room::query()->available()->orderBy('room_name')->get(['id', 'room_name']);
+        $facultyOptions = Faculty::approved()->orderBy('full_name')->get(['id', 'full_name']);
 
         // ── Permission panel data (Admin-only) ───────────────────────────────
         $allRegistrars          = $this->canManageRegistrarPermission() ? $this->getAllRegistrars() : collect();
@@ -827,6 +1459,14 @@ class BlockSchedule extends Component
                 ->take(10)
                 ->get()
             : collect();
+        $pendingRevisionRequests = $this->canReviewRevisionRequests()
+            ? ScheduleRevisionRequest::forWorkspace($this->semester, $this->schoolYear)
+                ->pending()
+                ->with(['subject:id,subject_code,description', 'requester:id,name', 'currentFaculty:id,full_name', 'requestedFaculty:id,full_name'])
+                ->latest()
+                ->take(10)
+                ->get()
+            : collect();
 
         return view('livewire.block-schedule', [
             'schedules'               => $schedules,
@@ -835,6 +1475,9 @@ class BlockSchedule extends Component
             'availableDepts'          => $available,
             'canFinalize'             => $this->canFinalizeSchedule(),
             'canAssign'               => $this->canAssignFaculty(),
+            'canEditWorkspace'         => $this->canEditWorkspace(),
+            'canRequestRevision'       => $this->canRequestRevision(),
+            'canReviewRevision'        => $this->canReviewRevisionRequests(),
             'canManagePermission'     => $this->canManageRegistrarPermission(),
             'allFinalized'            => $allFinalized,
             'unassignedCount'         => $unassignedCount,
@@ -842,9 +1485,14 @@ class BlockSchedule extends Component
             'totalRows'               => $scheduleRows->count(),
             'modalFaculty'            => $modalFaculty,
             'modalSubject'            => $modalSubject,
+            'revisionSubject'          => $revisionSubject,
+            'revisionFacultyOptions'   => $revisionFacultyOptions,
+            'roomOptions'              => $roomOptions,
+            'facultyOptions'           => $facultyOptions,
             'allRegistrars'           => $allRegistrars,
             'registrarWithPermission' => $registrarWithPermission,
             'recentPermissionLogs'    => $recentPermissionLogs,
+            'pendingRevisionRequests'  => $pendingRevisionRequests,
         ]);
     }
 }
