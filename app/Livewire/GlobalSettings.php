@@ -54,6 +54,8 @@ class GlobalSettings extends Component
 
     public bool $showRetrieveModal = false;
 
+    public bool $showRetrieveConfirmation = false;
+
     public ?string $retrieveArchiveBatch = null;
 
     public string $retrieveMode = 'subjects_only';
@@ -67,6 +69,10 @@ class GlobalSettings extends Component
     public string $archiveFilterDepartment = '';
 
     public array $changeHistory = [];
+
+    public ?array $matchingArchive = null;
+
+    public array $workspaceOccupancy = [];
 
     public function mount(): void
     {
@@ -416,6 +422,62 @@ class GlobalSettings extends Component
         return $next;
     }
 
+    /**
+     * Open the retrieval modal and auto-detect matching semester archive.
+     * 
+     * This is the new "intelligent" retrieval flow:
+     * 1. Find latest archived semester matching current semester type
+     * 2. Check workspace occupancy
+     * 3. Show confirmation modal with details
+     */
+    public function openRetrieveModal(): void
+    {
+        $this->ensureLifecycleSchema();
+
+        $matching = $this->findMatchingSemesterArchive();
+
+        if (! $matching) {
+            $this->dispatch('notify', [
+                'type' => 'warning',
+                'message' => 'No archived '.$this->semesterLabel().' semester found.',
+            ]);
+            return;
+        }
+
+        // Auto-populate the retrieval batch
+        $this->retrieveArchiveBatch = $matching['archive_batch_id'];
+        $this->matchingArchive = $matching;
+        $this->workspaceOccupancy = $this->getWorkspaceOccupancy();
+
+        // Show retrieval modal
+        $this->showRetrieveModal = true;
+    }
+
+    /**
+     * Validate and proceed to confirmation before actually retrieving.
+     */
+    public function proceedToRetrieveConfirmation(): void
+    {
+        $this->ensureLifecycleSchema();
+
+        if (! $this->retrieveArchiveBatch) {
+            $this->dispatch('notify', [
+                'type' => 'error',
+                'message' => 'No archive selected.',
+            ]);
+            return;
+        }
+
+        // Refresh occupancy check
+        $this->workspaceOccupancy = $this->getWorkspaceOccupancy();
+
+        // Show confirmation modal
+        $this->showRetrieveConfirmation = true;
+    }
+
+    /**
+     * Execute the actual retrieval after user confirmation.
+     */
     public function retrieveArchivedSemester(): void
     {
         $this->ensureLifecycleSchema();
@@ -564,7 +626,7 @@ class GlobalSettings extends Component
                     'old_value' => $this->retrieveArchiveBatch,
                     'new_value' => $period['semester_name'],
                     'action' => 'created',
-                    'change_reason' => "Retrieved mode {$this->retrieveMode}: copied {$created} archived subjects and {$schedulesCreated} schedules into the active semester. {$skipped} subjects and {$schedulesSkipped} schedules skipped.",
+                    'change_reason' => "Retrieved mode {$this->retrieveMode}: copied {$created} archived subjects and {$schedulesCreated} schedules into the active semester. {$skipped} subjects and {$schedulesSkipped} schedules were skipped as duplicates.",
                     'changed_at' => now(),
                 ]);
 
@@ -579,7 +641,9 @@ class GlobalSettings extends Component
             });
 
             $this->showRetrieveModal = false;
+            $this->showRetrieveConfirmation = false;
             $this->retrieveArchiveBatch = null;
+            $this->matchingArchive = null;
             $this->retrieveMode = 'subjects_only';
             $this->loadChangeHistory();
             $this->dispatch('subjectUpdated');
@@ -597,6 +661,91 @@ class GlobalSettings extends Component
                 'message' => 'Retrieval failed: '.$e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Find the latest archived semester matching the current semester type.
+     * 
+     * INTELLIGENT MATCHING:
+     * - Gets current semester type (e.g., "1st")
+     * - Searches all archives for same type
+     * - Returns the one with highest academic year (most recent)
+     * - Returns null if no match found
+     * 
+     * @return array|null Archive details or null
+     */
+    public function findMatchingSemesterArchive(): ?array
+    {
+        if (! Schema::hasTable('schedule_archives')) {
+            return null;
+        }
+
+        $period = Setting::getAcademicPeriod();
+        $currentSemester = $period['semester']; // e.g., "1st", "2nd", "Summer"
+
+        // Find all archives with matching semester type
+        $matchingArchives = DB::table('schedule_archives')
+            ->where('semester', $currentSemester)
+            ->where('total_subjects', '>', 0)
+            ->whereNotNull('archive_batch_id')
+            ->select(
+                'archive_batch_id',
+                'semester',
+                'semester_name',
+                'school_year',
+                'total_subjects',
+                'total_schedules',
+                'archived_at'
+            )
+            ->orderByDesc('school_year') // Most recent academic year first
+            ->get();
+
+        if ($matchingArchives->isEmpty()) {
+            return null;
+        }
+
+        // Return the latest one (highest school year)
+        $latest = $matchingArchives->first();
+
+        return [
+            'archive_batch_id' => $latest->archive_batch_id,
+            'semester' => $latest->semester,
+            'semester_name' => $latest->semester_name ?: Setting::semesterDisplayName($latest->semester, $latest->school_year),
+            'school_year' => $latest->school_year,
+            'total_subjects' => $latest->total_subjects,
+            'total_schedules' => $latest->total_schedules,
+            'archived_at' => $latest->archived_at,
+        ];
+    }
+
+    /**
+     * Check if current workspace already contains data.
+     * Used to warn user before retrieval.
+     * 
+     * @return array Occupancy status
+     */
+    public function getWorkspaceOccupancy(): array
+    {
+        $period = Setting::getAcademicPeriod();
+
+        $subjectCount = Subject::activeTerm($period['semester'], $period['school_year'])->count();
+        $scheduleCount = Schedule::activeTerm($period['semester'], $period['school_year'])->count();
+
+        return [
+            'has_subjects' => $subjectCount > 0,
+            'has_schedules' => $scheduleCount > 0,
+            'subject_count' => $subjectCount,
+            'schedule_count' => $scheduleCount,
+            'is_occupied' => $subjectCount > 0 || $scheduleCount > 0,
+        ];
+    }
+
+    /**
+     * Get a human-readable semester label for the current workspace.
+     */
+    private function semesterLabel(): string
+    {
+        return Setting::semesterLabel($this->semester);
     }
 
     public function generateNextAcademicYear(?string $academicYear = null): string
