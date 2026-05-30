@@ -267,28 +267,28 @@
                         })"
                     >
                         {{-- SCHEDULE CARD CONTENT --}}
-                        <div class="flex h-full w-full flex-col items-center justify-center gap-0.5 overflow-hidden bg-white/25 px-2 py-1.5 text-center leading-tight pointer-events-none dark:bg-black/15">
-                            <div class="w-full truncate text-[7px] font-black uppercase text-current opacity-80 sm:text-[8px]">
+                        <div class="flex h-full w-full flex-col items-center justify-center gap-1 overflow-hidden bg-white/25 px-2 py-1.5 text-center leading-tight pointer-events-none dark:bg-black/15">
+                            <div class="w-full truncate text-[10px] font-black uppercase text-current opacity-80 sm:text-[11px]">
                                 {{ $subjectType }} | S{{ $schedule->section ?? 'N/A' }}
                             </div>
                             
-                            <div class="w-full truncate text-[11px] font-black uppercase text-current sm:text-[12px]">
+                            <div class="w-full truncate text-[13px] font-black uppercase text-current sm:text-[14px]">
                                 {{ $subjectCode }}
                             </div>
 
-                            <div class="w-full truncate text-[7px] font-bold opacity-80">
+                            <div class="w-full truncate text-[10px] font-bold opacity-80">
                                 EDP: {{ $this->cleanScheduleText($subject->edp_code ?? 'N/A') }}
                             </div>
 
-                            <div class="w-full truncate text-[8px] font-bold opacity-90">
+                            <div class="w-full line-clamp-2 text-[11px] font-bold opacity-90">
                                 {{ $subjectDescription }}
                             </div>
 
-                            <div class="w-full truncate text-[8px] font-bold opacity-90 sm:text-[9px]">
+                            <div class="w-full truncate text-[11px] font-bold opacity-90 sm:text-[12px]">
                                 {{ $startTimeDisplay }} - {{ $endTimeDisplay }}
                             </div>
 
-                            <div class="w-full truncate text-[7px] font-bold opacity-80">
+                            <div class="w-full line-clamp-2 text-[10px] font-bold opacity-80">
                                 {{ $roomName }} | {{ $instructor }}
                             </div>
                         </div>

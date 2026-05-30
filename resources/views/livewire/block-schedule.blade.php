@@ -1,15 +1,13 @@
 {{-- ============================================================
      BLOCK SCHEDULE — livewire/block-schedule.blade.php
      ============================================================
-     Changes in this version:
-       • PERMISSION TOGGLE  – Admin-only panel to grant/revoke Registrar
-                              finalization access with visual toggle pill
-       • AUDIT LOG PANEL    – Mini log inside permission panel (last 10 events)
-       • HEADER LAYOUT      – Left: title/semester. Right: permission toggle
-                              button + finalize + print, all cleanly spaced
-       • READABILITY        – Larger fonts throughout (labels, table, badges)
-       • SAFETY RULES       – Finalize still blocked if conflicts or unassigned
-       • PRINT              – Robust @media print; hides all new UI chrome
+     UPDATED VERSION:
+       • Real-time conflict detection enabled in edit mode
+       • Added Cancel Editing button with snapshot restore
+       • Updated banner message to reflect live detection
+       • Added conflict type badges (ROOM, FACULTY, TIME)
+       • Removed blocking behavior—editing always allowed
+       • Improved UX with better visual feedback
      ============================================================ --}}
 
 <div class="min-h-screen bg-[#eef3f8] dark:bg-[#020617] transition-colors duration-500 py-6 px-5">
@@ -22,11 +20,12 @@
                     'bg-green-50 border-green-200 text-green-800 dark:bg-green-900/20 dark:border-green-700 dark:text-green-300' => $flashType === 'success',
                     'bg-red-50 border-red-200 text-red-800 dark:bg-red-900/20 dark:border-red-700 dark:text-red-300'             => $flashType === 'error',
                     'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-300' => $flashType === 'warning',
+                    'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/20 dark:border-blue-700 dark:text-blue-300'       => $flashType === 'info',
                 ])
                  x-data
                  x-init="setTimeout(() => $el.remove(), 6000)">
                 <span class="text-base mt-0.5 flex-shrink-0">
-                    @if($flashType === 'success') ✅ @elseif($flashType === 'error') ⛔ @else ⚠️ @endif
+                    @if($flashType === 'success') ✅ @elseif($flashType === 'error') ⛔ @elseif($flashType === 'info') ℹ️ @else ⚠️ @endif
                 </span>
                 <span class="text-[14px]">{{ $flashMessage }}</span>
             </div>
@@ -49,14 +48,25 @@
             </div>
         @endif
 
+        {{-- ── Edit Mode Banner (UPDATED) ────────────────────────────────── --}}
         @if($workspaceEditMode)
-            <div class="sticky top-0 z-40 flex items-center justify-between gap-4 rounded-xl border border-amber-300 bg-amber-100/95 px-5 py-3 text-amber-900 shadow-lg shadow-amber-900/10 backdrop-blur dark:border-amber-700 dark:bg-amber-950/85 dark:text-amber-200">
+            @php $liveConflictCount = count($workspaceRealTimeConflicts ?? []); @endphp
+            <div class="sticky top-0 z-40 flex items-center justify-between gap-4 rounded-xl border border-blue-300 bg-blue-100/95 px-5 py-3 text-blue-900 shadow-lg shadow-blue-900/10 backdrop-blur-sm dark:border-blue-700 dark:bg-blue-950/85 dark:text-blue-200">
                 <div class="flex items-center gap-3">
-                    <span class="rounded-lg bg-orange-500 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-white">Edit Mode</span>
-                    <span class="text-[13px] font-black">Conflict detection paused while editing workspace.</span>
+                    <span class="rounded-lg bg-blue-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-white">Edit Mode Active</span>
+                    <span class="text-[13px] font-black">Conflicts are detected in real time while you edit.</span>
+                    @if($liveConflictCount > 0)
+                        <span class="rounded-lg bg-red-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-white animate-pulse">
+                            ⚠ {{ $liveConflictCount }} conflict{{ $liveConflictCount === 1 ? '' : 's' }} detected
+                        </span>
+                    @else
+                        <span class="rounded-lg bg-emerald-600 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-white">
+                            ✓ No conflicts
+                        </span>
+                    @endif
                 </div>
                 @if($workspaceValidationActive)
-                    <span class="text-[11px] font-black uppercase tracking-widest text-red-700 dark:text-red-300">Resolve highlighted rows</span>
+                    <span class="text-[11px] font-black uppercase tracking-widest text-red-700 dark:text-red-300">Fix highlighted rows before saving</span>
                 @endif
             </div>
         @endif
@@ -253,25 +263,101 @@
             @if($canReviewRevision && $pendingRevisionRequests->isNotEmpty())
                 <div class="print:hidden border-b border-amber-500/20 bg-amber-50/80 px-8 py-4 dark:bg-amber-950/20">
                     <div class="mb-3 flex items-center justify-between gap-3">
-                        <p class="text-[12px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">Pending Faculty Revision Requests</p>
-                        <span class="rounded-full bg-amber-500/15 px-2.5 py-1 text-[10px] font-black uppercase text-amber-700 dark:text-amber-200">{{ $pendingRevisionRequests->count() }} pending</span>
+                        <p class="text-[12px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">
+                            ⏳ Pending Faculty Revision Requests
+                        </p>
+                        <span class="rounded-full bg-amber-500/15 px-2.5 py-1 text-[10px] font-black uppercase text-amber-700 dark:text-amber-200">
+                            {{ $pendingRevisionRequests->count() }} pending
+                        </span>
                     </div>
-                    <div class="grid gap-2 lg:grid-cols-2">
+                    <div class="grid gap-3 lg:grid-cols-2">
                         @foreach($pendingRevisionRequests as $request)
-                            <div class="rounded-xl border border-amber-200 bg-white/80 p-3 text-[12px] shadow-sm dark:border-amber-900/60 dark:bg-slate-950/60">
-                                <div class="flex items-start justify-between gap-3">
+                            @php
+                                $requesterRole = match($request->requester?->role) {
+                                    'dean'           => 'Dean',
+                                    'oic'            => 'OIC',
+                                    'associate_dean' => 'Associate Dean',
+                                    'admin'          => 'Admin',
+                                    'registrar'      => 'Registrar',
+                                    default          => ucfirst(str_replace('_', ' ', $request->requester?->role ?? '')),
+                                };
+                            @endphp
+                            <div class="rounded-xl border border-amber-200 bg-white/90 p-4 text-[12px] shadow-sm dark:border-amber-900/60 dark:bg-slate-950/60">
+
+                                {{-- Status badge + Subject ──────────────────────────────────────── --}}
+                                <div class="flex items-start justify-between gap-2 mb-2">
                                     <div class="min-w-0">
-                                        <p class="font-black uppercase text-slate-800 dark:text-slate-100">{{ $request->subject?->subject_code }} - {{ $request->subject?->description }}</p>
-                                        <p class="mt-1 font-semibold text-slate-500 dark:text-slate-400">
-                                            {{ $request->currentFaculty?->full_name ?? 'Unassigned' }} -> {{ $request->requestedFaculty?->full_name ?? 'Unassigned' }}
+                                        <span class="inline-block rounded px-2 py-0.5 text-[10px] font-black uppercase tracking-wide bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 mb-1">
+                                            ⏳ Pending
+                                        </span>
+                                        <p class="font-black uppercase text-slate-800 dark:text-slate-100 text-[13px]">
+                                            {{ $request->subject?->subject_code }}
+                                            @if($request->subject?->description)
+                                                — {{ $request->subject->description }}
+                                            @endif
                                         </p>
-                                        <p class="mt-1 line-clamp-2 text-slate-500 dark:text-slate-400">{{ $request->reason }}</p>
                                     </div>
-                                    <div class="flex shrink-0 gap-2">
-                                        <button type="button" wire:click="approveRevisionRequest({{ $request->id }})" class="rounded-lg bg-emerald-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:bg-emerald-500">Approve</button>
-                                        <button type="button" wire:click="rejectRevisionRequest({{ $request->id }})" class="rounded-lg bg-red-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:bg-red-500">Reject</button>
+                                    <span class="text-[10px] text-slate-400 dark:text-slate-500 shrink-0 mt-0.5">
+                                        {{ $request->created_at->diffForHumans() }}
+                                    </span>
+                                </div>
+
+                                {{-- Requester ─────────────────────────────────────────────────── --}}
+                                <div class="mb-2 rounded-lg bg-slate-50 dark:bg-slate-800/60 px-3 py-2">
+                                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-0.5">Submitted By</p>
+                                    <p class="font-bold text-slate-700 dark:text-slate-200">
+                                        {{ $request->requester?->name ?? 'Unknown' }}
+                                        <span class="ml-1 rounded bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-blue-700 dark:text-blue-300">
+                                            {{ $requesterRole }}
+                                        </span>
+                                    </p>
+                                </div>
+
+                                {{-- Faculty Change ─────────────────────────────────────────────── --}}
+                                <div class="mb-2 space-y-1">
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 w-24 shrink-0">Current</span>
+                                        <span class="font-bold text-slate-700 dark:text-slate-200 truncate">
+                                            {{ $request->currentFaculty?->full_name ?? 'Unassigned' }}
+                                        </span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <span class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 w-24 shrink-0">Requested</span>
+                                        <span class="font-bold text-emerald-700 dark:text-emerald-400 truncate">
+                                            {{ $request->requestedFaculty?->full_name ?? '—' }}
+                                        </span>
                                     </div>
                                 </div>
+
+                                {{-- Reason ───────────────────────────────────────────────────── --}}
+                                @if($request->reason)
+                                    <p class="mb-3 text-[11px] italic text-slate-500 dark:text-slate-400 line-clamp-2 border-l-2 border-amber-300 dark:border-amber-700 pl-2">
+                                        "{{ $request->reason }}"
+                                    </p>
+                                @endif
+
+                                {{-- Approve / Reject actions ─────────────────────────────────── --}}
+                                <div class="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                                    <button
+                                        type="button"
+                                        wire:click="approveRevisionRequest({{ $request->id }})"
+                                        wire:loading.attr="disabled"
+                                        wire:target="approveRevisionRequest({{ $request->id }})"
+                                        wire:confirm="Approve this faculty revision for {{ $request->subject?->subject_code }}? The schedule will be updated immediately."
+                                        class="flex-1 rounded-lg bg-emerald-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:bg-emerald-500 transition-all active:scale-95 disabled:opacity-60">
+                                        ✓ Approve
+                                    </button>
+                                    <button
+                                        type="button"
+                                        wire:click="rejectRevisionRequest({{ $request->id }})"
+                                        wire:loading.attr="disabled"
+                                        wire:target="rejectRevisionRequest({{ $request->id }})"
+                                        wire:confirm="Reject this faculty revision request? The requester will be notified."
+                                        class="flex-1 rounded-lg bg-red-600 px-3 py-2 text-[10px] font-black uppercase tracking-widest text-white hover:bg-red-500 transition-all active:scale-95 disabled:opacity-60">
+                                        ✕ Reject
+                                    </button>
+                                </div>
+
                             </div>
                         @endforeach
                     </div>
@@ -329,28 +415,42 @@
                         </select>
                     </div>
 
-                    {{-- ── Right: Action Buttons ──────────────────────────── --}}
+                    {{-- ── Right: Action Buttons (UPDATED) ──────────────────────────── --}}
                     <div class="ml-auto flex flex-wrap items-center gap-3">
 
-                        {{-- NOTE: Registrar Access control has moved to the page header above. --}}
-
-                        {{-- ── Finalize Button ──────────────────────────────
-                             Shown when:
-                              1. User has finalization permission
-                              2. Schedules exist and not fully finalized
-                             Disabled (not hidden) when: conflicts or unassigned
-                             ─────────────────────────────────────────────── --}}
+                        {{-- ── Edit Workspace Buttons ──────────────────────────
+                             NEW: Cancel Editing + Done Editing (conditional)
+                             ───────────────────────────────────────────────── --}}
                         @if($canEditWorkspace && !$allFinalized && $totalRows > 0)
-                            <button
-                                type="button"
-                                wire:click="{{ $workspaceEditMode ? 'finishWorkspaceEdit' : 'startWorkspaceEdit' }}"
-                                wire:loading.attr="disabled"
-                                class="{{ $workspaceEditMode
-                                    ? 'bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 shadow-amber-900/10'
-                                    : 'bg-gradient-to-r from-slate-800 to-slate-700 hover:from-slate-700 hover:to-slate-600 shadow-slate-900/10' }}
-                                    px-5 py-2.5 rounded-xl text-[13px] font-black uppercase tracking-wider text-white shadow-md transition-all active:scale-95 flex items-center gap-2.5">
-                                <span>{{ $workspaceEditMode ? 'Done Editing' : 'Edit Workspace' }}</span>
-                            </button>
+                            @if($workspaceEditMode)
+                                {{-- In Edit Mode: Show Cancel & Done buttons --}}
+                                <button
+                                    type="button"
+                                    wire:click="cancelWorkspaceEdit"
+                                    wire:loading.attr="disabled"
+                                    class="px-5 py-2.5 rounded-xl text-[13px] font-black uppercase tracking-wider text-white shadow-md transition-all active:scale-95 flex items-center gap-2.5
+                                           bg-gradient-to-r from-slate-500 to-slate-600 hover:from-slate-400 hover:to-slate-500 shadow-slate-900/10">
+                                    <span>Cancel Editing</span>
+                                </button>
+                                <button
+                                    type="button"
+                                    wire:click="finishWorkspaceEdit"
+                                    wire:loading.attr="disabled"
+                                    class="px-5 py-2.5 rounded-xl text-[13px] font-black uppercase tracking-wider text-white shadow-md transition-all active:scale-95 flex items-center gap-2.5
+                                           bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-400 hover:to-orange-500 shadow-amber-900/10">
+                                    <span>Done Editing</span>
+                                </button>
+                            @else
+                                {{-- Not in Edit Mode: Show Edit Workspace button --}}
+                                <button
+                                    type="button"
+                                    wire:click="startWorkspaceEdit"
+                                    wire:loading.attr="disabled"
+                                    class="px-5 py-2.5 rounded-xl text-[13px] font-black uppercase tracking-wider text-white shadow-md transition-all active:scale-95 flex items-center gap-2.5
+                                           bg-gradient-to-r from-slate-800 to-slate-700 hover:from-slate-700 hover:to-slate-600 shadow-slate-900/10">
+                                    <span>Edit Workspace</span>
+                                </button>
+                            @endif
                         @endif
 
                         @if($canFinalize && !$allFinalized && $totalRows > 0)
@@ -456,9 +556,37 @@
                                     NOT SCHEDULED
                                 </span>
                             @elseif($workspaceEditMode && isset($workspaceEdits[$sched->edit_key]))
+                                @php
+                                    $rtc       = $workspaceRealTimeConflicts[$sched->edit_key] ?? null;
+                                    $hasRtc    = ! is_null($rtc);
+                                    $timeRing  = $hasRtc ? 'border-red-500 ring-1 ring-red-400' : 'border-amber-300 dark:border-amber-700';
+                                    $timeSlots = $workspaceEditOptions[$sched->edit_key]['timeSlots'] ?? [];
+                                @endphp
                                 <div class="flex flex-col gap-1">
-                                    <input type="time" wire:model.live="workspaceEdits.{{ $sched->edit_key }}.start_time" class="w-full rounded-md border border-amber-300 bg-white px-2 py-1 text-[12px] font-black text-slate-800 dark:border-amber-700 dark:bg-slate-950 dark:text-slate-100">
-                                    <input type="time" wire:model.live="workspaceEdits.{{ $sched->edit_key }}.end_time" class="w-full rounded-md border border-amber-300 bg-white px-2 py-1 text-[12px] font-black text-slate-800 dark:border-amber-700 dark:bg-slate-950 dark:text-slate-100">
+                                    {{-- Start Time — master-grid slot select --}}
+                                    <select wire:model.live="workspaceEdits.{{ $sched->edit_key }}.start_time"
+                                            class="w-full rounded-md border {{ $timeRing }} bg-white px-2 py-1 text-[11px] font-black text-slate-800 dark:bg-slate-950 dark:text-slate-100 transition-colors">
+                                        @foreach($timeSlots as $slot)
+                                            <option value="{{ $slot['value'] }}">{{ $slot['label'] }}</option>
+                                        @endforeach
+                                    </select>
+                                    {{-- End Time — master-grid slot select --}}
+                                    <select wire:model.live="workspaceEdits.{{ $sched->edit_key }}.end_time"
+                                            class="w-full rounded-md border {{ $timeRing }} bg-white px-2 py-1 text-[11px] font-black text-slate-800 dark:bg-slate-950 dark:text-slate-100 transition-colors">
+                                        @foreach($timeSlots as $slot)
+                                            <option value="{{ $slot['value'] }}">{{ $slot['label'] }}</option>
+                                        @endforeach
+                                    </select>
+                                    @if($hasRtc)
+                                        <div class="mt-0.5 flex flex-wrap gap-0.5">
+                                            @foreach($rtc['types'] ?? [] as $ctype)
+                                                <span class="inline-block rounded px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-white
+                                                    {{ str_contains($ctype, 'ROOM') ? 'bg-red-500' : (str_contains($ctype, 'FACULTY') ? 'bg-orange-500' : 'bg-yellow-500') }}">
+                                                    {{ $ctype }}
+                                                </span>
+                                            @endforeach
+                                        </div>
+                                    @endif
                                 </div>
                             @else
                             <span class="bg-blue-50 dark:bg-blue-900/30
@@ -506,7 +634,47 @@
                         {{-- ── Day ──────────────────────────────────────── --}}
                         <td class="px-3 py-3 text-center">
                             @if($workspaceEditMode && isset($workspaceEdits[$sched->edit_key]))
-                                <input type="text" wire:model.live="workspaceEdits.{{ $sched->edit_key }}.day_string" placeholder="Monday, Wednesday" class="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-center text-[12px] font-black uppercase tracking-tight text-slate-800 dark:border-amber-700 dark:bg-slate-950 dark:text-slate-100">
+                                @php
+                                    $rtcDay   = $workspaceRealTimeConflicts[$sched->edit_key] ?? null;
+                                    $activeDayList = $workspaceEditOptions[$sched->edit_key]['days'] ?? [];
+                                    // Parse currently selected days for checkbox state
+                                    $selectedDays  = array_filter(array_map(
+                                        'trim',
+                                        explode(',', $workspaceEdits[$sched->edit_key]['day_string'] ?? '')
+                                    ));
+                                @endphp
+                                {{-- Day checkboxes — only active scheduling days shown --}}
+                                <div class="flex flex-col gap-0.5 text-left" x-data>
+                                    @foreach($activeDayList as $activeDay)
+                                        @php
+                                            $dayAbbr  = strtoupper(substr($activeDay, 0, 3));
+                                            $dayChecked = in_array($activeDay, $selectedDays, true);
+                                        @endphp
+                                        <label class="flex items-center gap-1.5 cursor-pointer select-none
+                                                       {{ $dayChecked ? 'text-blue-700 dark:text-blue-300 font-black' : 'text-slate-500 dark:text-slate-400 font-semibold' }}
+                                                       text-[11px] uppercase tracking-tight">
+                                            <input type="checkbox"
+                                                   value="{{ $activeDay }}"
+                                                   {{ $dayChecked ? 'checked' : '' }}
+                                                   class="accent-blue-600 w-3 h-3 flex-shrink-0"
+                                                   x-on:change="
+                                                       let key  = '{{ $sched->edit_key }}';
+                                                       let cur  = ($wire.workspaceEdits[key] || {}).day_string || '';
+                                                       let days = cur.split(',').map(d => d.trim()).filter(Boolean);
+                                                       if ($event.target.checked) {
+                                                           if (! days.includes('{{ $activeDay }}')) days.push('{{ $activeDay }}');
+                                                       } else {
+                                                           days = days.filter(d => d !== '{{ $activeDay }}');
+                                                       }
+                                                       $wire.set('workspaceEdits.' + key + '.day_string', days.join(', '));
+                                                   ">
+                                            {{ $dayAbbr }}
+                                        </label>
+                                    @endforeach
+                                    @if($rtcDay)
+                                        <span class="mt-0.5 inline-block rounded px-1 py-0.5 text-[9px] font-black uppercase text-white bg-yellow-500">CONFLICT</span>
+                                    @endif
+                                </div>
                             @else
                             <span class="text-[12px] font-black uppercase tracking-tight
                                          text-slate-600 dark:text-slate-400">
@@ -522,11 +690,44 @@
                                     UNASSIGNED
                                 </span>
                             @elseif($workspaceEditMode && isset($workspaceEdits[$sched->edit_key]))
-                                <select wire:model.live="workspaceEdits.{{ $sched->edit_key }}.room_id" class="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-[12px] font-black text-slate-800 dark:border-amber-700 dark:bg-slate-950 dark:text-slate-100">
-                                    @foreach($roomOptions as $room)
-                                        <option value="{{ $room->id }}">{{ $room->room_name }}</option>
-                                    @endforeach
-                                </select>
+                                @php
+                                    $rtcRoom         = $workspaceRealTimeConflicts[$sched->edit_key] ?? null;
+                                    $roomHasConflict = $rtcRoom && collect($rtcRoom['types'] ?? [])->contains(fn($t) => str_contains($t, 'ROOM'));
+                                    $roomRing        = $roomHasConflict ? 'border-red-500 ring-1 ring-red-400' : 'border-amber-300 dark:border-amber-700';
+                                    $filteredRooms   = $workspaceEditOptions[$sched->edit_key]['rooms'] ?? [];
+                                @endphp
+                                <div class="flex flex-col gap-0.5">
+                                    <select wire:model.live="workspaceEdits.{{ $sched->edit_key }}.room_id"
+                                            class="w-full rounded-md border {{ $roomRing }} bg-white px-2 py-1.5 text-[11px] font-black text-slate-800 dark:bg-slate-950 dark:text-slate-100 transition-colors">
+                                        @if(empty($filteredRooms))
+                                            <option value="">No compatible rooms</option>
+                                        @else
+                                            @php $hasOccupied = collect($filteredRooms)->contains('occupied', true); @endphp
+                                            @if($hasOccupied)<optgroup label="── AVAILABLE ──">@endif
+                                            @foreach($filteredRooms as $fr)
+                                                @if($hasOccupied && $fr['occupied'])
+                                                    </optgroup><optgroup label="── OCCUPIED ──">
+                                                    @php $hasOccupied = false; @endphp
+                                                @endif
+                                                <option value="{{ $fr['id'] }}"
+                                                        {{ (string)($workspaceEdits[$sched->edit_key]['room_id'] ?? '') === (string)$fr['id'] ? 'selected' : '' }}>
+                                                    {{ $fr['label'] }}{{ $fr['occupied'] ? ' (Occupied)' : '' }}
+                                                </option>
+                                            @endforeach
+                                            @if(! $hasOccupied)</optgroup>@endif
+                                        @endif
+                                    </select>
+                                    @if($roomHasConflict)
+                                        <span class="inline-block rounded px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-white bg-red-500">
+                                            ROOM CONFLICT
+                                        </span>
+                                    @endif
+                                    @if(empty($filteredRooms))
+                                        <span class="inline-block rounded px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-white bg-slate-500">
+                                            NO COMPATIBLE ROOM
+                                        </span>
+                                    @endif
+                                </div>
                             @else
                             <span class="bg-blue-50 dark:bg-blue-900/30
                                          text-blue-600 dark:text-blue-400
@@ -540,22 +741,87 @@
                         {{-- ── Faculty Cell ─────────────────────────────────────────────────── --}}
                         <td class="px-3 py-3 text-center">
                             @if($workspaceEditMode && isset($workspaceEdits[$sched->edit_key]))
-                                <select wire:model.live="workspaceEdits.{{ $sched->edit_key }}.faculty_id" class="w-full rounded-md border border-amber-300 bg-white px-2 py-1.5 text-[12px] font-black text-slate-800 dark:border-amber-700 dark:bg-slate-950 dark:text-slate-100">
-                                    <option value="">UNASSIGNED</option>
-                                    @foreach($facultyOptions as $faculty)
-                                        <option value="{{ $faculty->id }}">{{ $faculty->full_name }}</option>
-                                    @endforeach
-                                </select>
+                                @php
+                                    $rtcFac          = $workspaceRealTimeConflicts[$sched->edit_key] ?? null;
+                                    $facHasConflict  = $rtcFac && collect($rtcFac['types'] ?? [])->contains(fn($t) => str_contains($t, 'FACULTY'));
+                                    $facRing         = $facHasConflict ? 'border-red-500 ring-1 ring-red-400' : 'border-amber-300 dark:border-amber-700';
+                                    $filteredFaculty = $workspaceEditOptions[$sched->edit_key]['faculty'] ?? [];
+                                @endphp
+                                <div class="flex flex-col gap-0.5">
+                                    <select wire:model.live="workspaceEdits.{{ $sched->edit_key }}.faculty_id"
+                                            class="w-full rounded-md border {{ $facRing }} bg-white px-2 py-1.5 text-[11px] font-black text-slate-800 dark:bg-slate-950 dark:text-slate-100 transition-colors">
+                                        <option value="">UNASSIGNED</option>
+                                        @if(! empty($filteredFaculty))
+                                            @php $hasOccupied = collect($filteredFaculty)->contains('occupied', true); @endphp
+                                            @if($hasOccupied)<optgroup label="── AVAILABLE ──">@endif
+                                            @foreach($filteredFaculty as $ff)
+                                                @if($hasOccupied && $ff['occupied'])
+                                                    </optgroup><optgroup label="── OCCUPIED ──">
+                                                    @php $hasOccupied = false; @endphp
+                                                @endif
+                                                <option value="{{ $ff['id'] }}"
+                                                        {{ (string)($workspaceEdits[$sched->edit_key]['faculty_id'] ?? '') === (string)$ff['id'] ? 'selected' : '' }}>
+                                                    {{ $ff['label'] }}{{ $ff['occupied'] ? ' (Occupied)' : '' }}
+                                                </option>
+                                            @endforeach
+                                            @if(! $hasOccupied)</optgroup>@endif
+                                        @endif
+                                    </select>
+                                    @if($facHasConflict)
+                                        <span class="inline-block rounded px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-white bg-orange-500">
+                                            FACULTY CONFLICT
+                                        </span>
+                                    @endif
+                                    @if(empty($filteredFaculty))
+                                        <span class="inline-block rounded px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wide text-white bg-slate-500">
+                                            NO ELIGIBLE FACULTY
+                                        </span>
+                                    @endif
+                                </div>
                             @elseif($sched->status === \App\Models\Schedule::STATUS_FINALIZED && $canRequestRevision)
-                                @if(($sched->revision_request?->status ?? null) === \App\Models\ScheduleRevisionRequest::STATUS_PENDING)
-                                    <span class="inline-block rounded-lg border border-amber-300 bg-amber-100 px-2.5 py-1 text-[10px] font-black uppercase tracking-widest text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200">Pending Revision</span>
-                                @else
-                                    <button type="button"
-                                            wire:click="openRevisionModal({{ json_encode($sched->ids) }}, {{ $sched->subject?->id ?? 0 }})"
-                                            class="w-full rounded-xl border border-amber-400 bg-amber-50 px-3 py-2 text-[11px] font-black uppercase tracking-widest text-amber-700 transition hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
-                                        Request Revision
-                                    </button>
-                                @endif
+                                {{-- Always show faculty name first, then the revision action below ─────── --}}
+                                <div class="flex flex-col items-center gap-1.5">
+
+                                    {{-- Faculty name (always visible) ────────────────────────────────── --}}
+                                    @if($sched->faculty)
+                                        <div class="flex items-center gap-1.5 w-full">
+                                            <div class="w-5 h-5 rounded-full bg-emerald-500 flex-shrink-0 flex items-center justify-center">
+                                                <svg class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"/>
+                                                </svg>
+                                            </div>
+                                            <span class="text-[12px] font-semibold text-slate-700 dark:text-slate-200 truncate leading-snug text-left">
+                                                {{ $sched->faculty->full_name }}
+                                            </span>
+                                        </div>
+                                    @else
+                                        <span class="text-[11px] italic text-slate-400 dark:text-slate-500">Unassigned</span>
+                                    @endif
+
+                                    {{-- Revision action ─────────────────────────────────────────────── --}}
+                                    @if(($sched->revision_request?->status ?? null) === \App\Models\ScheduleRevisionRequest::STATUS_PENDING)
+                                        <span class="inline-block w-full text-center rounded-lg border border-amber-300 bg-amber-100 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200">
+                                            ⏳ Pending Revision
+                                        </span>
+                                    @elseif(($sched->revision_request?->status ?? null) === \App\Models\ScheduleRevisionRequest::STATUS_APPROVED)
+                                        <span class="inline-block w-full text-center rounded-lg border border-emerald-300 bg-emerald-100 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-emerald-800 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200">
+                                            ✓ Revision Approved
+                                        </span>
+                                    @elseif(($sched->revision_request?->status ?? null) === \App\Models\ScheduleRevisionRequest::STATUS_REJECTED)
+                                        <button type="button"
+                                                wire:click="openRevisionModal({{ json_encode($sched->ids) }}, {{ $sched->subject?->id ?? 0 }})"
+                                                class="w-full rounded-lg border border-red-300 bg-red-50 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-red-700 transition hover:bg-red-100 dark:border-red-700 dark:bg-red-900/20 dark:text-red-300">
+                                            ✕ Rejected · Re-request
+                                        </button>
+                                    @else
+                                        <button type="button"
+                                                wire:click="openRevisionModal({{ json_encode($sched->ids) }}, {{ $sched->subject?->id ?? 0 }})"
+                                                class="w-full rounded-lg border border-amber-400 bg-amber-50 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-amber-700 transition hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-200">
+                                            Request Revision
+                                        </button>
+                                    @endif
+
+                                </div>
                             @elseif($canAssign && $sched->status !== 'not_scheduled')
 
                                 <button
@@ -642,7 +908,7 @@
                             @endif
                         </td>
 
-                        {{-- ── Status Badge ──────────────────────────────── --}}
+                        {{-- ── Status Badge (UPDATED) ──────────────────────────────── --}}
                         <td class="px-3 py-3 text-center">
                             @php
                                 $statusMap = [
@@ -682,17 +948,31 @@
                                 <div class="mt-1 text-[11px] font-bold text-red-600 dark:text-red-400 uppercase tracking-tight">
                                     Conflict
                                 </div>
+                                {{-- NEW: Display conflict type badges --}}
+                                @if($sched->conflict_type)
+                                    <div class="mt-1 text-[10px] font-black text-white uppercase tracking-tight inline-block px-2 py-1 rounded
+                                                {{ str_contains($sched->conflict_type, 'ROOM') ? 'bg-red-500' : (str_contains($sched->conflict_type, 'FACULTY') ? 'bg-orange-500' : (str_contains($sched->conflict_type, 'TIME') ? 'bg-yellow-500' : 'bg-slate-500')) }}">
+                                        {{ $sched->conflict_type }}
+                                    </div>
+                                @endif
                             @endif
-                            @if($sched->revision_request)
+
+                            @if($sched->revision_request && $canReviewRevision)
                                 @php
                                     $revisionClasses = [
-                                        \App\Models\ScheduleRevisionRequest::STATUS_PENDING => 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-700',
+                                        \App\Models\ScheduleRevisionRequest::STATUS_PENDING  => 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-200 dark:border-amber-700',
                                         \App\Models\ScheduleRevisionRequest::STATUS_APPROVED => 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-200 dark:border-emerald-700',
                                         \App\Models\ScheduleRevisionRequest::STATUS_REJECTED => 'bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-200 dark:border-red-700',
                                     ];
+                                    $revisionIcons = [
+                                        \App\Models\ScheduleRevisionRequest::STATUS_PENDING  => '⏳',
+                                        \App\Models\ScheduleRevisionRequest::STATUS_APPROVED => '✓',
+                                        \App\Models\ScheduleRevisionRequest::STATUS_REJECTED => '✕',
+                                    ];
                                 @endphp
                                 <div class="mt-1 inline-block rounded border px-2 py-0.5 text-[9px] font-black uppercase tracking-widest {{ $revisionClasses[$sched->revision_request->status] ?? 'bg-slate-100 text-slate-600 border-slate-200' }}">
-                                    Revision {{ $sched->revision_request->status }}
+                                    {{ $revisionIcons[$sched->revision_request->status] ?? '' }}
+                                    Revision {{ ucfirst($sched->revision_request->status) }}
                                 </div>
                             @endif
                         </td>
@@ -726,16 +1006,16 @@
     </div>{{-- /max-w --}}
 
 
-    {{-- ════════════════════════════════════════════════════════════════════════
+    {{-- ════════════════════════════════════════════════════════════════
          ADMIN PERMISSION PANEL MODAL
-         ════════════════════════════════════════════════════════════════════════
+         ════════════════════════════════════════════════════════════════
          Only rendered when $canManagePermission (Admin) AND $showPermissionPanel.
          Allows Admin to:
            - See the current state (enabled / disabled)
            - Grant to any active Registrar
            - Revoke from a Registrar who currently has it
            - View recent permission audit log
-         ════════════════════════════════════════════════════════════════════════ --}}
+         ════════════════════════════════════════════════════════════════ --}}
     @if($canManagePermission && $showPermissionPanel)
         <div class="fixed inset-0 z-50 flex items-center justify-center p-4"
              x-data
@@ -978,7 +1258,7 @@
 
 
     {{-- ════════════════════════════════════════════════════════════════
-         FACULTY ASSIGNMENT MODAL
+         WORKSPACE CONFLICT MODAL
          ════════════════════════════════════════════════════════════════ --}}
     @if($showWorkspaceConflictModal)
         <div class="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-xl">
@@ -998,10 +1278,9 @@
                                 @foreach($workspaceRecommendations as $suggestion)
                                     <div class="rounded-xl border border-blue-200 bg-blue-50/80 p-3 text-xs dark:border-blue-900/60 dark:bg-blue-950/20">
                                         <div class="flex items-center justify-between gap-2">
-                                            <p class="font-black text-blue-800 dark:text-blue-200">{{ $suggestion['label'] ?? 'Alternative schedule' }}</p>
-                                            <span class="rounded bg-blue-600 px-2 py-1 text-[9px] font-black uppercase text-white">{{ $suggestion['match_label'] ?? 'GOOD MATCH' }}</span>
+                                            <p class="font-black text-blue-800 dark:text-blue-200">{{ $suggestion['label'] ?? 'Alternative' }}</p>
+                                            <span class="rounded bg-blue-600 px-2 py-1 text-[9px] font-black uppercase text-white">{{ $suggestion['match_label'] ?? 'GOOD' }}</span>
                                         </div>
-                                        <p class="mt-1 font-semibold text-blue-700/80 dark:text-blue-300/80">{{ $suggestion['day'] ?? '' }} {{ $suggestion['start_time'] ?? '' }}</p>
                                     </div>
                                 @endforeach
                             </div>
@@ -1015,39 +1294,167 @@
         </div>
     @endif
 
+    {{-- ════════════════════════════════════════════════════════════════
+         REVISION REQUEST MODAL
+         ════════════════════════════════════════════════════════════════ --}}
     @if($showRevisionModal)
-        <div class="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-xl">
-            <div class="w-full max-w-xl overflow-hidden rounded-2xl border border-amber-500/30 bg-white shadow-2xl dark:bg-slate-950">
-                <div class="border-b border-amber-200 bg-amber-50 px-6 py-4 dark:border-amber-900/60 dark:bg-amber-950/30">
-                    <h3 class="text-lg font-black uppercase tracking-tight text-amber-800 dark:text-amber-200">Request Faculty Revision</h3>
-                    <p class="mt-1 text-sm font-semibold text-amber-700 dark:text-amber-300">{{ $revisionSubject?->subject_code }} - {{ $revisionSubject?->description }}</p>
+        <div class="fixed inset-0 z-[9998] flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-xl"
+             x-data
+             x-transition:enter="transition ease-out duration-200"
+             x-transition:enter-start="opacity-0"
+             x-transition:enter-end="opacity-100"
+             x-transition:leave="transition ease-in duration-150"
+             x-transition:leave-start="opacity-100"
+             x-transition:leave-end="opacity-0">
+            <div class="w-full max-w-xl overflow-hidden rounded-2xl border border-amber-500/30 bg-white shadow-2xl dark:bg-slate-950"
+                 x-transition:enter="transition ease-out duration-200"
+                 x-transition:enter-start="opacity-0 scale-95 translate-y-2"
+                 x-transition:enter-end="opacity-100 scale-100 translate-y-0"
+                 x-transition:leave="transition ease-in duration-150"
+                 x-transition:leave-start="opacity-100 scale-100 translate-y-0"
+                 x-transition:leave-end="opacity-0 scale-95 translate-y-2">
+
+                {{-- Modal Header ────────────────────────────────────────────── --}}
+                <div class="border-b border-amber-200 bg-amber-50 px-6 py-4 dark:border-amber-900/60 dark:bg-amber-950/30 flex items-start justify-between">
+                    <div>
+                        <h3 class="text-lg font-black uppercase tracking-tight text-amber-800 dark:text-amber-200">
+                            Request Faculty Revision
+                        </h3>
+                        <p class="mt-1 text-sm font-semibold text-amber-700 dark:text-amber-300">
+                            {{ $revisionSubject?->subject_code }} — {{ $revisionSubject?->description }}
+                        </p>
+                    </div>
+                    <button type="button" wire:click="closeRevisionModal"
+                            class="text-amber-500 hover:text-amber-800 dark:hover:text-amber-200 p-1.5 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors ml-4">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
                 </div>
-                <div class="space-y-4 p-6">
+
+                {{-- Subject + Faculty Summary Card ─────────────────────────── --}}
+                @if($revisionSubject)
+                <div class="mx-6 mt-5 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50/80 dark:bg-slate-800/50 px-4 py-3 text-[12px]">
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-1.5">
+                        <div>
+                            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-0.5">Subject Code</p>
+                            <p class="font-bold text-slate-800 dark:text-slate-100">{{ $revisionSubject->subject_code }}</p>
+                        </div>
+                        <div>
+                            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-0.5">Section / Year</p>
+                            <p class="font-bold text-slate-800 dark:text-slate-100">
+                                {{ $revisionSubject->section }} · Year {{ $revisionSubject->year_level }}
+                            </p>
+                        </div>
+                        <div class="col-span-2">
+                            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-0.5">Description</p>
+                            <p class="font-semibold text-slate-700 dark:text-slate-300">{{ $revisionSubject->description }}</p>
+                        </div>
+                        <div>
+                            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-0.5">Current Faculty</p>
+                            <p class="font-bold text-slate-700 dark:text-slate-200">
+                                @php
+                                    $currentFacForRevision = $revisionCurrentFacultyId
+                                        ? \App\Models\Faculty::find($revisionCurrentFacultyId)
+                                        : null;
+                                @endphp
+                                {{ $currentFacForRevision?->full_name ?? 'Unassigned' }}
+                            </p>
+                        </div>
+                        <div>
+                            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-0.5">Semester / S.Y.</p>
+                            <p class="font-bold text-slate-700 dark:text-slate-200">{{ $semester }} · {{ $schoolYear }}</p>
+                        </div>
+                    </div>
+                </div>
+                @endif
+
+                {{-- Form body ────────────────────────────────────────────────── --}}
+                <div class="space-y-4 px-6 py-5">
                     @if($revisionError)
-                        <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700 dark:border-red-900/60 dark:bg-red-950/25 dark:text-red-200">{{ $revisionError }}</div>
+                        @php $isFacultyConflict = str_starts_with($revisionError, "⚠"); @endphp
+                        @if($isFacultyConflict)
+                            {{-- Faculty scheduling conflict — prominent amber warning --}}
+                            <div class="rounded-xl border border-amber-300 bg-amber-50 dark:border-amber-700/60 dark:bg-amber-950/30 px-4 py-3.5 flex items-start gap-3">
+                                <div class="flex-shrink-0 mt-0.5 w-8 h-8 rounded-lg bg-amber-500 flex items-center justify-center shadow-sm">
+                                    <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                                              d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+                                    </svg>
+                                </div>
+                                <div class="min-w-0">
+                                    <p class="text-[11px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-400 mb-1">
+                                        Faculty Scheduling Conflict
+                                    </p>
+                                    <p class="text-[13px] font-semibold text-amber-800 dark:text-amber-200 leading-snug">
+                                        {{ ltrim($revisionError, "⚠ ") }}
+                                    </p>
+                                </div>
+                            </div>
+                        @else
+                            {{-- Generic validation error --}}
+                            <div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-bold text-red-700 dark:border-red-900/60 dark:bg-red-950/25 dark:text-red-200 flex items-start gap-2">
+                                <span class="flex-shrink-0">⛔</span>
+                                <span>{{ $revisionError }}</span>
+                            </div>
+                        @endif
                     @endif
+
                     <label class="block">
-                        <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Requested Faculty</span>
-                        <select wire:model.live="revisionRequestedFacultyId" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100">
-                            <option value="">Choose faculty</option>
+                        <span class="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                            Requested Faculty
+                        </span>
+                        <select wire:model.live="revisionRequestedFacultyId"
+                                class="mt-1.5 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm font-bold text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-amber-400 focus:border-transparent outline-none transition-all">
+                            <option value="">— Choose replacement faculty —</option>
                             @foreach($revisionFacultyOptions as $faculty)
                                 <option value="{{ $faculty->id }}">{{ $faculty->full_name }}</option>
                             @endforeach
                         </select>
                     </label>
+
                     <label class="block">
-                        <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">Reason</span>
-                        <textarea wire:model.live="revisionReason" rows="4" class="mt-1 w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100" placeholder="Explain why this finalized assignment needs revision."></textarea>
+                        <span class="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                            Reason for Revision <span class="text-red-500">*</span>
+                        </span>
+                        <textarea wire:model.live="revisionReason"
+                                  rows="3"
+                                  class="mt-1.5 w-full rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm font-semibold text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-amber-400 focus:border-transparent outline-none transition-all resize-none"
+                                  placeholder="e.g., Faculty specialization alignment, workload balancing…"></textarea>
                     </label>
                 </div>
-                <div class="flex justify-end gap-3 border-t border-slate-200 bg-slate-50 px-6 py-4 dark:border-slate-800 dark:bg-slate-900">
-                    <button type="button" wire:click="closeRevisionModal" class="rounded-xl bg-slate-200 px-5 py-2.5 text-xs font-black uppercase tracking-widest text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-200 dark:hover:bg-slate-600">Cancel</button>
-                    <button type="button" wire:click="submitRevisionRequest" class="rounded-xl bg-amber-600 px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white hover:bg-amber-500">Submit Request</button>
+
+                {{-- Footer ────────────────────────────────────────────────────── --}}
+                <div class="flex justify-end gap-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/80 dark:bg-slate-900 px-6 py-4">
+                    <button type="button"
+                            wire:click="closeRevisionModal"
+                            wire:loading.attr="disabled"
+                            class="rounded-xl bg-slate-200 dark:bg-slate-700 px-5 py-2.5 text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200 hover:bg-slate-300 dark:hover:bg-slate-600 transition-all active:scale-95 disabled:opacity-60">
+                        Cancel
+                    </button>
+                    <button type="button"
+                            wire:click="submitRevisionRequest"
+                            wire:loading.attr="disabled"
+                            wire:target="submitRevisionRequest"
+                            class="rounded-xl bg-amber-600 px-5 py-2.5 text-xs font-black uppercase tracking-widest text-white hover:bg-amber-500 transition-all active:scale-95 disabled:opacity-60 flex items-center gap-2">
+                        <span wire:loading.remove wire:target="submitRevisionRequest">Submit Request</span>
+                        <span wire:loading wire:target="submitRevisionRequest" class="flex items-center gap-2">
+                            <svg class="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+                            </svg>
+                            Submitting…
+                        </span>
+                    </button>
                 </div>
+
             </div>
         </div>
     @endif
 
+    {{-- ════════════════════════════════════════════════════════════════
+         FACULTY ASSIGNMENT MODAL
+         ════════════════════════════════════════════════════════════════ --}}
     @if($showFacultyModal)
         <div class="fixed inset-0 z-50 flex items-center justify-center p-4"
              x-data
@@ -1126,23 +1533,6 @@
                                 </button>
                             @endforeach
                         </div>
-                    </div>
-                @endif
-
-                {{-- Subject type guidance --}}
-                @if($modalSubject)
-                    <div class="flex-shrink-0 mx-6 mt-3 px-4 py-2.5 rounded-xl text-[12px]
-                                @if(strtolower($modalSubject->type ?? '') === 'minor')
-                                    bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-700 text-violet-700 dark:text-violet-400
-                                @else
-                                    bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-500 dark:text-slate-400
-                                @endif">
-                        @if(strtolower($modalSubject->type ?? '') === 'minor')
-                            <strong>Minor/GenEd Subject:</strong> Showing GenEd and minor-eligible faculty only.
-                        @else
-                            <strong>Major Subject ({{ $modalSubject->department ?? $modalSubject->major }}):</strong>
-                            Showing departmental and cross-department faculty for this college.
-                        @endif
                     </div>
                 @endif
 
@@ -1226,17 +1616,6 @@
                                     <span class="text-[11px] text-slate-500 dark:text-slate-400">
                                         {{ $faculty->displayDepartment() }}
                                     </span>
-                                    <span @class([
-                                            'text-[11px] font-bold px-1.5 py-0.5 rounded uppercase',
-                                            'text-emerald-600 bg-emerald-50 dark:bg-emerald-900/20 dark:text-emerald-400'
-                                                => $faculty->faculty_scope === 'gened',
-                                            'text-violet-600 bg-violet-50 dark:bg-violet-900/20 dark:text-violet-400'
-                                                => $faculty->faculty_scope === 'cross_department',
-                                            'text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400'
-                                                => $faculty->faculty_scope === 'departmental',
-                                        ])>
-                                        {{ $faculty->scopeLabel() }}
-                                    </span>
                                 </div>
                             </div>
 
@@ -1257,9 +1636,6 @@
                                                 @endif"
                                          style="width: {{ min(100, round((($currentUnits + $newUnits) / max(1, $maxUnits)) * 100)) }}%">
                                     </div>
-                                </div>
-                                <div class="text-[10px] text-slate-400 mt-0.5">
-                                    +{{ $newUnits }}u this subj.
                                 </div>
                             </div>
 

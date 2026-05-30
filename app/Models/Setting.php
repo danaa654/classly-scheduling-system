@@ -155,6 +155,50 @@ class Setting extends Model
         ];
     }
 
+    /**
+     * Generate a list of valid scheduling time slots from master-grid settings.
+     *
+     * Slots are produced every `slot_duration_minutes` from `day_start` to
+     * `day_end`, with the lunch-break window (12:00-13:00) excluded so no
+     * slot starts or ends inside that window.
+     *
+     * Returns an array of ['value' => 'HH:MM', 'label' => 'g:i A'] maps
+     * ready for <select> options in the Edit Workspace dropdowns.
+     *
+     * @param  bool  $includeLunch  Pass true to keep lunch-break slots.
+     * @return array<int, array{value: string, label: string}>
+     */
+    public static function getTimeSlots(bool $includeLunch = false): array
+    {
+        $bounds      = self::getDayBounds();
+        $slotMinutes = self::getSlotDurationMinutes();
+        $lunchBreak  = self::getLunchBreakTimes();
+
+        $cursor     = \Carbon\Carbon::createFromTimeString($bounds['start']);
+        $dayEnd     = \Carbon\Carbon::createFromTimeString($bounds['end']);
+        $lunchStart = \Carbon\Carbon::createFromTimeString($lunchBreak['start']);
+        $lunchEnd   = \Carbon\Carbon::createFromTimeString($lunchBreak['end']);
+
+        $slots = [];
+
+        while ($cursor->lessThanOrEqualTo($dayEnd)) {
+            $inLunch = ! $includeLunch
+                && $cursor->greaterThanOrEqualTo($lunchStart)
+                && $cursor->lessThan($lunchEnd);
+
+            if (! $inLunch) {
+                $slots[] = [
+                    'value' => $cursor->format('H:i'),
+                    'label' => $cursor->format('g:i A'),
+                ];
+            }
+
+            $cursor->addMinutes($slotMinutes);
+        }
+
+        return $slots;
+    }
+
     public static function normalizeActiveDays(array $days): array
     {
         $normalized = collect($days)

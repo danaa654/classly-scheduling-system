@@ -21,6 +21,7 @@ class NotificationCenter extends Component
     #[On('roomImported')]
     #[On('subjectUpdated')] // Add this for Subjects
     #[On('notify')]
+    #[On('revisionRequestUpdated')] // Fires when a revision request is approved or rejected
     
     public function loadNotifications()
     {
