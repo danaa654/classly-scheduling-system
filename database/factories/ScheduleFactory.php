@@ -13,7 +13,7 @@ class ScheduleFactory extends Factory
 
     public function definition(): array
     {
-        $startHour = $this->faker->numberBetween(8, 16);
+        $startHour = $this->faker->numberBetween(8, 15);
         $startMinute = $this->faker->randomElement([0, 30]);
         $startTime = sprintf('%02d:%02d:00', $startHour, $startMinute);
         $endTime = sprintf('%02d:30:00', $startHour + 1);
@@ -21,13 +21,12 @@ class ScheduleFactory extends Factory
         return [
             'subject_id' => Subject::factory(),
             'room_id' => Room::factory(),
+            'user_id' => null,
+            'faculty_id' => null,  // Can be assigned later
+            'section' => $this->faker->randomElement(['A', 'B', 'C']),
             'day' => $this->faker->randomElement(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']),
             'start_time' => $startTime,
             'end_time' => $endTime,
-            'section' => $this->faker->randomElement(['A', 'B', 'C']),
-            'status' => 'draft',
-            'semester' => 1,
-            'school_year' => '2026-2027',
         ];
     }
 }

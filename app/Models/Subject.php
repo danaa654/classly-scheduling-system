@@ -494,6 +494,24 @@ class Subject extends Model
     }
 
     /**
+ * The faculty preferred for scheduling this subject.
+ * Set via the "Assign Preferred Faculty" modal in Manage Subjects.
+ */
+public function preferredFaculty(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+{
+    return $this->belongsTo(\App\Models\Faculty::class, 'preferred_faculty_id');
+}
+ 
+/**
+ * The room preferred for scheduling this subject.
+ * Set via the "Assign Preferred Room" modal in Manage Subjects.
+ */
+public function preferredRoom(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+{
+    return $this->belongsTo(\App\Models\Room::class, 'preferred_room_id');
+}
+
+    /**
      * Get remaining meeting slots for this subject.
      */
     public function getRemainingMeetings()

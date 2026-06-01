@@ -14,8 +14,9 @@ class RoomFactory extends Factory
         return [
             'room_name' => 'Room ' . $this->faker->numberBetween(101, 999),
             'capacity' => $this->faker->numberBetween(30, 100),
-            'building' => $this->faker->randomElement(['Building A', 'Building B', 'Building C']),
-            'is_available' => true,
+            'type' => $this->faker->randomElement(['Lecture', 'Lab', 'Workshop']),
+            'specialization' => $this->faker->randomElement(['IT', 'CCS', 'ACT', 'GENERAL']),
+            'floor' => $this->faker->randomElement(['Ground', '1st', '2nd', '3rd']),
         ];
     }
 }
