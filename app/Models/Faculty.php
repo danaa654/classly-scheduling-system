@@ -93,6 +93,79 @@ class Faculty extends Model
     }
 
     /**
+     * Calculate total units assigned to this faculty, including unscheduled subjects
+     * Used for pre-assignment validation to check max_units constraint
+     */
+    public function calculateTotalAssignedUnits(): int
+    {
+        return $this->schedules()
+            ->activeTerm()
+            ->with('subject')
+            ->get()
+            ->pluck('subject')
+            ->filter()
+            ->unique('id')
+            ->sum('units') ?? 0;
+    }
+
+    /**
+     * Calculate remaining units available before hitting max_units limit
+     */
+    public function remainingUnitCapacity(): int
+    {
+        $maxUnits = (int) ($this->max_units ?? 21);
+        $assignedUnits = $this->calculateTotalAssignedUnits();
+        return max(0, $maxUnits - $assignedUnits);
+    }
+
+    /**
+     * Check if adding a subject would exceed load
+     */
+    public function canAccommodateSubject(?Subject $subject): bool
+    {
+        if (!$subject) {
+            return false;
+        }
+        
+        $subjectUnits = (int) ($subject->units ?? 0);
+        return ($this->calculateTotalAssignedUnits() + $subjectUnits) <= (int) ($this->max_units ?? 21);
+    }
+
+    /**
+     * Check daily max unit controls (new constraint for intra-day distribution)
+     */
+    public function getUnitsOnDay(string $day): int
+    {
+        return $this->schedules()
+            ->activeTerm()
+            ->where('day', $day)
+            ->whereNotNull('day')
+            ->with('subject')
+            ->get()
+            ->pluck('subject')
+            ->filter()
+            ->unique('id')
+            ->sum('units') ?? 0;
+    }
+
+    /**
+     * Check if faculty has availability window constraints
+     */
+    public function getAvailabilityWindow(): ?array
+    {
+        // Parse the availability JSON field if it exists and contains time-of-day constraints
+        if (!$this->availability) {
+            return null;
+        }
+        
+        if (is_string($this->availability)) {
+            return json_decode($this->availability, true);
+        }
+        
+        return $this->availability;
+    }
+
+    /**
      * Scope to get all approved faculties
      */
     public function scopeApproved($query)

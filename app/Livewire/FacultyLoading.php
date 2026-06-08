@@ -59,6 +59,8 @@ class FacultyLoading extends Component
 
     public array $assignmentRecommendations = [];
 
+    public array $pendingRawSubjectData = [];
+
     protected $listeners = [
         'refreshGrid' => '$refresh',
     ];
@@ -136,9 +138,274 @@ class FacultyLoading extends Component
         $this->activeTab = 'subjects';
     }
 
+    public function initializeRawSubjectAssignment(int $subjectId, string $section = 'A', ?int $facultyId = null): void
+{
+    $subject = Subject::activeTerm()->find($subjectId);
+    
+    if (!$subject) {
+        $this->toast('error', 'Subject no longer exists.');
+        return;
+    }
+    
+    // Store raw subject data for later schedule creation
+    $this->pendingRawSubjectData = [
+        'subject_id' => $subjectId,
+        'section' => trim($section),
+        'year_level' => $subject->year_level ?? 1,
+        'department' => $subject->department,
+        'major' => $subject->major,
+    ];
+    
+    // Pre-select faculty if provided
+    if ($facultyId !== null) {
+        $this->selectedFacultyId = $facultyId;
+    }
+    
+    if (!$this->selectedFacultyId) {
+        $this->toast('error', 'Please select a faculty member first.');
+        $this->pendingRawSubjectData = [];
+        return;
+    }
+    
+    // Validate workload before opening confirmation modal
+    $faculty = Faculty::find($this->selectedFacultyId);
+    if (!$faculty) {
+        $this->toast('error', 'Faculty member not found.');
+        return;
+    }
+    
+    // Check if subject is already assigned to this faculty
+    $existing = Schedule::activeTerm()
+        ->where('subject_id', $subjectId)
+        ->where('faculty_id', $faculty->id)
+        ->first();
+    
+    if ($existing) {
+        $this->toast('warning', "{$subject->subject_code} is already assigned to {$faculty->full_name}.");
+        $this->pendingRawSubjectData = [];
+        return;
+    }
+    
+    // Validate workload
+    $workloadValidation = $this->validatePreAssignmentWorkload($faculty, $subject);
+    
+    if (!$workloadValidation['valid']) {
+        $this->pendingAssignmentWarnings = [[
+            'type' => 'OVERLOAD',
+            'title' => 'Faculty Load Limit Exceeded',
+            'message' => "{$subject->subject_code} ({$subject->units} units) would exceed {$faculty->full_name}'s maximum load of {$workloadValidation['max_units']} units.",
+            'details' => sprintf(
+                "Current load: %d units\nSubject units: %d units\nNew total: %d units\nOverage: %d units",
+                $workloadValidation['current_units'],
+                $workloadValidation['subject_units'],
+                $workloadValidation['new_total'],
+                $workloadValidation['overload']
+            ),
+            'overridable' => $this->canOverrideAssignmentWarnings(Auth::user()),
+        ]];
+        
+        $this->conflictModalOpen = true;
+        $this->toast(
+            $this->canOverrideAssignmentWarnings(Auth::user()) ? 'warning' : 'error',
+            'Assignment needs workload review.'
+        );
+        return;
+    }
+    
+    // No warnings - proceed directly with assignment
+    $this->confirmRawSubjectAssignment();
+}
+
+/**
+ * Validate faculty workload before assignment
+ * Returns detailed metrics for UI and validation
+ */
+private function validatePreAssignmentWorkload(Faculty $faculty, Subject $subject): array
+{
+    $currentUnits = $faculty->calculateTotalAssignedUnits();
+    $subjectUnits = (int) ($subject->units ?? 0);
+    $maxUnits = (int) ($faculty->max_units ?? 21);
+    $newTotal = $currentUnits + $subjectUnits;
+    
+    return [
+        'valid' => $newTotal <= $maxUnits,
+        'current_units' => $currentUnits,
+        'subject_units' => $subjectUnits,
+        'new_total' => $newTotal,
+        'max_units' => $maxUnits,
+        'overload' => max(0, $newTotal - $maxUnits),
+        'remaining' => max(0, $maxUnits - $newTotal),
+    ];
+}
+
+    /**
+     * Approve raw subject assignment from conflict modal (with override capability)
+     * Called when user confirms modal after workload warning
+     * 
+     * This is the critical BRIDGE between the conflict modal and the execution layer.
+     * Without this method, the modal can warn but has no way to approve the assignment.
+     */
+    public function approveRawSubjectAssignmentOverride(): void
+    {
+        $user = Auth::user();
+
+        // GUARD 1: Authorization - only override-capable roles can proceed
+        if (!$this->canOverrideAssignmentWarnings($user)) {
+            $this->toast('error', 'You are not authorized to override assignment warnings.');
+            return;
+        }
+
+        // GUARD 2: Data validation - must have pending raw subject data
+        if (empty($this->pendingRawSubjectData) || !$this->selectedFacultyId) {
+            $this->resetPendingAssignment();
+            $this->toast('error', 'No pending assignment found.');
+            return;
+        }
+
+        // GUARD 3: Subject must still exist (in case it was archived)
+        $subject = Subject::activeTerm()->find($this->pendingRawSubjectData['subject_id'] ?? null);
+        if (!$subject) {
+            $this->resetPendingAssignment();
+            $this->toast('error', 'Subject no longer exists.');
+            return;
+        }
+
+        // GUARD 4: Faculty must still exist
+        $faculty = Faculty::find($this->selectedFacultyId);
+        if (!$faculty) {
+            $this->resetPendingAssignment();
+            $this->toast('error', 'Faculty member no longer exists.');
+            return;
+        }
+
+        // GUARD 5: Authorization check - can this user assign to this faculty?
+        if (!$this->canAssignSubject($user, $faculty, $subject)) {
+            $this->resetPendingAssignment();
+            $this->toast('error', 'Unauthorized assignment.');
+            return;
+        }
+
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        // ALL GUARDS PASSED - Execute assignment with override flag = true
+        // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+        $this->confirmRawSubjectAssignment(overridden: true);
+    }
+
+    /**
+ * Confirm and persist raw subject assignment
+ * Creates new schedule record with NULL spacetime, status = 'faculty_locked'
+ * This bypasses override logic since we're not checking conflicts on unscheduled subjects
+ */
+public function confirmRawSubjectAssignment(bool $overridden = false): void
+{
+    // Validate pending data
+    if (empty($this->pendingRawSubjectData) || !$this->selectedFacultyId) {
+        $this->toast('error', 'Assignment data is missing. Please try again.');
+        return;
+    }
+    
+    $faculty = Faculty::find($this->selectedFacultyId);
+    $subject = Subject::activeTerm()->find($this->pendingRawSubjectData['subject_id'] ?? null);
+    
+    if (!$faculty || !$subject) {
+        $this->toast('error', 'Faculty or subject no longer exists.');
+        $this->resetPendingAssignment();
+        return;
+    }
+    
+    try {
+        DB::transaction(function () use ($faculty, $subject, $overridden) {
+            $period = Setting::getAcademicPeriod();
+            
+            // Step 1: Try to find existing schedule for this subject-section combo
+            $existingSchedule = Schedule::activeTerm()
+                ->where('subject_id', $subject->id)
+                ->where('section', $this->pendingRawSubjectData['section'])
+                ->lockForUpdate()
+                ->first();
+            
+            if ($existingSchedule) {
+                // Step 2a: Use existing schedule (shouldn't happen, but handle gracefully)
+                if ($existingSchedule->faculty_id !== null && (int) $existingSchedule->faculty_id !== (int) $faculty->id) {
+                    throw new \RuntimeException(
+                        "{$subject->subject_code} is already assigned to another faculty."
+                    );
+                }
+                
+                $existingSchedule->update([
+                    'faculty_id' => $faculty->id,
+                    'status' => Schedule::STATUS_FACULTY_LOCKED,
+                ]);
+                
+                $scheduleId = $existingSchedule->id;
+            } else {
+                // Step 2b: Create NEW schedule record with NULL spacetime
+                $newSchedule = Schedule::create([
+                    'subject_id' => $subject->id,
+                    'faculty_id' => $faculty->id,
+                    'section' => $this->pendingRawSubjectData['section'],
+                    'department' => $this->pendingRawSubjectData['department'],
+                    'major' => $this->pendingRawSubjectData['major'],
+                    'year_level' => $this->pendingRawSubjectData['year_level'],
+                    
+                    // ← CRITICAL: Keep these NULL for unscheduled subjects
+                    'day' => null,
+                    'start_time' => null,
+                    'end_time' => null,
+                    'room_id' => null,
+                    
+                    // Status indicates faculty assigned but spacetime pending
+                    'status' => Schedule::STATUS_FACULTY_LOCKED,
+                    
+                    // Academic period (auto-populated by Schedule::booted hook)
+                    'semester' => $period['semester'],
+                    'school_year' => $period['school_year'],
+                    'academic_year' => $period['school_year'],
+                    'workspace_key' => Setting::workspaceKey($period['school_year'], $period['semester']),
+                    'edp_code' => $subject->edp_code,
+                ]);
+                
+                $scheduleId = $newSchedule->id;
+            }
+            
+            // Step 3: Log the action
+            if (method_exists('App\Models\FacultyLog', 'create')) {
+                \App\Models\FacultyLog::create([
+                    'faculty_id' => $faculty->id,
+                    'action' => 'raw_subject_assignment',
+                    'subject_code' => $subject->subject_code,
+                    'description' => "Faculty pre-assigned (unscheduled) to {$subject->subject_code} (raw assignment)",
+                    'performed_by' => Auth::id(),
+                ]);
+            }
+        });
+        
+        // Step 4: Refresh component state OUTSIDE transaction
+        unset($this->selectedFaculty);
+        $this->resetPendingAssignment();
+        
+        $message = "{$subject->subject_code} assigned to {$faculty->full_name} (awaiting auto-generation).";
+        $this->toast(
+            'success',
+            $overridden ? "{$message} Override recorded." : $message
+        );
+    } catch (\RuntimeException $e) {
+        $this->toast('warning', $e->getMessage());
+    } catch (\Throwable $e) {
+        report($e);
+        $this->toast('error', 'Could not create schedule. Subject was not assigned.');
+        \Log::error('Raw subject assignment failed', [
+            'subject_id' => $this->pendingRawSubjectData['subject_id'] ?? null,
+            'faculty_id' => $this->selectedFacultyId,
+            'error' => $e->getMessage(),
+        ]);
+    }
+}
+
     public function closeAssignmentPanel(): void
     {
         $this->scheduleModalOpen = false;
+        $this->conflictModalOpen = false;  // ← CHANGE 3: Add this line
         $this->resetPendingAssignment();
     }
 
@@ -213,49 +480,100 @@ class FacultyLoading extends Component
      * Groups multi-day schedule rows into a single display row per subject-section offering.
      */
     private function groupedAssignedSubjects(): Collection
-    {
-        return $this->assignedSchedules()
-            ->groupBy(fn (Schedule $schedule) => $schedule->subject_id.'::'.($schedule->section ?? 'none')
-            )
-            ->map(function (Collection $group) {
-                /** @var Schedule $first */
-                $first = $group->first();
-                $subject = $first->subject;
-                $room = $first->room;
-
-                $scheduleLines = $group
+{
+    return $this->assignedSchedules()
+        ->groupBy(fn (Schedule $schedule) => $schedule->subject_id.'::'.($schedule->section ?? 'none')
+        )
+        ->map(function (Collection $group) {
+            /** @var Schedule $first */
+            $first = $group->first();
+            $subject = $first->subject;
+            $room = $first->room;
+ 
+            // ================================================================
+            // CRITICAL FIX: Only include schedules with COMPLETE spacetime
+            // ================================================================
+            $fullyScheduledRecords = $group->filter(fn (Schedule $s) => 
+                filled($s->day) && 
+                filled($s->start_time) && 
+                filled($s->end_time) &&
+                filled($s->room_id)
+            );
+ 
+            // Check if ANY schedule in this group is a pre-assignment (faculty assigned, no spacetime)
+            $preAssignedRecords = $group->filter(fn (Schedule $s) =>
+                filled($s->faculty_id) && (
+                    blank($s->day) || 
+                    blank($s->start_time) || 
+                    blank($s->end_time) || 
+                    blank($s->room_id)
+                )
+            );
+ 
+            $isPreAssigned = $preAssignedRecords->isNotEmpty();
+            $hasFullyScheduled = $fullyScheduledRecords->isNotEmpty();
+ 
+            // ================================================================
+            // Build schedule display string
+            // ================================================================
+            if ($hasFullyScheduled) {
+                // Use only the valid schedules for display
+                $scheduleLines = $fullyScheduledRecords
                     ->map(fn (Schedule $s) => trim(
-                        ($s->day ?? 'N/A')
+                        ($s->day ?? 'TBA')
                         .' / '
-                        .Carbon::parse($s->start_time)->format('h:i A')
+                        .(\Carbon\Carbon::parse($s->start_time)->format('h:i A') ?? '--:-- --')
                         .' - '
-                        .Carbon::parse($s->end_time)->format('h:i A')
-                    )
-                    )
+                        .(\Carbon\Carbon::parse($s->end_time)->format('h:i A') ?? '--:-- --')
+                    ))
                     ->unique()
                     ->values()
                     ->implode('<br>');
-
-                $department = Department::normalizeCode($first->department ?? $subject?->department) ?? 'N/A';
-                $major = $first->major ?? $subject?->major ?? 'N/A';
-                $year = $first->year_level ?? $subject?->year_level ?? '?';
-                $section = $first->section ?? $subject?->section ?? 'N/A';
-
-                return [
-                    'subject_code' => $subject?->subject_code ?? 'N/A',
-                    'edp_code' => $subject?->edp_code ?? 'No EDP',
-                    'description' => $subject?->description ?? 'Untitled subject',
-                    'group' => "{$department} / {$major} / Y{$year} / {$section}",
-                    'room' => $room?->room_name ?? 'No room',
-                    'schedule' => $scheduleLines,
-                    'units' => $subject?->units ?? 0,
-                    'type' => $subject?->type ?? 'N/A',
-                    'schedule_ids' => $group->pluck('id')->all(),
-                    'first_schedule_id' => $first->id,
-                ];
-            })
-            ->values();
-    }
+            } elseif ($isPreAssigned) {
+                // This is a pre-assigned subject awaiting auto-generation
+                // Use a marker string that the blade template will recognize
+                $scheduleLines = '<span class="text-amber-500 font-medium italic">Unscheduled Placeholder</span>';
+            } else {
+                // No valid schedules at all
+                $scheduleLines = '<span class="text-slate-500 italic">Not Assigned</span>';
+            }
+ 
+            $department = Department::normalizeCode($first->department ?? $subject?->department) ?? 'N/A';
+            $major = $first->major ?? $subject?->major ?? 'N/A';
+            $year = $first->year_level ?? $subject?->year_level ?? '?';
+            $section = $first->section ?? $subject?->section ?? 'N/A';
+ 
+            // If pre-assigned but no room yet, use fallback
+            $displayRoom = $room?->room_name ?? 'No room';
+            if ($isPreAssigned && !$hasFullyScheduled) {
+                $displayRoom = 'No room'; // Will be converted to "TBA" in blade
+            }
+ 
+            return [
+                'subject_code'      => $subject?->subject_code ?? 'N/A',
+                'edp_code'          => $subject?->edp_code ?? 'No EDP',
+                'description'       => $subject?->description ?? 'Untitled subject',
+                'group'             => "{$department} / {$major} / Y{$year} / {$section}",
+                'room'              => $displayRoom,
+                'schedule'          => $scheduleLines,
+                'units'             => $subject?->units ?? 0,
+                'type'              => $subject?->type ?? 'N/A',
+                'schedule_ids'      => $group->pluck('id')->all(),
+                'first_schedule_id' => $first->id,
+                'is_pre_assigned'   => $isPreAssigned,           // Optional: for extra safety
+                'is_fully_scheduled'=> $hasFullyScheduled,       // Optional: for extra safety
+            ];
+        })
+        ->values();
+}
+ 
+/**
+ * OPTIONAL: If you want to add a helper method for easier blade-side checks:
+ */
+public function isScheduleUnscheduled(string $scheduleHtml): bool
+{
+    return str_contains($scheduleHtml, 'Unscheduled Placeholder');
+}
 
     // ============================================================
     // DEPARTMENT-LEVEL SUMMARY (State A — no faculty selected)
@@ -274,8 +592,7 @@ class FacultyLoading extends Component
     {
         $user = Auth::user();
 
-        // Resolve the active department scope for the filter.
-        // When the user is a dean/oic we scope to their department automatically.
+        // Resolve the active department scope for the filter
         $activeDepartment = null;
 
         if ($this->departmentFilter !== 'all') {
@@ -284,45 +601,82 @@ class FacultyLoading extends Component
             $activeDepartment = Department::normalizeCode($user->department);
         }
 
-        // ── Total schedule rows (each unique subject-section-day slot counts as one) ──
-        $baseQuery = $this->activeScheduleQuery()
-            ->whereIn('status', [
-                Schedule::STATUS_PARTIAL,
-                Schedule::STATUS_FACULTY_ASSIGNED,
-                Schedule::STATUS_FINALIZED,
-            ])
-            ->whereHas('subject');
+        // ════════════════════════════════════════════════════════════════════════════════════
+        // FACULTY-FIRST: Query SUBJECTS table with LEFT JOIN to SCHEDULES
+        // This counts ALL subjects in the system, not just those with schedule rows
+        // ════════════════════════════════════════════════════════════════════════════════════
+        
+        // Get active period
+        $period = Setting::getAcademicPeriod();
+        $semester = Setting::normalizeSemester($period['semester']);
+        $schoolYear = $period['school_year'];
+        $workspaceKey = Setting::workspaceKey($schoolYear, $semester);
 
+        // Base query: All subjects in active term
+        $baseQuery = Subject::query()
+            ->where('subjects.semester', $semester)
+            ->where(function (Builder $q) use ($schoolYear, $workspaceKey) {
+                $q->where('subjects.workspace_key', $workspaceKey)
+                    ->orWhere('subjects.school_year', $schoolYear)
+                    ->orWhere('subjects.academic_year', $schoolYear);
+            })
+            ->where('subjects.is_archived', 0)
+            ->leftJoin('schedules', 'subjects.id', '=', 'schedules.subject_id')
+            ->select('subjects.id', 'subjects.*', 'schedules.faculty_id')
+            ->distinct();
+
+        // ────────────────────────────────────────────────────────────────────────────────────
+        // Apply role-based visibility
+        // ────────────────────────────────────────────────────────────────────────────────────
+        if ($user->role === 'associate_dean') {
+            $baseQuery->where('subjects.type', 'Minor');
+        } elseif (in_array($user->role, ['dean', 'oic'], true)) {
+            $baseQuery->where(function (Builder $visibility) use ($user) {
+                $visibility->where('subjects.type', 'Minor')
+                    ->orWhere(function (Builder $majorQuery) use ($user) {
+                        $majorQuery->where('subjects.type', 'Major')
+                            ->whereIn('subjects.department', $this->departmentAliases($user->department));
+                    });
+            });
+        }
+
+        // ────────────────────────────────────────────────────────────────────────────────────
+        // Apply department filter
+        // ────────────────────────────────────────────────────────────────────────────────────
         if ($activeDepartment) {
             $aliases = $this->departmentAliases($activeDepartment);
             $baseQuery->where(function (Builder $q) use ($aliases) {
-                $q->whereIn('department', $aliases)
-                    ->orWhereHas('subject', fn (Builder $sq) => $sq->whereIn('department', $aliases));
+                $q->whereIn('subjects.department', $aliases)
+                    ->orWhereIn('schedules.department', $aliases);
             });
-        } elseif ($user->role === 'associate_dean') {
-            $baseQuery->whereHas('subject', fn (Builder $sq) => $sq->where('type', 'Minor'));
         }
 
-        $totalSubjects = (clone $baseQuery)->count();
+        // ────────────────────────────────────────────────────────────────────────────────────
+        // Count metrics
+        // ────────────────────────────────────────────────────────────────────────────────────
+        
+        // Total subjects (all)
+        $allResults = (clone $baseQuery)->get();
+        $totalSubjects = $allResults->pluck('id')->unique()->count();
 
-        // ── Assigned (has a faculty_id) ──
-        $assignedSubjects = (clone $baseQuery)->whereNotNull('faculty_id')->count();
+        // Assigned subjects (has faculty_id in any schedule)
+        $assignedSubjects = $allResults
+            ->filter(fn ($row) => $row->faculty_id !== null)
+            ->pluck('id')
+            ->unique()
+            ->count();
 
-        // ── Left (no faculty_id) ──
+        // Left (no faculty assigned)
         $subjectsLeft = $totalSubjects - $assignedSubjects;
 
-        // ── Faculty Processed ──
-        // Departmental staff assigned here OR GenEd/Cross-dept staff assigned here.
-        $assignedFacultyIds = (clone $baseQuery)
-            ->whereNotNull('faculty_id')
+        // Faculty Processed (unique faculty assigned to these subjects)
+        $assignedFacultyIds = $allResults
+            ->filter(fn ($row) => $row->faculty_id !== null)
             ->pluck('faculty_id')
             ->filter()
             ->unique()
             ->values();
 
-        // Count of distinct faculty in that id set who are either:
-        //   (a) from the active department, OR
-        //   (b) GenEd / Cross-Department scope (institution-wide)
         $facultyProcessedQuery = Faculty::query()
             ->whereIn('id', $assignedFacultyIds);
 
@@ -403,6 +757,124 @@ class FacultyLoading extends Component
     // ASSIGNMENT ACTIONS
     // ============================================================
 
+    public function assignUnscheduledSubject(int $subjectId, ?string $section = null): void
+    {
+        if (!$this->selectedFacultyId) {
+            $this->toast('error', 'Please select a faculty member first.');
+            return;
+        }
+
+        $faculty = Faculty::find($this->selectedFacultyId);
+        if (!$faculty) {
+            $this->toast('error', 'Faculty not found.');
+            return;
+        }
+
+        $subject = Subject::query()
+            ->where('subjects.semester', Setting::normalizeSemester(Setting::getAcademicPeriod()['semester']))
+            ->find($subjectId);
+
+        if (!$subject) {
+            $this->toast('error', 'Subject not found.');
+            return;
+        }
+
+        // Validate faculty eligibility BEFORE attempting to find/create schedule
+        $validation = $this->validatePreAssignmentComplete($faculty, $subject);
+        
+        if (!$validation['eligible']) {
+            $this->openAssignmentFailure(null, $faculty, $validation['errors']);
+            $this->toast('error', 'Assignment blocked by faculty eligibility rules.');
+            return;
+        }
+
+        // Find or create a schedule row for this unscheduled subject
+        $schedule = $this->findOrCreateScheduleForUnscheduledSubject($subject, $section);
+
+       if (!$schedule) {
+    $lastError = \Log::channel('single')->getHandlers()[0]->getLevel();
+    $this->toast('error', 'Could not create schedule: Check logs. ' . ($schedule ? '' : 'Schedule null'));
+    return;
+}
+
+        // Check for feasibility warnings (no time conflicts since spacetime is NULL)
+        if (!$validation['feasible']) {
+            $this->pendingAssignmentScheduleId = $schedule->id;
+            $this->pendingAssignmentWarnings = $validation['warnings'];
+            $this->assignmentRecommendations = [];
+            $this->conflictModalOpen = true;
+            
+            $this->toast(
+                $this->canOverrideAssignmentWarnings(Auth::user()) ? 'warning' : 'error',
+                'Assignment needs feasibility review (load capacity check).'
+            );
+            return;
+        }
+
+        // All good - persist the pre-assignment
+        $this->persistPreAssignment($schedule, $faculty);
+    }
+
+    private function findOrCreateScheduleForUnscheduledSubject(Subject $subject, ?string $section = null): ?Schedule
+{
+    $period = Setting::getAcademicPeriod();
+    $semester = Setting::normalizeSemester($period['semester']);
+    $schoolYear = $period['school_year'];
+    $workspaceKey = Setting::workspaceKey($schoolYear, $semester);
+    
+    // Try to find existing unscheduled row
+    $existing = Schedule::query()
+        ->where('subject_id', $subject->id)
+        ->where('semester', $semester)
+        ->where('school_year', $schoolYear)
+        ->where('workspace_key', $workspaceKey)
+        ->where(function (Builder $q) {
+            $q->whereNull('day')
+                ->orWhereNull('start_time')
+                ->orWhereNull('end_time')
+                ->orWhereNull('room_id');
+        })
+        ->where(function (Builder $q) {
+            $q->where('status', Schedule::STATUS_FACULTY_LOCKED)
+                ->orWhere('status', Schedule::STATUS_PENDING_GENERATION);
+        })
+        ->first();
+
+    if ($existing && !$existing->faculty_id) {
+        return $existing;
+    }
+
+    // Create new one
+    $sectionValue = $section ?? $subject->section ?? 'A';
+
+    try {
+        $newSchedule = Schedule::create([
+            'subject_id'    => $subject->id,
+            'faculty_id'    => null,
+            'room_id'       => null,
+            'day'           => null,
+            'start_time'    => null,
+            'end_time'      => null,
+            'section'       => $sectionValue,
+            'department'    => $subject->department,
+            'major'         => $subject->major,
+            'year_level'    => $subject->year_level,
+            'semester'      => $semester,
+            'school_year'   => $schoolYear,
+            'workspace_key' => $workspaceKey,
+            'status'        => Schedule::STATUS_PENDING_GENERATION,
+        ]);
+
+        return $newSchedule;
+    } catch (\Throwable $e) {
+    \Log::error('Schedule creation failed: ' . $e->getMessage());
+    \Log::error('Exception: ' . get_class($e));
+    \Log::error('Stack: ' . $e->getTraceAsString());
+    report($e);
+    return null;
+}
+}
+
     public function assignSubject($scheduleId)
     {
         if (! $this->selectedFacultyId) {
@@ -446,15 +918,44 @@ class FacultyLoading extends Component
             return;
         }
 
-        if (! $this->canAssignSubject(Auth::user(), $faculty, $schedule->subject)) {
-            $this->openAssignmentFailure($schedule, $faculty, [
-                $this->eligibilityWarning($faculty, $schedule->subject, $schedule),
-            ]);
-            $this->toast('error', 'Assignment blocked by faculty eligibility rules.');
+        $validation = $this->validatePreAssignmentComplete($faculty, $schedule->subject);
 
+        if (!$validation['eligible']) {
+            $this->openAssignmentFailure($schedule, $faculty, $validation['errors']);
+            $this->toast('error', 'Assignment blocked by faculty eligibility rules.');
             return;
         }
 
+        // Check if subject has spacetime assigned
+        $isUnscheduled = $schedule->day === null 
+            || $schedule->start_time === null 
+            || $schedule->end_time === null 
+            || $schedule->room_id === null;
+
+        // For UNSCHEDULED subjects, use feasibility warnings only
+        // For SCHEDULED subjects, check for conflicts
+       if ($isUnscheduled) {
+    $warnings = $this->assignmentWarnings($faculty, $schedule);
+    
+    if ($warnings !== []) {
+        $this->pendingAssignmentScheduleId = $schedule->id;
+        $this->pendingAssignmentWarnings = $warnings;
+        $this->assignmentRecommendations = $this->buildAssignmentRecommendations($faculty, $schedule);
+        $this->conflictModalOpen = true;
+        
+        $this->toast(
+            $this->canOverrideAssignmentWarnings(Auth::user()) ? 'warning' : 'error',
+            'Assignment needs feasibility review.'
+        );
+        return;
+    }
+    
+    // No warnings for unscheduled - proceed with assignment
+    $this->persistAssignment($schedule, $faculty);
+    return;
+}
+
+        // For SCHEDULED subjects, continue with existing conflict checks
         $warnings = $this->assignmentWarnings($faculty, $schedule);
 
         if ($warnings !== []) {
@@ -474,6 +975,13 @@ class FacultyLoading extends Component
 
         $this->persistAssignment($schedule, $faculty);
     }
+
+    /**
+     * Persist pre-assignment state for unscheduled subjects
+     * Sets faculty_id and status to 'faculty_locked' or 'pending_generation'
+     * Leaves day, start_time, end_time, room_id as NULL for future auto-generation
+     */
+      
 
     public function confirmAssignmentOverride(): void
     {
@@ -784,31 +1292,64 @@ class FacultyLoading extends Component
     private function persistAssignment(Schedule $schedule, Faculty $faculty, bool $overridden = false): void
     {
         try {
-            $subjectCode = $schedule->subject->subject_code;
-            $scheduleId = $schedule->id;
-
-            DB::transaction(function () use ($scheduleId, $faculty) {
-                $fresh = $this->activeScheduleQuery()
-                    ->lockForUpdate()
-                    ->findOrFail($scheduleId);
-
+            DB::transaction(function () use ($schedule, $faculty, $overridden) {
+                // Re-fetch with lock to prevent race conditions
+                $fresh = Schedule::lockForUpdate()->find($schedule->id);
+                
+                if (!$fresh) {
+                    throw new \RuntimeException('Schedule was deleted during assignment.');
+                }
+                
+                // Check if already assigned to another faculty
                 if ($fresh->faculty_id !== null && (int) $fresh->faculty_id !== (int) $faculty->id) {
                     throw new \RuntimeException(
-                        'This schedule was assigned to another faculty member just now. Please refresh and try again.'
+                        "{$fresh->subject?->subject_code} is already assigned to another faculty."
                     );
                 }
-
+                
+                $subjectCode = $fresh->subject?->subject_code ?? 'Unknown Subject';
+                
+                // Determine assignment status
+                // If spacetime is NULL (unscheduled), use 'faculty_locked'
+                // If spacetime is set (scheduled), use 'partial'
+                $isUnscheduled = $fresh->day === null 
+                    || $fresh->start_time === null 
+                    || $fresh->end_time === null 
+                    || $fresh->room_id === null;
+                
+                $newStatus = $isUnscheduled 
+                    ? Schedule::STATUS_FACULTY_LOCKED
+                    : Schedule::STATUS_PARTIAL;
+                
+                // Update the schedule with faculty_id and status
                 $fresh->update([
                     'faculty_id' => $faculty->id,
-                    'status'     => Schedule::STATUS_PARTIAL,
+                    'status'     => $newStatus,
                 ]);
+                
+                // Log the assignment action (if FacultyLog model exists)
+                if (method_exists('App\Models\FacultyLog', 'create')) {
+                    \App\Models\FacultyLog::create([
+                        'faculty_id' => $faculty->id,
+                        'action' => $isUnscheduled ? 'pre_assignment' : 'assignment',
+                        'subject_code' => $subjectCode,
+                        'description' => $isUnscheduled
+                            ? "Faculty pre-assigned (unscheduled) to {$subjectCode}"
+                            : "Faculty assigned to {$subjectCode}",
+                        'performed_by' => Auth::id(),
+                    ]);
+                }
             });
 
-            $this->resetPendingAssignment();
+            // Refresh component state OUTSIDE transaction
             unset($this->selectedFaculty);
-
-            $message = "{$subjectCode} assigned to {$faculty->full_name} successfully.";
-            $this->toast('success', $overridden ? "{$message} Override recorded." : $message);
+            $this->resetPendingAssignment();
+            
+            $message = "{$schedule->subject?->subject_code} assigned to {$faculty->full_name}.";
+            $this->toast(
+                'success', 
+                $overridden ? "{$message} Override recorded." : $message
+            );
         } catch (\RuntimeException $exception) {
             $this->toast('warning', $exception->getMessage());
         } catch (\Throwable $exception) {
@@ -820,8 +1361,80 @@ class FacultyLoading extends Component
     private function assignmentWarnings(Faculty $faculty, Schedule $schedule): array
     {
         $warnings = [];
-        $startTime = Carbon::parse($schedule->start_time)->format('H:i:s');
-        $endTime = Carbon::parse($schedule->end_time)->format('H:i:s');
+        $overloadFlagged = false;
+        $conflictService = app(ScheduleConflictService::class);
+
+        // ════════════════════════════════════════════════════════════════════════════════════
+        // OPTIMIZATION: Skip time/room/section conflicts if spacetime is NULL
+        // These checks are only meaningful for SCHEDULED subjects
+        // ════════════════════════════════════════════════════════════════════════════════════
+        $isUnscheduled = $schedule->day === null 
+            || $schedule->start_time === null 
+            || $schedule->end_time === null 
+            || $schedule->room_id === null;
+
+        // ────────────────────────────────────────────────────────────────────────────────────
+        // ELIGIBLE CHECK (applies to both scheduled and unscheduled)
+        // ────────────────────────────────────────────────────────────────────────────────────
+        if (! $schedule->subject) {
+            return $warnings;
+        }
+
+        if (! $this->canAssignSubject(Auth::user(), $faculty, $schedule->subject)) {
+            $warnings[] = $this->eligibilityWarning($faculty, $schedule->subject, $schedule);
+        }
+
+        // ────────────────────────────────────────────────────────────────────────────────────
+        // SECTION CONFLICT CHECK (only if scheduled)
+        // ────────────────────────────────────────────────────────────────────────────────────
+        if (! $isUnscheduled) {
+            $sectionConflict = $conflictService->checkSectionConflict(
+                $schedule->subject,
+                (string) $schedule->day,
+                Carbon::parse($schedule->start_time)->format('H:i:s'),
+                Carbon::parse($schedule->end_time)->format('H:i:s'),
+                $schedule->id,
+                $schedule->room
+            );
+
+            if (($sectionConflict['status'] ?? true) === false) {
+                $warnings[] = $this->warningFromConflict(
+                    $sectionConflict,
+                    $faculty,
+                    $schedule,
+                    'SECTION_CONFLICT',
+                    'Student Group Conflict',
+                    'The student group already has a class during this time.'
+                );
+            }
+        }
+
+        // ────────────────────────────────────────────────────────────────────────────────────
+        // OVERLOAD & FEASIBILITY CHECKS (applies to both)
+        // ────────────────────────────────────────────────────────────────────────────────────
+        foreach ($this->assignmentWarningsForFeasibility($faculty, $schedule, $isUnscheduled) as $warning) {
+            if (($warning['type'] ?? '') === 'OVERLOAD') {
+                if ($overloadFlagged) {
+                    continue;
+                }
+                $overloadFlagged = true;
+            }
+
+            if (! collect($warnings)->contains(fn (array $existing) => ($existing['message'] ?? '') === ($warning['message'] ?? ''))) {
+                $warnings[] = $warning;
+            }
+        }
+
+        return collect($warnings)->unique(fn (array $warning) => ($warning['type'] ?? '').'|'.($warning['message'] ?? ''))->values()->all();
+    }
+
+    /**
+     * Internal helper: Extract overload/feasibility warnings separately from time-based warnings
+     * @param bool $isUnscheduled If true, skip faculty/room conflict checks (spacetime is NULL)
+     */
+    private function assignmentWarningsForFeasibility(Faculty $faculty, Schedule $schedule, bool $isUnscheduled): array
+    {
+        $warnings = [];
         $assignedSchedules = $this->activeScheduleQuery()
             ->where('faculty_id', $faculty->id)
             ->with(['subject', 'room'])
@@ -870,6 +1483,18 @@ class FacultyLoading extends Component
             ];
         }
 
+        // ════════════════════════════════════════════════════════════════════════════════════
+        // TIME/ROOM/FACULTY CONFLICTS ONLY IF SCHEDULED
+        // ════════════════════════════════════════════════════════════════════════════════════
+        if ($isUnscheduled) {
+            return $warnings;  // Skip conflict checks; spacetime is still NULL
+        }
+
+        // ────────────────────────────────────────────────────────────────────────────────────
+        // Time-based conflict checks (only for SCHEDULED subjects)
+        // ────────────────────────────────────────────────────────────────────────────────────
+        $startTime = Carbon::parse($schedule->start_time)->format('H:i:s');
+        $endTime = Carbon::parse($schedule->end_time)->format('H:i:s');
         $conflictService = app(ScheduleConflictService::class);
 
         $facultyConflict = $conflictService->checkFacultyConflict(
@@ -1265,13 +1890,14 @@ class FacultyLoading extends Component
     }
 
     private function resetPendingAssignment(): void
-    {
-        $this->conflictModalOpen          = false;
-        $this->pendingAssignmentScheduleId = null;
-        $this->pendingAssignmentWarnings  = [];
-        $this->pendingAssignmentGroupIds  = [];
-        $this->assignmentRecommendations  = [];
-    }
+{
+    $this->pendingAssignmentScheduleId = null;
+    $this->pendingAssignmentWarnings = [];
+    $this->pendingAssignmentGroupIds = [];
+    $this->pendingRawSubjectData = [];
+    $this->assignmentRecommendations = [];
+    $this->conflictModalOpen = false;
+}
 
     // ============================================================
     // REMOVE SUBJECT
@@ -1492,6 +2118,191 @@ class FacultyLoading extends Component
             ->every(fn (array $warning) => (bool) ($warning['overridable'] ?? false));
     }
 
+    private function validatePreAssignmentFeasibility(Faculty $faculty, Subject $subject): array
+    {
+        $warnings = [];
+        
+        // STEP 1: Calculate current unit load
+        $currentSchedules = Schedule::query()
+            ->where('faculty_id', $faculty->id)
+            ->activeTerm()
+            ->with('subject')
+            ->get();
+        
+        $assignedSubjects = $currentSchedules
+            ->pluck('subject')
+            ->filter()
+            ->unique('id')
+            ->values();
+        
+        $currentUnits = (int) $assignedSubjects->sum('units');
+        $subjectUnits = (int) ($subject->units ?? 0);
+        $maxUnits = (int) ($faculty->max_units ?? 21);
+        $newTotal = $currentUnits + $subjectUnits;
+        
+        // STEP 2: Check weekly unit load (max_units constraint)
+        $metrics = [
+            'current_units' => $currentUnits,
+            'subject_units' => $subjectUnits,
+            'new_total' => $newTotal,
+            'max_units' => $maxUnits,
+            'overload_units' => max(0, $newTotal - $maxUnits),
+            'remaining_units' => max(0, $maxUnits - $newTotal),
+        ];
+        
+        if ($newTotal > $maxUnits) {
+            $overloadBy = $newTotal - $maxUnits;
+            $warnings[] = [
+                'type' => 'OVERLOAD',
+                'title' => 'Unit Load Exceeded',
+                'message' => "Assigning {$subject->subject_code} ({$subjectUnits} units) to {$faculty->full_name} "
+                    . "would exceed their max load of {$maxUnits} units by {$overloadBy} unit(s). "
+                    . "Current: {$currentUnits} units, New total: {$newTotal} units.",
+                'overridable' => true,
+            ];
+        }
+        
+        // STEP 3: Check daily distribution feasibility
+        $settings = Setting::getScheduleSettings();
+        $activeDays = $settings['active_days'] ?? [];
+        $maxDailyUnits = (int) ceil($maxUnits / max(1, count($activeDays)));
+        
+        $dailyDistribution = [];
+        foreach ($activeDays as $day) {
+            $dayUnits = $currentSchedules
+                ->filter(fn (Schedule $s) => $s->day === $day)
+                ->pluck('subject')
+                ->filter()
+                ->unique('id')
+                ->sum('units');
+            
+            $dailyDistribution[$day] = [
+                'units' => (int) $dayUnits,
+                'available' => max(0, $maxDailyUnits - (int) $dayUnits),
+            ];
+        }
+        
+        $hasOptimalDay = collect($dailyDistribution)
+            ->contains(fn ($day) => $day['available'] >= $subjectUnits);
+        
+        if (!$hasOptimalDay && count($activeDays) > 0) {
+            $optimalDays = collect($dailyDistribution)
+                ->filter(fn ($day) => $day['available'] > 0)
+                ->keys()
+                ->implode(', ');
+            
+            if ($optimalDays) {
+                $warnings[] = [
+                    'type' => 'SUBOPTIMAL_DISTRIBUTION',
+                    'title' => 'Daily Distribution Warning',
+                    'message' => "For optimal daily load balance, consider scheduling {$subject->subject_code} "
+                        . "on: {$optimalDays}. These days have the most available capacity.",
+                    'overridable' => true,
+                ];
+            }
+        }
+        
+        $canAssign = collect($warnings)
+            ->filter(fn ($w) => !($w['overridable'] ?? true))
+            ->isEmpty();
+        
+        return [
+            'can_assign' => $canAssign,
+            'warnings' => $warnings,
+            'metrics' => $metrics,
+            'daily_distribution' => $dailyDistribution,
+        ];
+    }
+
+        private function createInitialScheduleRow(Subject $subject): Schedule
+    {
+        $period = Setting::getAcademicPeriod();
+        
+        return Schedule::create([
+            'subject_id'  => $subject->id,
+            'department'  => $subject->department,
+            'major'       => $subject->major,
+            'year_level'  => $subject->year_level,
+            'section'     => $subject->section,
+            'semester'    => $period['semester'],
+            'school_year' => $period['school_year'],
+            'workspace_key' => $period['workspace_key'],
+            // Spacetime fields explicitly NULL for pre-assignment
+            'room_id'     => null,
+            'faculty_id'  => null,
+            'day'         => null,
+            'start_time'  => null,
+            'end_time'    => null,
+            'status'      => Schedule::STATUS_PENDING_GENERATION,
+        ]);
+    }
+        /**
+     * Validate subject eligibility BEFORE spacetime assignment
+     * (existing validation + pre-assignment specific checks)
+     */
+    private function validateFacultySubjectEligibility(Faculty $faculty, Subject $subject): array
+    {
+        $errors = [];
+        
+        // CHECK 1: Faculty eligibility (department, scope, minor rules)
+        if (!$faculty->isEligibleForSubject($subject)) {
+            $errors[] = [
+                'type' => 'FACULTY_INELIGIBLE',
+                'title' => 'Faculty Eligibility Mismatch',
+                'message' => $this->eligibilityWarning($faculty, $subject)['message'],
+                'overridable' => false,
+            ];
+        }
+        
+        // CHECK 2: Duplicate subject assignment
+        $alreadyAssigned = $faculty->schedules()
+            ->activeTerm()
+            ->where('subject_id', $subject->id)
+            ->exists();
+        
+        if ($alreadyAssigned) {
+            $errors[] = [
+                'type' => 'DUPLICATE_SUBJECT',
+                'title' => 'Subject Already Assigned',
+                'message' => "{$faculty->full_name} is already assigned to {$subject->subject_code}.",
+                'overridable' => false,
+            ];
+        }
+        
+        return [
+            'errors' => $errors,
+            'warnings' => [],
+        ];
+    }
+
+    /**
+     * Comprehensive pre-assignment validation wrapper
+     * Combines eligibility + feasibility checks
+     */
+     private function validatePreAssignmentComplete(Faculty $faculty, Subject $subject): array
+    {
+        $eligibilityErrors = $this->validateFacultySubjectEligibility($faculty, $subject);
+        
+        if (!empty($eligibilityErrors['errors'])) {
+            return [
+                'eligible' => false,
+                'feasible' => false,
+                'errors' => $eligibilityErrors['errors'],
+                'warnings' => [],
+                'metrics' => [],
+            ];
+        }
+        
+        $feasibility = $this->validatePreAssignmentFeasibility($faculty, $subject);
+        
+        return [
+            'eligible' => true,
+            'feasible' => $feasibility['can_assign'],
+            'errors' => [],
+            'warnings' => $feasibility['warnings'],
+            'metrics' => $feasibility['metrics'] ?? [],
+        ];
+    }
     // ============================================================
     // QUERY BUILDERS
     // ============================================================
@@ -1594,182 +2405,274 @@ class FacultyLoading extends Component
     }
 
     private function getAvailableSubjects()
-    {
-        $query = $this->activeScheduleQuery()
-            ->with(['subject', 'room', 'faculty'])
-            ->whereIn('status', [
-                Schedule::STATUS_PARTIAL,
-                Schedule::STATUS_FACULTY_ASSIGNED,
-                Schedule::STATUS_FINALIZED,
-            ])
-            ->whereHas('subject');
+{
+    $user = Auth::user();
+    
+    // Get the active academic period
+    $period = Setting::getAcademicPeriod();
+    $semester = Setting::normalizeSemester($period['semester']);
+    $schoolYear = $period['school_year'];
+    $workspaceKey = Setting::workspaceKey($schoolYear, $semester);
+    
+    // ════════════════════════════════════════════════════════════════════════════════════
+    // FACULTY-FIRST QUERY: Start from SUBJECTS table with LEFT JOIN to SCHEDULES
+    // This ensures ALL subjects appear, even without a schedule row (NULL spacetime)
+    // Uses same logic as Subject::forWorkspace() scope to capture ALL subjects
+    // ════════════════════════════════════════════════════════════════════════════════════
+    $query = Subject::query()
+        // Apply same conditions as Subject::forWorkspace() scope
+        ->where('subjects.semester', $semester)
+        ->where(function (Builder $q) use ($schoolYear, $workspaceKey) {
+            $q->where('subjects.workspace_key', $workspaceKey)
+                ->orWhere('subjects.school_year', $schoolYear)
+                ->orWhere('subjects.academic_year', $schoolYear);
+        })
+        ->where('subjects.is_archived', 0)
+        // NOW apply the joins
+        ->leftJoin('schedules', function ($join) {
+            $join->on('subjects.id', '=', 'schedules.subject_id');
+        })
+        ->leftJoin('faculties', 'schedules.faculty_id', '=', 'faculties.id')
+        ->leftJoin('rooms', 'schedules.room_id', '=', 'rooms.id')
+        ->select(
+            'subjects.id as subject_id',
+            'subjects.*',
+            'schedules.id as schedule_id',
+            'schedules.room_id',
+            'schedules.faculty_id',
+            'schedules.section as schedule_section',
+            'schedules.day',
+            'schedules.start_time',
+            'schedules.end_time',
+            'schedules.status as schedule_status',
+            'schedules.department as schedule_department',
+            'schedules.major as schedule_major',
+            'schedules.year_level as schedule_year_level',
+            'faculties.full_name as faculty_name',
+            'rooms.room_name',
+            'rooms.id as room_id'
+        )
+        ->distinct();
 
-        if ($this->showUnassignedOnly) {
-            $query->whereNull('faculty_id');
-        }
-
-        $user = Auth::user();
-
-        $query->whereHas('subject', function (Builder $subjectQuery) use ($user) {
-            if ($user->role === 'associate_dean') {
-                $subjectQuery->where('type', 'Minor');
-
-                return;
-            }
-
-            if (in_array($user->role, ['dean', 'oic'], true)) {
-                $subjectQuery->where(function (Builder $visibility) use ($user) {
-                    $visibility->where('type', 'Minor')
-                        ->orWhere(function (Builder $majorQuery) use ($user) {
-                            $majorQuery->where('type', 'Major')
-                                ->whereIn('department', $this->departmentAliases($user->department));
-                        });
+    // ────────────────────────────────────────────────────────────────────────────────────
+    // ROLE-BASED VISIBILITY (dean/oic/associate_dean can only see their scope)
+    // ────────────────────────────────────────────────────────────────────────────────────
+    if ($user->role === 'associate_dean') {
+        $query->where('subjects.type', 'Minor');
+    } elseif (in_array($user->role, ['dean', 'oic'], true)) {
+        $query->where(function (Builder $visibility) use ($user) {
+            $visibility->where('subjects.type', 'Minor')
+                ->orWhere(function (Builder $majorQuery) use ($user) {
+                    $majorQuery->where('subjects.type', 'Major')
+                        ->whereIn('subjects.department', $this->departmentAliases($user->department));
                 });
-            }
         });
-
-        if ($this->subjectDepartmentFilter !== 'all') {
-            $query->where(function (Builder $filterQuery) {
-                $aliases = $this->departmentAliases($this->subjectDepartmentFilter);
-
-                $filterQuery->whereIn('department', $aliases)
-                    ->orWhereHas('subject', fn (Builder $sq) => $sq->whereIn('department', $aliases));
-            });
-        }
-
-        if ($this->subjectMajorFilter !== 'all') {
-            $query->where(function (Builder $filterQuery) {
-                $filterQuery->where('major', $this->subjectMajorFilter)
-                    ->orWhereHas('subject', fn (Builder $sq) => $sq->where('major', $this->subjectMajorFilter));
-            });
-        }
-
-        if ($this->subjectYearLevelFilter !== 'all') {
-            $query->where(function (Builder $filterQuery) {
-                $filterQuery->where('year_level', (int) $this->subjectYearLevelFilter)
-                    ->orWhereHas('subject', fn (Builder $sq) => $sq->where('year_level', (int) $this->subjectYearLevelFilter));
-            });
-        }
-
-        if ($this->subjectSectionFilter !== 'all') {
-            $query->where(function (Builder $filterQuery) {
-                $filterQuery->where('section', $this->subjectSectionFilter)
-                    ->orWhereHas('subject', fn (Builder $sq) => $sq->where('section', $this->subjectSectionFilter));
-            });
-        }
-
-        if ($this->subjectTypeFilter !== 'all') {
-            $query->whereHas('subject', fn (Builder $q) => $q->where('type', $this->subjectTypeFilter));
-        }
-
-        if (strlen($this->subjectSearch) > 1) {
-            $term           = $this->subjectSearch;
-            $departmentTerm = Department::normalizeCode($term);
-            $query->where(function (Builder $searchQuery) use ($term, $departmentTerm) {
-                $searchQuery->where('section', 'like', "%{$term}%")
-                    ->orWhere('department', 'like', "%{$term}%")
-                    ->orWhere('major', 'like', "%{$term}%")
-                    ->orWhereHas('subject', function (Builder $q) use ($term) {
-                        $q->where('subject_code', 'like', "%{$term}%")
-                            ->orWhere('description', 'like', "%{$term}%")
-                            ->orWhere('edp_code', 'like', "%{$term}%")
-                            ->orWhere('section', 'like', "%{$term}%")
-                            ->orWhere('department', 'like', "%{$term}%")
-                            ->orWhere('major', 'like', "%{$term}%");
-                    });
-
-                if ($departmentTerm && $departmentTerm !== strtoupper(trim((string) $term))) {
-                    $searchQuery->orWhere('department', 'like', "%{$departmentTerm}%")
-                        ->orWhereHas('subject', fn (Builder $q) => $q->where('department', 'like', "%{$departmentTerm}%"));
-                }
-            });
-        }
-
-        $schedules = $query
-            ->orderBy('start_time')
-            ->get()
-            ->pipe(fn (Collection $schedules) => $this->sortSchedules($schedules));
-
-        if ($this->selectedFacultyId) {
-            $faculty = Faculty::find($this->selectedFacultyId);
-
-            if ($faculty) {
-                $schedules = $schedules
-                    ->filter(fn (Schedule $schedule) => ((int) $schedule->faculty_id === (int) $faculty->id)
-                        || $this->canAssignSubject($user, $faculty, $schedule->subject)
-                    )
-                    ->values();
-            }
-        }
-
-        return $schedules;
     }
 
+    // ────────────────────────────────────────────────────────────────────────────────────
+    // UI FILTER: Department
+    // ────────────────────────────────────────────────────────────────────────────────────
+    if ($this->subjectDepartmentFilter !== 'all') {
+        $aliases = $this->departmentAliases($this->subjectDepartmentFilter);
+        $query->where(function (Builder $filterQuery) use ($aliases) {
+            $filterQuery->whereIn('subjects.department', $aliases)
+                ->orWhereIn('schedules.department', $aliases);
+        });
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────────────
+    // UI FILTER: Major
+    // ────────────────────────────────────────────────────────────────────────────────────
+    if ($this->subjectMajorFilter !== 'all') {
+        $query->where(function (Builder $filterQuery) {
+            $filterQuery->where('subjects.major', $this->subjectMajorFilter)
+                ->orWhere('schedules.major', $this->subjectMajorFilter);
+        });
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────────────
+    // UI FILTER: Year Level
+    // ────────────────────────────────────────────────────────────────────────────────────
+    if ($this->subjectYearLevelFilter !== 'all') {
+        $query->where(function (Builder $filterQuery) {
+            $filterQuery->where('subjects.year_level', (int) $this->subjectYearLevelFilter)
+                ->orWhere('schedules.year_level', (int) $this->subjectYearLevelFilter);
+        });
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────────────
+    // UI FILTER: Section
+    // ────────────────────────────────────────────────────────────────────────────────────
+    if ($this->subjectSectionFilter !== 'all') {
+        $query->where(function (Builder $filterQuery) {
+            $filterQuery->where('subjects.section', $this->subjectSectionFilter)
+                ->orWhere('schedules.section', $this->subjectSectionFilter);
+        });
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────────────
+    // UI FILTER: Type (Major/Minor)
+    // ────────────────────────────────────────────────────────────────────────────────────
+    if ($this->subjectTypeFilter !== 'all') {
+        $query->where('subjects.type', $this->subjectTypeFilter);
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────────────
+    // SEARCH: Subject code, description, EDP code, section
+    // ────────────────────────────────────────────────────────────────────────────────────
+    if (strlen($this->subjectSearch) > 1) {
+        $term = $this->subjectSearch;
+        $departmentTerm = Department::normalizeCode($term);
+        
+        $query->where(function (Builder $searchQuery) use ($term, $departmentTerm) {
+            $searchQuery->where('subjects.subject_code', 'like', "%{$term}%")
+                ->orWhere('subjects.description', 'like', "%{$term}%")
+                ->orWhere('subjects.edp_code', 'like', "%{$term}%")
+                ->orWhere('subjects.section', 'like', "%{$term}%")
+                ->orWhere('subjects.department', 'like', "%{$term}%")
+                ->orWhere('subjects.major', 'like', "%{$term}%")
+                ->orWhere('schedules.section', 'like', "%{$term}%")
+                ->orWhere('schedules.department', 'like', "%{$term}%")
+                ->orWhere('schedules.major', 'like', "%{$term}%");
+
+            if ($departmentTerm && $departmentTerm !== strtoupper(trim((string) $term))) {
+                $searchQuery->orWhere('subjects.department', 'like', "%{$departmentTerm}%")
+                    ->orWhere('schedules.department', 'like', "%{$departmentTerm}%");
+            }
+        });
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────────────
+    // OPTIONAL: Show unassigned subjects only (toggle in UI)
+    // ────────────────────────────────────────────────────────────────────────────────────
+    if ($this->showUnassignedOnly) {
+        $query->whereNull('schedules.faculty_id');
+    }
+
+    // ────────────────────────────────────────────────────────────────────────────────────
+    // EXECUTE QUERY AND FILTER BY FACULTY ELIGIBILITY
+    // ────────────────────────────────────────────────────────────────────────────────────
+    $results = $query->orderBy('subjects.subject_code')->get();
+
+    if ($this->selectedFacultyId) {
+        $faculty = Faculty::find($this->selectedFacultyId);
+        
+        if ($faculty) {
+            $results = $results->filter(function ($row) use ($user, $faculty) {
+                // Include if already assigned to this faculty
+                if ((int) ($row->faculty_id ?? 0) === (int) $faculty->id) {
+                    return true;
+                }
+                
+                // Include if faculty can teach this subject
+                $subject = Subject::find($row->subject_id);
+                return $subject ? $this->canAssignSubject($user, $faculty, $subject) : false;
+            })->values();
+        }
+    }
+
+    return $results;
+}
     private function getGroupedAvailableSubjects(): Collection
-    {
-        return $this->getAvailableSubjects()
-            ->groupBy(function (Schedule $schedule) {
-                $start = Carbon::parse($schedule->start_time)->format('H:i');
-                $end   = Carbon::parse($schedule->end_time)->format('H:i');
-
-                return implode('::', [
-                    $schedule->subject_id,
-                    $schedule->section ?? 'none',
-                    $schedule->department ?? '',
-                    $schedule->major ?? '',
-                    $schedule->year_level ?? '',
-                    $start,
-                    $end,
-                ]);
-            })
-            ->map(function (Collection $group) {
-                /** @var Schedule $first */
-                $first   = $group->first();
-                $subject = $first->subject;
-                $room    = $first->room;
-
-                $days = $group
-                    ->map(fn (Schedule $s) => $s->day ?? 'N/A')
+{
+    $available = $this->getAvailableSubjects();
+    
+    // ════════════════════════════════════════════════════════════════════════════════════
+    // GROUP BY SUBJECT (not schedule details, since some may be unscheduled)
+    // ════════════════════════════════════════════════════════════════════════════════════
+    return $available
+        ->groupBy(function ($row) {
+            // Group by subject_id + section (not by time, since unscheduled have NULL times)
+            return implode('::', [
+                $row->subject_id,
+                $row->section ?? 'none',
+            ]);
+        })
+        ->map(function (Collection $group) {
+            $first = $group->first();
+            
+            // ────────────────────────────────────────────────────────────────────────────
+            // RECONSTRUCT SUBJECT OBJECT FROM ROW DATA
+            // ────────────────────────────────────────────────────────────────────────────
+            $subject = Subject::find($first->subject_id);
+            
+            // ────────────────────────────────────────────────────────────────────────────
+            // COLLECT ALL SCHEDULED INSTANCES (may be empty for unscheduled)
+            // ────────────────────────────────────────────────────────────────────────────
+            $scheduledRows = $group->filter(fn ($row) => $row->schedule_id !== null);
+            
+            // ────────────────────────────────────────────────────────────────────────────
+            // HANDLE UNSCHEDULED vs SCHEDULED
+            // ────────────────────────────────────────────────────────────────────────────
+            if ($scheduledRows->isEmpty()) {
+                // UNSCHEDULED: No schedule row exists yet
+                $days = 'Unscheduled';
+                $time = 'No time assigned';
+                $room = 'No room';
+                $isUnscheduled = true;
+            } else {
+                // SCHEDULED: Format day/time from schedule rows
+                $days = $scheduledRows
+                    ->map(fn ($row) => $row->day ?? 'N/A')
                     ->unique()
                     ->values()
                     ->implode(' / ');
 
-                $department = Department::normalizeCode($first->department ?? $subject?->department) ?? 'N/A';
-                $major      = $first->major ?? $subject?->major ?? 'N/A';
-                $year       = $first->year_level ?? $subject?->year_level ?? 'N/A';
-                $section    = $first->section ?? $subject?->section ?? 'N/A';
+                $startTime = $first->start_time ? Carbon::parse($first->start_time)->format('h:i A') : 'N/A';
+                $endTime = $first->end_time ? Carbon::parse($first->end_time)->format('h:i A') : 'N/A';
+                $time = "{$startTime} - {$endTime}";
+                
+                $room = $first->room_name ?? 'No room';
+                $isUnscheduled = false;
+            }
 
-                $assignedFacultyId = $group->first(fn (Schedule $s) => $s->faculty_id !== null)?->faculty_id;
-                $assignedFaculty   = $assignedFacultyId
-                    ? ($group->first(fn (Schedule $s) => $s->faculty_id !== null)?->faculty?->full_name ?? null)
-                    : null;
+            // ────────────────────────────────────────────────────────────────────────────
+            // FACULTY ASSIGNMENT (may be NULL for unscheduled)
+            // ────────────────────────────────────────────────────────────────────────────
+            $assignedFacultyId = $group->first(fn ($row) => $row->faculty_id !== null)?->faculty_id;
+            $assignedFacultyName = $assignedFacultyId 
+                ? ($group->first(fn ($row) => $row->faculty_id !== null)?->faculty_name ?? null)
+                : null;
 
-                $isFinalized = $group->contains(fn (Schedule $s) => $s->status === Schedule::STATUS_FINALIZED);
+            // ────────────────────────────────────────────────────────────────────────────
+            // EXTRACT METADATA
+            // ────────────────────────────────────────────────────────────────────────────
+            $department = Department::normalizeCode(
+                $first->schedule_department ?? $subject?->department
+            ) ?? 'N/A';
+            $major = $first->schedule_major ?? $subject?->major ?? 'N/A';
+            $year = $first->schedule_year_level ?? $subject?->year_level ?? 'N/A';
+            $section = $first->schedule_section ?? $subject?->section ?? 'N/A';
+            
+            $isFinalized = $scheduledRows->contains(fn ($row) => $row->schedule_status === Schedule::STATUS_FINALIZED);
 
-                return [
-                    'schedule_ids'     => $group->pluck('id')->all(),
-                    'first_schedule_id' => $first->id,
-                    'subject_code'     => $subject?->subject_code ?? 'N/A',
-                    'edp_code'         => $subject?->edp_code ?? 'No EDP',
-                    'description'      => $subject?->description ?? 'Untitled subject',
-                    'units'            => $subject?->units ?? 0,
-                    'type'             => $subject?->type ?? 'N/A',
-                    'department'       => $department,
-                    'major'            => $major,
-                    'year'             => $year,
-                    'section'          => $section,
-                    'room'             => $room?->room_name ?? 'No room',
-                    'days'             => $days,
-                    'time'             => Carbon::parse($first->start_time)->format('h:i A')
-                                         .' - '
-                                         .Carbon::parse($first->end_time)->format('h:i A'),
-                    'faculty_id'       => $assignedFacultyId,
-                    'faculty_name'     => $assignedFaculty,
-                    'is_finalized'     => $isFinalized,
-                ];
-            })
-            ->values();
-    }
+            // ────────────────────────────────────────────────────────────────────────────
+            // RETURN GROUPED SUBJECT CARD
+            // ────────────────────────────────────────────────────────────────────────────
+            return [
+                'schedule_ids'          => $scheduledRows->pluck('schedule_id')->filter()->all(),
+                'first_schedule_id'     => $scheduledRows->first()?->schedule_id,
+                'subject_code'          => $subject?->subject_code ?? 'N/A',
+                'edp_code'              => $subject?->edp_code ?? 'No EDP',
+                'description'           => $subject?->description ?? 'Untitled subject',
+                'units'                 => $subject?->units ?? 0,
+                'type'                  => $subject?->type ?? 'N/A',
+                'department'            => $department,
+                'major'                 => $major,
+                'year'                  => $year,
+                'section'               => $section,
+                'room'                  => $room,
+                'days'                  => $days,
+                'time'                  => $time,
+                'faculty_id'            => $assignedFacultyId,
+                'faculty_name'          => $assignedFacultyName,
+                'is_finalized'          => $isFinalized,
+                'is_unscheduled'        => $isUnscheduled,  // ← NEW: Flag for UI styling
+                'subject_id'            => $first->subject_id,  // ← NEW: For pre-assignment
+            ];
+        })
+        ->values();
+}
 
     public function assignSubjectGroup(array $scheduleIds): void
     {
@@ -2139,13 +3042,85 @@ class FacultyLoading extends Component
             ->values();
     }
 
+    private function preAssignmentPlaceholders(Collection $schedules): Collection
+    {
+        return $schedules->filter(function (Schedule $schedule) {
+            // Check if schedule is a pre-assignment placeholder
+            // (has faculty assigned but no day/time/room)
+            return $schedule->isPreAssignmentPlaceholder();
+        });
+    }
+ 
+    /**
+     * Get count of pre-assignment placeholders for display
+     * 
+     * @param Collection $schedules Collection of Schedule models
+     * @return int Count of pre-assignments
+     */
+    private function preAssignmentPlaceholderCount(Collection $schedules): int
+    {
+        return $this->preAssignmentPlaceholders($schedules)->count();
+    }
+ 
+    /**
+     * Format schedule display data for Blade template
+     * 
+     * Ensures that pre-assignment placeholders are properly labeled
+     * in the UI instead of showing random default times
+     */
+    private function formatScheduleForDisplay(Schedule $schedule): array
+    {
+        return [
+            'id' => $schedule->id,
+            'subject_code' => $schedule->subject?->subject_code,
+            'faculty_name' => $schedule->getFacultyName(),
+            'day' => $schedule->getDayDisplay(),
+            'time' => $schedule->getTimeDisplay(),
+            'room' => $schedule->getRoomDisplay(),
+            'status' => $schedule->getStatusDisplay(),
+            'is_placeholder' => $schedule->isPreAssignmentPlaceholder(),
+            'is_fully_scheduled' => $schedule->isFullyScheduled(),
+            'badge_color' => $this->getScheduleBadgeColor($schedule),
+        ];
+    }
+ 
+    /**
+     * Get badge color for schedule status in UI
+     */
+    private function getScheduleBadgeColor(Schedule $schedule): string
+    {
+        if ($schedule->isPreAssignmentPlaceholder()) {
+            return 'orange'; // Pre-assignment needs scheduling
+        }
+ 
+        return match($schedule->status) {
+            Schedule::STATUS_FINALIZED => 'green',
+            Schedule::STATUS_PARTIAL => 'blue',
+            Schedule::STATUS_FACULTY_LOCKED => 'purple',
+            default => 'gray',
+        };
+    }
+ 
+    /**
+     * Get formatted display for assigned schedules with proper placeholders
+     */
+    private function getFormattedAssignedSchedules(): Collection
+    {
+        $assignedSchedules = $this->assignedSchedules();
+ 
+        return $assignedSchedules->map(fn (Schedule $schedule) => 
+            $this->formatScheduleForDisplay($schedule)
+        );
+    }
+
     // ============================================================
     // RENDER
     // ============================================================
 
     public function render()
     {
-        $user    = Auth::user();
+        $user = Auth::user();
+        
         $faculties = $this->getFacultyQuery()
             ->with(['schedules' => fn ($query) => $query->activeTerm()->with('subject')])
             ->orderBy('full_name', 'asc')
@@ -2157,47 +3132,55 @@ class FacultyLoading extends Component
                     ->unique('id')
                     ->sum('units');
             });
-
-        $availableSubjects        = $this->getAvailableSubjects();
+ 
+        $availableSubjects = $this->getAvailableSubjects();
         $groupedAvailableSubjects = $this->getGroupedAvailableSubjects();
-        $currentFaculty           = $this->selectedFaculty;
-        $assignedSchedules        = $this->assignedSchedules();
-        $assignedSubjects         = $this->assignedSubjects();
-        $groupedAssignedSubjects  = $this->groupedAssignedSubjects();
-        $facultySummary           = $this->getFacultySummary();
-        $departmentSummary        = $this->getDepartmentSummary();
-        $facultyDepartments       = $this->getFacultyDepartments();
-        $scheduleDepartments      = $this->getScheduleDepartments();
-        $majors                   = $this->getAvailableMajors();
-        $yearLevels               = $this->getAvailableYearLevels();
-        $sections                 = $this->getAvailableSections();
-        $subjectTypes             = $this->getAvailableSubjectTypes();
-        $facultyConflicts         = $this->getFacultyConflicts($assignedSchedules);
-        $scheduleGroups           = $this->getScheduleGroups($assignedSchedules);
-        $activeDays               = Setting::getActiveDays();
-
+        $currentFaculty = $this->selectedFaculty;
+        $assignedSchedules = $this->assignedSchedules();
+        $assignedSubjects = $this->assignedSubjects();
+        $groupedAssignedSubjects = $this->groupedAssignedSubjects();
+        
+        // NEW: Get pre-assignment placeholder count for display
+        $preAssignmentCount = $this->preAssignmentPlaceholderCount($assignedSchedules);
+        $preAssignmentPlaceholders = $this->preAssignmentPlaceholders($assignedSchedules);
+        
+        $facultySummary = $this->getFacultySummary();
+        $departmentSummary = $this->getDepartmentSummary();
+        $facultyDepartments = $this->getFacultyDepartments();
+        $scheduleDepartments = $this->getScheduleDepartments();
+        $majors = $this->getAvailableMajors();
+        $yearLevels = $this->getAvailableYearLevels();
+        $sections = $this->getAvailableSections();
+        $subjectTypes = $this->getAvailableSubjectTypes();
+        $facultyConflicts = $this->getFacultyConflicts($assignedSchedules);
+        $scheduleGroups = $this->getScheduleGroups($assignedSchedules);
+        $activeDays = Setting::getActiveDays();
+ 
         return view('livewire.faculty-loading', [
-            'faculties'                => $faculties,
-            'availableSubjects'        => $availableSubjects,
+            'faculties' => $faculties,
+            'availableSubjects' => $availableSubjects,
             'groupedAvailableSubjects' => $groupedAvailableSubjects,
-            'assignedSchedules'        => $assignedSchedules,
-            'assignedSubjects'         => $assignedSubjects,
-            'groupedAssignedSubjects'  => $groupedAssignedSubjects,
-            'currentFaculty'           => $currentFaculty,
-            'facultySummary'           => $facultySummary,
-            'departmentSummary'        => $departmentSummary,
-            'facultyDepartments'       => $facultyDepartments,
-            'scheduleDepartments'      => $scheduleDepartments,
-            'majors'                   => $majors,
-            'yearLevels'               => $yearLevels,
-            'sections'                 => $sections,
-            'subjectTypes'             => $subjectTypes,
-            'userRole'                 => $user->role,
-            'activeTab'                => $this->activeTab,
-            'facultyConflicts'         => $facultyConflicts,
-            'scheduleGroups'           => $scheduleGroups,
-            'activeDays'               => $activeDays,
-            'canOverrideWarnings'      => $this->canOverrideAssignmentWarnings($user),
+            'assignedSchedules' => $assignedSchedules,
+            'assignedSubjects' => $assignedSubjects,
+            'groupedAssignedSubjects' => $groupedAssignedSubjects,
+            'currentFaculty' => $currentFaculty,
+            'facultySummary' => $facultySummary,
+            'departmentSummary' => $departmentSummary,
+            'facultyDepartments' => $facultyDepartments,
+            'scheduleDepartments' => $scheduleDepartments,
+            'majors' => $majors,
+            'yearLevels' => $yearLevels,
+            'sections' => $sections,
+            'subjectTypes' => $subjectTypes,
+            'userRole' => $user->role,
+            'activeTab' => $this->activeTab,
+            'facultyConflicts' => $facultyConflicts,
+            'scheduleGroups' => $scheduleGroups,
+            'activeDays' => $activeDays,
+            'canOverrideWarnings' => $this->canOverrideAssignmentWarnings($user),
+            // NEW: Pre-assignment data for display
+            'preAssignmentCount' => $preAssignmentCount,
+            'preAssignmentPlaceholders' => $preAssignmentPlaceholders,
         ])->layout('layouts.app');
     }
 }

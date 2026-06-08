@@ -153,9 +153,9 @@ class Subject extends Model
      * Get the faculty member assigned to this subject.
      */
     public function faculty(): BelongsTo
-    {
-        return $this->belongsTo(Faculty::class, 'faculty_id');
-    }
+{
+    return $this->belongsTo(Faculty::class);
+}
 
     public function copiedFrom(): BelongsTo
     {

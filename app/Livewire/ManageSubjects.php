@@ -9,8 +9,6 @@ use Livewire\WithPagination;
 use Illuminate\Support\Facades\Notification;
 use App\Notifications\SubjectUpdatedNotification;
 use App\Models\Subject;
-use App\Models\Faculty;
-use App\Models\Room;
 use App\Models\Activity;
 use App\Models\Schedule;
 use App\Models\Setting;
@@ -56,26 +54,12 @@ class ManageSubjects extends Component
     public ?int $protectedDeleteSubjectId = null;
     public array $protectedDeleteImpact = [];
 
-    // Preferred Faculty & Room (Combined Modal)
-    public $assignFacultyId = null;
-    public $assignRoomId = null;
-
-    protected $listeners = ['refreshComponent' => '$refresh'];
-
     // Major mapping by department
     private $majorsByDept = [
         'CCS'  => ['IT' => 'Information Technology', 'ACT' => 'Assistive Computer Technology'],
         'SHTM' => ['HM' => 'Hospitality Management', 'TM' => 'Tourism Management'],
         'COC'  => ['FB' => 'Forensic Biology', 'LD' => 'Lie Detection', 'QD' => 'Questioned Documents'],
         'CTE'  => ['ED' => 'Education'],
-    ];
-
-    // Department → related department codes for faculty filtering
-    private $deptFamilies = [
-        'CCS'  => ['CCS', 'IT', 'ACT'],
-        'SHTM' => ['SHTM', 'HM', 'TM'],
-        'COC'  => ['COC', 'FB', 'LD', 'QD'],
-        'CTE'  => ['CTE', 'ED'],
     ];
 
     public function updatedSearch() { $this->resetPage(); }
@@ -121,211 +105,6 @@ class ManageSubjects extends Component
                 'total_subjects'   => null,
                 'archived_at'      => null,
             ]);
-    }
-
-    // ============================================================
-    // SMART PREFERENCE FILTERING
-    // ============================================================
-
-    /**
-     * Return eligible faculties for a given subject based on smart rules:
-     *   - Major subject  → faculties in the same department family (e.g. CCS/IT/ACT)
-     *                      OR GenEd faculties
-     *   - Minor subject  → GenEd faculties + faculties with can_teach_minor = true
-     *                      OR cross_department faculties
-     *   - Always exclude rejected/pending faculties
-     */
-    public function getEligibleFacultiesForSubject(int $subjectId): array
-    {
-        $subject = Subject::find($subjectId);
-        if (! $subject) {
-            return [];
-        }
-
-        $isMinor    = strtolower($subject->type ?? '') === 'minor';
-        $department = strtoupper($subject->department ?? '');
-        $major      = strtoupper($subject->major ?? '');
-
-        // Build the department family codes
-        $familyCodes = $this->deptFamilies[$department] ?? [$department];
-        // Also include the major code itself if not already there
-        if ($major && ! in_array($major, $familyCodes)) {
-            $familyCodes[] = $major;
-        }
-
-        $query = Faculty::approved();
-
-        if ($isMinor) {
-            // Minor: GenEd, cross_department, or can_teach_minor
-            $query->where(function ($q) {
-                $q->where('faculty_scope', 'gened')
-                  ->orWhere('faculty_scope', 'cross_department')
-                  ->orWhere('can_teach_minor', true);
-            });
-        } else {
-            // Major: same department family OR GenEd
-            $query->where(function ($q) use ($familyCodes) {
-                $q->whereIn('department', $familyCodes)
-                  ->orWhere('faculty_scope', 'gened');
-            });
-        }
-
-        return $query->orderBy('full_name')
-            ->get(['id', 'full_name', 'department', 'faculty_scope', 'employment_type'])
-            ->map(function (Faculty $f) {
-                $scopeLabel = match ($f->faculty_scope) {
-                    'gened'            => 'GenEd',
-                    'cross_department' => 'Cross-Dept',
-                    default            => $f->department ?? 'Dept',
-                };
-                return [
-                    'id'            => $f->id,
-                    'full_name'     => $f->full_name,
-                    'department'    => $f->department,
-                    'scope_label'   => $scopeLabel,
-                    'employment_type' => $f->employment_type ?? 'Full-time',
-                ];
-            })
-            ->toArray();
-    }
-
-    /**
-     * Return eligible rooms for a given subject based on smart rules:
-     *   - Major subject  → Labs preferred (filtered by subject's department/major specialization)
-     *                      Lecture rooms also shown but grouped separately
-     *   - Minor/GenEd    → Lecture rooms first, all rooms available
-     *   - Always shows all rooms but flags recommended ones
-     */
-    public function getEligibleRoomsForSubject(int $subjectId): array
-    {
-        $subject = Subject::find($subjectId);
-        if (! $subject) {
-            return [];
-        }
-
-        $isMinor        = strtolower($subject->type ?? '') === 'minor';
-        $requiresLab    = (bool) ($subject->requires_lab ?? false);
-        $prefRoomType   = strtoupper($subject->preferred_room_type ?? '');
-        $major          = strtoupper($subject->major ?? '');
-        $department     = strtoupper($subject->department ?? '');
-        $familyCodes    = $this->deptFamilies[$department] ?? [$department];
-        if ($major && ! in_array($major, $familyCodes)) {
-            $familyCodes[] = $major;
-        }
-
-        $rooms = Room::orderBy('room_name')->get();
-
-        return $rooms->map(function (Room $room) use ($isMinor, $requiresLab, $prefRoomType, $familyCodes, $major, $department) {
-            $roomType         = strtoupper($room->type ?? '');
-            $roomSpec         = strtoupper($room->specialization ?? '');
-            $isLab            = str_contains($roomType, 'LAB') || str_contains($roomType, 'LABORATORY');
-            $isLecture        = str_contains($roomType, 'LECTURE') || str_contains($roomType, 'CLASSROOM');
-
-            // Check if room specialization matches the subject's department family
-            $specMatchesDept  = false;
-            foreach ($familyCodes as $code) {
-                if ($roomSpec && str_contains($roomSpec, $code)) {
-                    $specMatchesDept = true;
-                    break;
-                }
-            }
-            $isGeneral = in_array($roomSpec, ['GENERAL', 'GEN', 'ALL', 'COMMON', 'MINOR', '', 'LECTURE', 'CLASSROOM']);
-
-            // Determine recommendation tier
-            if ($isMinor) {
-                // Minor: Lecture rooms preferred
-                if ($isLecture || $isGeneral) {
-                    $tier = 'recommended';
-                    $reason = 'Lecture / General (Minor subject)';
-                } else {
-                    $tier = 'available';
-                    $reason = 'Lab room (non-standard for minor)';
-                }
-            } else {
-                // Major subject logic
-                if ($requiresLab || str_contains($prefRoomType, 'LAB')) {
-                    // Needs a lab
-                    if ($isLab && $specMatchesDept) {
-                        $tier = 'recommended';
-                        $reason = "Lab — matches {$major}/{$department}";
-                    } elseif ($isLab && $isGeneral) {
-                        $tier = 'recommended';
-                        $reason = 'General Lab';
-                    } elseif ($isLab) {
-                        $tier = 'available';
-                        $reason = 'Lab (different specialization)';
-                    } else {
-                        $tier = 'available';
-                        $reason = 'Lecture (subject needs lab)';
-                    }
-                } else {
-                    // Lecture preferred
-                    if ($isLecture && ($specMatchesDept || $isGeneral)) {
-                        $tier = 'recommended';
-                        $reason = 'Lecture room';
-                    } elseif ($isLab && $specMatchesDept) {
-                        $tier = 'available';
-                        $reason = "Lab — matches {$major} (if needed)";
-                    } else {
-                        $tier = 'available';
-                        $reason = $roomType ?: 'Room';
-                    }
-                }
-            }
-
-            return [
-                'id'         => $room->id,
-                'room_name'  => $room->room_name,
-                'type'       => $room->type,
-                'specialization' => $room->specialization,
-                'capacity'   => $room->capacity,
-                'floor'      => $room->floor,
-                'tier'       => $tier,   // 'recommended' | 'available'
-                'reason'     => $reason,
-            ];
-        })
-        ->sortBy(fn ($r) => $r['tier'] === 'recommended' ? 0 : 1)
-        ->values()
-        ->toArray();
-    }
-
-    /**
-     * Return a smart hint message for the preference modal based on the subject.
-     */
-    public function getSmartHintForSubject(int $subjectId): array
-    {
-        $subject = Subject::find($subjectId);
-        if (! $subject) {
-            return ['faculty_hint' => '', 'room_hint' => '', 'subject_info' => []];
-        }
-
-        $isMinor     = strtolower($subject->type ?? '') === 'minor';
-        $requiresLab = (bool) ($subject->requires_lab ?? false);
-        $major       = strtoupper($subject->major ?? '');
-        $department  = strtoupper($subject->department ?? '');
-
-        $facultyHint = $isMinor
-            ? "Minor subject: showing GenEd and cross-department faculty who can teach minor subjects."
-            : "Major subject ({$major} / {$department}): showing faculty from the {$department} department and GenEd faculty.";
-
-        $roomHint = $isMinor
-            ? "Minor subject: lecture rooms are recommended."
-            : ($requiresLab
-                ? "This subject requires a lab: lab rooms matching {$major}/{$department} are recommended."
-                : "Major subject: showing all rooms. Lab rooms matching {$major}/{$department} are highlighted.");
-
-        return [
-            'faculty_hint' => $facultyHint,
-            'room_hint'    => $roomHint,
-            'subject_info' => [
-                'subject_code' => $subject->subject_code,
-                'description'  => $subject->description,
-                'type'         => $subject->type,
-                'major'        => $major,
-                'department'   => $department,
-                'requires_lab' => $requiresLab,
-            ],
-        ];
     }
 
     // ============================================================
@@ -923,72 +702,6 @@ class ManageSubjects extends Component
         $this->selectedDept = in_array($userRole, ['admin', 'registrar', 'associate_dean']) ? '' : $user->department;
     }
 
-    // ============================================================
-    // PREFERENCE SAVE METHODS
-    // ============================================================
-
-    public function savePreferredFaculty(?int $subjectId): void
-    {
-        if (! $subjectId || $this->catalogMode !== 'active') { return; }
-        $subject = $this->activeSubjectsQuery()->findOrFail($subjectId);
-        if (! $this->validateDepartmentAccess($subject->department)) { $this->dispatch('toast', ['type' => 'error', 'message' => 'Access Denied', 'detail' => 'You do not have permission to update subjects in this department.']); return; }
-        $subject->update(['preferred_faculty_id' => $this->assignFacultyId ?: null]);
-        $facultyName = $this->assignFacultyId ? (\App\Models\Faculty::find($this->assignFacultyId)?->full_name ?? 'Unknown') : 'cleared';
-        \App\Models\Activity::create(['user_id' => auth()->id(), 'action' => 'Edit', 'module' => 'Subjects', 'description' => "Set preferred faculty for {$subject->subject_code} to {$facultyName}."]);
-        $this->dispatch('toast', ['type' => 'success', 'message' => 'Preferred Faculty Updated', 'detail' => "Saved preferred faculty for {$subject->subject_code}."]);
-        $this->assignFacultyId = null;
-    }
-
-    public function savePreferredRoom(?int $subjectId): void
-    {
-        if (! $subjectId || $this->catalogMode !== 'active') { return; }
-        $subject = $this->activeSubjectsQuery()->findOrFail($subjectId);
-        if (! $this->validateDepartmentAccess($subject->department)) { $this->dispatch('toast', ['type' => 'error', 'message' => 'Access Denied', 'detail' => 'You do not have permission to update subjects in this department.']); return; }
-        $subject->update(['preferred_room_id' => $this->assignRoomId ?: null]);
-        $roomName = $this->assignRoomId ? (\App\Models\Room::find($this->assignRoomId)?->room_name ?? 'Unknown') : 'cleared';
-        \App\Models\Activity::create(['user_id' => auth()->id(), 'action' => 'Edit', 'module' => 'Subjects', 'description' => "Set preferred room for {$subject->subject_code} to {$roomName}."]);
-        $this->dispatch('toast', ['type' => 'success', 'message' => 'Preferred Room Updated', 'detail' => "Saved preferred room for {$subject->subject_code}."]);
-        $this->assignRoomId = null;
-    }
-
-    /**
-     * Save both preferred faculty and preferred room in a single operation.
-     */
-    public function savePreferredFacultyAndRoom(?int $subjectId): void
-    {
-        if (! $subjectId || $this->catalogMode !== 'active') { return; }
-        $subject = $this->activeSubjectsQuery()->findOrFail($subjectId);
-        if (! $this->validateDepartmentAccess($subject->department)) {
-            $this->dispatch('toast', ['type' => 'error', 'message' => 'Access Denied', 'detail' => 'You do not have permission to update subjects in this department.']);
-            return;
-        }
-
-        $subject->update([
-            'preferred_faculty_id' => $this->assignFacultyId ?: null,
-            'preferred_room_id'    => $this->assignRoomId ?: null,
-        ]);
-
-        $facultyName = $this->assignFacultyId ? (\App\Models\Faculty::find($this->assignFacultyId)?->full_name ?? 'Unknown') : 'None';
-        $roomName    = $this->assignRoomId ? (\App\Models\Room::find($this->assignRoomId)?->room_name ?? 'Unknown') : 'None';
-
-        \App\Models\Activity::create([
-            'user_id'     => auth()->id(),
-            'action'      => 'Edit',
-            'module'      => 'Subjects',
-            'description' => "Updated preferences for {$subject->subject_code}: Faculty → {$facultyName}, Room → {$roomName}.",
-        ]);
-
-        $this->dispatch('toast', [
-            'type'    => 'success',
-            'message' => 'Preferences Saved',
-            'detail'  => "Faculty: {$facultyName} | Room: {$roomName}",
-        ]);
-
-        $this->assignFacultyId = null;
-        $this->assignRoomId    = null;
-        $this->dispatch('refreshComponent');
-    }
-
     public function render()
     {
         $user        = auth()->user();
@@ -1009,7 +722,7 @@ class ManageSubjects extends Component
         if (! empty($this->selectedMajor)) { $query->where('major', strtoupper($this->selectedMajor)); }
         if (! empty($this->search)) { $query->where(function ($q) { $q->where('subject_code', 'like', "%{$this->search}%")->orWhere('edp_code', 'like', "%{$this->search}%")->orWhere('description', 'like', "%{$this->search}%"); }); }
 
-        $subjects = $query->with(['preferredFaculty', 'preferredRoom'])->orderBy('edp_code', 'asc')->paginate(10);
+        $subjects = $query->orderBy('edp_code', 'asc')->paginate(10);
 
         $sectionsQuery = $isArchiveMode
             ? Subject::archived()->where('archive_batch', $this->selectedArchiveBatch)

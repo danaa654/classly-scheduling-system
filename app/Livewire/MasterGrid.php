@@ -146,9 +146,13 @@ class MasterGrid extends Component
     }
 
     private function activeSubjectQuery()
-    {
-        return Subject::activeTerm($this->semester, $this->schoolYear);
-    }
+{
+    $period = Setting::getAcademicPeriod();
+    return Subject::query()
+        ->where('semester', $period['semester'])
+        ->where('school_year', $period['school_year'])
+        ->where('is_archived', false);
+}
 
     public function maxMeetingDays(): int
     {
@@ -312,11 +316,15 @@ class MasterGrid extends Component
     }
 
     public function getScheduledCount($subjectId): int
-    {
-        return $this->activeScheduleQuery()
-            ->where('subject_id', $subjectId)
-            ->count();
-    }
+{
+    return $this->activeScheduleQuery()
+        ->where('subject_id', $subjectId)
+        ->whereNotNull('day')           // ← ADD
+        ->whereNotNull('start_time')    // ← ADD
+        ->whereNotNull('end_time')      // ← ADD
+        ->whereNotNull('room_id')       // ← ADD
+        ->count();
+}
 
     public function getRemainingHours($subjectId): float
     {
@@ -1764,38 +1772,74 @@ class MasterGrid extends Component
         return !$expectedSize || !$room->capacity || (int) $room->capacity >= (int) $expectedSize;
     }
 
-    private function createPartialSchedule(Subject $subject, Room $room, string $day, string $startTime, string $endTime): Schedule
-    {
-        if (!in_array($day, Setting::getActiveDays(), true)) {
-            throw new \InvalidArgumentException("{$day} is not enabled for scheduling.");
-        }
+    private function createOrUpdateScheduleFromPlaceholder(
+    Subject $subject,
+    Room $room,
+    string $day,
+    string $startTime,
+    string $endTime,
+    ?int $preAssignedFacultyId = null
+): Schedule {
+    $period = Setting::getAcademicPeriod();
 
-        $period = Setting::getAcademicPeriod();
+    // Find the existing faculty_locked placeholder (no spacetime yet)
+    $placeholder = Schedule::activeTerm()
+        ->where('subject_id', $subject->id)
+        ->where('status', Schedule::STATUS_FACULTY_LOCKED)
+        ->whereNull('day')
+        ->whereNull('start_time')
+        ->whereNull('end_time')
+        ->whereNull('room_id')
+        ->lockForUpdate()
+        ->first();
 
-        return Schedule::create([
-            'subject_id' => $subject->id,
-            'room_id' => $room->id,
-            'faculty_id' => $subject->faculty_id,
-            'user_id' => auth()->id() ?? 1,
-            'department' => $subject->department,
-            'major' => $subject->major,
-            'year_level' => $subject->year_level,
-            'section' => $subject->section,
-            'day' => $day,
-            'start_time' => $startTime,
-            'end_time' => $endTime,
-            'duration_hours' => round(Carbon::parse($startTime)->diffInMinutes(Carbon::parse($endTime)) / 60, 2),
+    if ($placeholder) {
+        // UPDATE the placeholder: fill in room + spacetime, preserve faculty
+        $placeholder->update([
+            'room_id'        => $room->id,
+            'day'            => $day,
+            'start_time'     => $startTime,
+            'end_time'       => $endTime,
+            'duration_hours' => round(
+                Carbon::parse($startTime)->diffInMinutes(Carbon::parse($endTime)) / 60, 2
+            ),
             'meetings_per_week' => $subject->meetings_per_week,
-            'pairing_key' => "manual-{$subject->id}-" . now()->format('YmdHisv'),
-            'status' => Schedule::STATUS_PARTIAL,
-            'edp_code' => $subject->edp_code,
-            'semester' => $period['semester'],
-            'school_year' => $period['school_year'],
-            'academic_year' => $period['school_year'],
-            'workspace_key' => $period['workspace_key'],
-            'is_archived' => false,
+            'pairing_key'    => "manual-{$subject->id}-" . now()->format('YmdHisv'),
+            'status'         => Schedule::STATUS_FINALIZED,
+            'user_id'        => auth()->id() ?? 1,
+            'faculty_id'     => $preAssignedFacultyId ?? $placeholder->faculty_id,
         ]);
-    }   
+
+        return $placeholder->fresh();
+    }
+
+    // No placeholder — create a fresh schedule row
+    return Schedule::create([
+        'subject_id'      => $subject->id,
+        'room_id'         => $room->id,
+        'faculty_id'      => $preAssignedFacultyId ?? $subject->faculty_id,
+        'user_id'         => auth()->id() ?? 1,
+        'department'      => $subject->department,
+        'major'           => $subject->major,
+        'year_level'      => $subject->year_level,
+        'section'         => $subject->section,
+        'day'             => $day,
+        'start_time'      => $startTime,
+        'end_time'        => $endTime,
+        'duration_hours'  => round(
+            Carbon::parse($startTime)->diffInMinutes(Carbon::parse($endTime)) / 60, 2
+        ),
+        'meetings_per_week' => $subject->meetings_per_week,
+        'pairing_key'     => "manual-{$subject->id}-" . now()->format('YmdHisv'),
+        'status'          => Schedule::STATUS_PARTIAL,
+        'edp_code'        => $subject->edp_code,
+        'semester'        => $period['semester'],
+        'school_year'     => $period['school_year'],
+        'academic_year'   => $period['school_year'],
+        'workspace_key'   => $period['workspace_key'],
+        'is_archived'     => false,
+    ]);
+}
 
     public function generateLinkedMeetingPattern(int $subjectId): ?array
     {
@@ -2030,6 +2074,17 @@ class MasterGrid extends Component
 
         $subject = $this->activeSubjectQuery()->find($subjectId);
 
+        // Look up the pre-assigned faculty from the faculty_locked placeholder
+        // (Faculty Loading stores the faculty in schedules, not subjects)
+        $preAssignedFacultyId = Schedule::activeTerm()
+            ->where('subject_id', $subjectId)
+            ->whereNotNull('faculty_id')
+            ->whereNull('day')
+            ->whereNull('start_time')
+            ->whereNull('end_time')
+            ->whereNull('room_id')
+            ->value('faculty_id');
+
         if (!$subject) {
             $this->dispatch('toast', [
                 'type' => 'error',
@@ -2142,7 +2197,10 @@ class MasterGrid extends Component
         }
 
         try {
-            $schedule = $this->createPartialSchedule($subject, $room, $day, $startTime, $endTime);
+            $schedule = $this->createOrUpdateScheduleFromPlaceholder(
+                $subject, $room, $day, $startTime, $endTime, $preAssignedFacultyId
+            );
+
             $this->syncToBlockSchedule([[
                 'subject_id' => $schedule->subject_id,
                 'room_id' => $schedule->room_id,
@@ -2425,7 +2483,10 @@ class MasterGrid extends Component
         $schedules = $this->selectedRoomId
             ? $this->activeScheduleQuery()
                 ->where('room_id', $this->selectedRoomId)
-                ->whereIn('day', $this->days)
+                ->where(function ($q) {
+                    $q->whereIn('day', $this->days)
+                    ->orWhereNull('day');
+                })
                 ->with(['subject' => function ($query) {
                     $query->select(
                         'id', 'subject_code', 'description', 'edp_code', 

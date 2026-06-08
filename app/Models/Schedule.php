@@ -12,11 +12,15 @@ class Schedule extends Model
 {
     use HasFactory;
 
-    public const STATUS_DRAFT = 'draft';
+   public const STATUS_DRAFT = 'draft';
 
     public const STATUS_PARTIAL = 'partial';
 
     public const STATUS_FACULTY_ASSIGNED = 'faculty_assigned';
+
+    public const STATUS_FACULTY_LOCKED = 'faculty_locked';
+
+    public const STATUS_PENDING_GENERATION = 'pending_generation';
 
     public const STATUS_FINALIZED = 'finalized';
 
@@ -65,47 +69,40 @@ class Schedule extends Model
     {
         static::saving(function (Schedule $schedule) {
             $period = Setting::getAcademicPeriod();
-
+ 
             if (blank($schedule->semester)) {
                 $schedule->semester = $period['semester'];
             }
-
+ 
             $schedule->semester = Setting::normalizeSemester($schedule->semester);
-
+ 
             $schoolYear = $schedule->school_year ?: $schedule->academic_year ?: $period['school_year'];
             $academicYear = $schedule->academic_year ?: $schoolYear;
-
+ 
             if ($schedule->isDirty('academic_year') && ! $schedule->isDirty('school_year')) {
                 $schoolYear = $academicYear;
             }
-
+ 
             if ($schedule->isDirty('school_year') && ! $schedule->isDirty('academic_year')) {
                 $academicYear = $schoolYear;
             }
-
+ 
             if ($schoolYear !== $academicYear) {
                 $academicYear = $schoolYear;
             }
-
+ 
             $schedule->school_year = $schoolYear;
             $schedule->academic_year = $academicYear;
-
+ 
             if (blank($schedule->academic_year)) {
                 $schedule->academic_year = $period['school_year'];
             }
-
-            if ($schedule->is_archived === null) {
-                $schedule->is_archived = false;
-            }
-
-            $schedule->workspace_key = Setting::workspaceKey($schedule->school_year, $schedule->semester);
-
-            if (! $schedule->edp_code && $schedule->subject_id) {
-                $schedule->edp_code = Subject::whereKey($schedule->subject_id)->value('edp_code');
+ 
+            if (blank($schedule->workspace_key)) {
+                $schedule->workspace_key = $period['workspace_key'];
             }
         });
     }
-
     // ============================================================
     // RELATIONSHIPS
     // ============================================================
@@ -239,6 +236,47 @@ class Schedule extends Model
         return $query->whereIn('status', [self::STATUS_PARTIAL, self::STATUS_FACULTY_ASSIGNED]);
     }
 
+    public function scopeFacultyLocked($query)
+    {
+        return $query->where('status', self::STATUS_FACULTY_LOCKED);
+    }
+
+    public function scopePendingGeneration($query)
+    {
+        return $query->where('status', self::STATUS_PENDING_GENERATION);
+    }
+
+    /**
+     * Get all schedules that are unscheduled (no spacetime assigned yet)
+     * but have faculty assigned
+     */
+    public function scopeUnscheduled($query)
+    {
+        return $query->whereNull('day')
+                    ->whereNull('start_time')
+                    ->whereNull('end_time')
+                    ->whereNull('room_id')
+                    ->whereNotNull('faculty_id');
+    }
+
+    /**
+     * Get all schedules awaiting faculty assignment
+     * (either completely unassigned or unscheduled)
+     */
+    public function scopeAwaitingFaculty($query)
+    {
+        return $query->where(function ($q) {
+            $q->whereNull('faculty_id')
+            ->orWhere(function ($inner) {
+                $inner->whereNull('day')
+                        ->whereNull('start_time')
+                        ->whereNull('end_time')
+                        ->whereNull('room_id')
+                        ->whereNotNull('faculty_id');
+            });
+        });
+    }
+
     /** Only rows visible on the active-term dashboards */
     public function scopeActive($query)
     {
@@ -274,14 +312,121 @@ class Schedule extends Model
         return $query->activeTerm($period['semester'], $period['school_year']);
     }
 
-    public function scopeActiveTerm($query, ?string $semester = null, ?string $schoolYear = null)
+    public function isPreAssignmentPlaceholder(): bool
+    {
+        return $this->faculty_id !== null
+            && (is_null($this->day) 
+                || is_null($this->start_time) 
+                || is_null($this->end_time) 
+                || is_null($this->room_id));
+    }
+ 
+    /**
+     * Check if this schedule has been fully scheduled with spacetime
+     * 
+     * A fully scheduled record has ALL of these fields populated:
+     * - day (Monday, Tuesday, etc)
+     * - start_time (HH:MM:SS)
+     * - end_time (HH:MM:SS)
+     * - room_id (room assignment)
+     */
+    public function isFullyScheduled(): bool
+    {
+        return !is_null($this->day)
+            && !is_null($this->start_time)
+            && !is_null($this->end_time)
+            && !is_null($this->room_id);
+    }
+ 
+    /**
+     * Get readable status for UI display
+     * 
+     * Priority:
+     * 1. If pre-assignment placeholder → "No Schedule"
+     * 2. Otherwise use the status field
+     */
+    public function getStatusDisplay(): string
+    {
+        if ($this->isPreAssignmentPlaceholder()) {
+            return 'No Schedule';
+        }
+        
+        return match($this->status) {
+            self::STATUS_DRAFT => 'Draft',
+            self::STATUS_PARTIAL => 'Partial',
+            self::STATUS_FACULTY_ASSIGNED => 'Faculty Assigned',
+            self::STATUS_FACULTY_LOCKED => 'Faculty Locked',
+            self::STATUS_PENDING_GENERATION => 'Pending Generation',
+            self::STATUS_FINALIZED => 'Finalized',
+            default => ucfirst($this->status ?? 'Draft'),
+        };
+    }
+ 
+    /**
+     * Get faculty name or "Unassigned" if not available
+     */
+    public function getFacultyName(): string
+    {
+        return $this->faculty?->full_name ?? 'Unassigned';
+    }
+ 
+    /**
+     * Get formatted time display for UI
+     * Returns "No Schedule" if pre-assignment placeholder
+     */
+    public function getTimeDisplay(): string
+    {
+        if ($this->isPreAssignmentPlaceholder()) {
+            return 'No Schedule';
+        }
+ 
+        if (!$this->start_time || !$this->end_time) {
+            return 'TBD';
+        }
+ 
+        return $this->start_time->format('h:i A') . ' - ' . $this->end_time->format('h:i A');
+    }
+ 
+    /**
+     * Get formatted day display for UI
+     * Returns "Unscheduled" if pre-assignment placeholder
+     */
+    public function getDayDisplay(): string
+    {
+        if ($this->isPreAssignmentPlaceholder()) {
+            return 'Unscheduled';
+        }
+ 
+        return $this->day ?? 'TBD';
+    }
+ 
+    /**
+     * Get room name or "TBD" if not assigned
+     */
+    public function getRoomDisplay(): string
+    {
+        if ($this->isPreAssignmentPlaceholder()) {
+            return 'TBD';
+        }
+ 
+        return $this->room?->room_name ?? 'TBD';
+    }
+
+    public function scopeActiveTerm($query, $semester = null, $schoolYear = null)
     {
         $period = Setting::getAcademicPeriod();
-        $semester ??= $period['semester'];
-        $schoolYear ??= $period['school_year'];
-
-        return $query->forWorkspace($semester, $schoolYear)
+        $semester = $semester ?? $period['semester'];
+        $schoolYear = $schoolYear ?? $period['school_year'];
+ 
+        return $query
+            ->where('semester', $semester)
+            ->where('school_year', $schoolYear)
             ->where('is_archived', false);
+    }
+ 
+    public function scopeNotArchived($query)
+    {
+        return $query->where('is_archived', false);
     }
 
     public function scopeCurrentSemester($query)
@@ -294,6 +439,26 @@ class Schedule extends Model
     public function scopeArchived($query)
     {
         return $query->where('is_archived', true);
+    }
+
+    public function scopeWithSubject($query)
+    {
+        return $query->with('subject');
+    }
+ 
+    public function scopeWithRoom($query)
+    {
+        return $query->with('room');
+    }
+ 
+    public function scopeWithFaculty($query)
+    {
+        return $query->with('faculty');
+    }
+ 
+    public function scopeWithUser($query)
+    {
+        return $query->with('user');
     }
 
     public function scopeArchivedWorkspace($query, ?string $semester = null, ?string $schoolYear = null)
@@ -417,16 +582,35 @@ class Schedule extends Model
         }
     }
 
-    /**
-     * Check if this schedule conflicts with another
-     */
-    public function hasConflictWith(Schedule $other): bool
+    // ============================================================
+    // HELPER METHODS
+    // ============================================================
+ 
+    public function getDurationMinutes(): int
     {
-        if ($this->room_id !== $other->room_id || $this->day !== $other->day) {
+        if (!$this->start_time || !$this->end_time) {
+            return 0;
+        }
+ 
+        return $this->start_time->diffInMinutes($this->end_time);
+    }
+ 
+    public function hasConflict(self $other): bool
+    {
+        if ($this->day !== $other->day) {
             return false;
         }
-
-        return $this->start_time < $other->end_time && $this->end_time > $other->start_time;
+ 
+        return $this->start_time < $other->end_time
+            && $this->end_time > $other->start_time;
+    }
+ 
+    public function markAsArchived(): void
+    {
+        $this->update([
+            'is_archived' => true,
+            'archived_at' => now(),
+        ]);
     }
 
     /**
@@ -563,4 +747,6 @@ class Schedule extends Model
             })
             ->get();
     }
+
+
 }

@@ -1,78 +1,7 @@
-<div class="min-h-screen bg-[#E6E6E6] dark:bg-[#020617] transition-colors duration-500"
+<div class="manage-subjects-readable min-h-screen bg-[#E6E6E6] dark:bg-[#020617] transition-colors duration-500"
      x-data="{
         open: @entangle('showModal'),
-        bulkOpen: @entangle('bulkOpen'),
-        prefOpen: false,
-        prefSubjectId: null,
-        prefFacultyId: @entangle('assignFacultyId'),
-        prefRoomId: @entangle('assignRoomId'),
-        prefLoading: false,
-        prefFaculties: [],
-        prefRooms: [],
-        prefHint: { faculty_hint: '', room_hint: '', subject_info: {} },
-        prefSearch: '',
-        prefRoomSearch: '',
-        prefRoomFilter: 'all',
-
-        openPrefModal(subjectId, currentFacultyId, currentRoomId) {
-            this.prefSubjectId = subjectId;
-            this.prefFacultyId = currentFacultyId;
-            this.prefRoomId = currentRoomId;
-            this.prefSearch = '';
-            this.prefRoomSearch = '';
-            this.prefRoomFilter = 'all';
-            this.prefLoading = true;
-            this.prefOpen = true;
-
-            Promise.all([
-                $wire.getEligibleFacultiesForSubject(subjectId),
-                $wire.getEligibleRoomsForSubject(subjectId),
-                $wire.getSmartHintForSubject(subjectId),
-            ]).then(([faculties, rooms, hint]) => {
-                this.prefFaculties = faculties;
-                this.prefRooms = rooms;
-                this.prefHint = hint;
-                this.prefLoading = false;
-            });
-        },
-
-        get filteredFaculties() {
-            if (!this.prefSearch) return this.prefFaculties;
-            const q = this.prefSearch.toLowerCase();
-            return this.prefFaculties.filter(f =>
-                f.full_name.toLowerCase().includes(q) ||
-                (f.department || '').toLowerCase().includes(q) ||
-                (f.scope_label || '').toLowerCase().includes(q)
-            );
-        },
-
-        get filteredRooms() {
-            let rooms = this.prefRooms;
-            if (this.prefRoomFilter !== 'all') {
-                rooms = rooms.filter(r => r.tier === this.prefRoomFilter);
-            }
-            if (this.prefRoomSearch) {
-                const q = this.prefRoomSearch.toLowerCase();
-                rooms = rooms.filter(r =>
-                    r.room_name.toLowerCase().includes(q) ||
-                    (r.type || '').toLowerCase().includes(q) ||
-                    (r.specialization || '').toLowerCase().includes(q)
-                );
-            }
-            return rooms;
-        },
-
-        get selectedFacultyName() {
-            if (!this.prefFacultyId) return null;
-            const f = this.prefFaculties.find(f => f.id == this.prefFacultyId);
-            return f ? f.full_name : null;
-        },
-
-        get selectedRoomName() {
-            if (!this.prefRoomId) return null;
-            const r = this.prefRooms.find(r => r.id == this.prefRoomId);
-            return r ? r.room_name : null;
-        },
+        bulkOpen: @entangle('bulkOpen')
      }">
     <main class="flex-1 flex flex-col h-screen overflow-hidden">
 
@@ -250,7 +179,7 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
                             </svg>
                             <input type="text" wire:model.live="search"
-                                placeholder="Search by code, subject, faculty, room, or EDP..."
+                                placeholder="Search by code, subject, or EDP..."
                                 class="w-full bg-transparent border-none focus:ring-0 font-semibold text-sm text-slate-800 dark:text-slate-200 placeholder-slate-400 py-3">
                             @if($search)
                                 <button wire:click="$set('search', '')" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition">
@@ -265,123 +194,73 @@
                     {{-- SUBJECTS TABLE --}}
                     <div class="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
                         <div class="overflow-x-auto">
-                            <table class="w-full text-left min-w-[900px]">
+                            <table class="w-full text-left min-w-[920px]">
                                 <thead class="bg-slate-50 dark:bg-slate-800/60 text-[10px] font-extrabold uppercase text-slate-500 dark:text-slate-400 tracking-wide border-b border-slate-200 dark:border-slate-700">
                                     <tr>
-                                        <th class="pl-4 pr-2 py-3 w-8">
+                                        <th class="pl-6 pr-3 py-3 w-10">
                                             <input type="checkbox" wire:model.live="selectAll" @disabled($catalogMode !== 'active')
                                                 class="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 dark:bg-slate-900 text-blue-600 focus:ring-blue-500 transition-all">
                                         </th>
-                                        <th class="px-3 py-3">EDP Code</th>
-                                        <th class="px-3 py-3">Subject</th>
-                                        <th class="px-2 py-3">Section</th>
-                                        <th class="px-2 py-3">Year</th>
-                                        <th class="px-2 py-3">Duration</th>
-                                        <th class="px-2 py-3">Type</th>
-                                        <th class="px-3 py-3">Preferences</th>
-                                        <th class="px-3 py-3 text-right">Actions</th>
+                                        <th class="px-4 py-3">EDP Code</th>
+                                        <th class="px-5 py-3">Subject</th>
+                                        <th class="px-4 py-3 text-center">Section</th>
+                                        <th class="px-4 py-3 text-center">Year</th>
+                                        <th class="px-4 py-3 text-center">Duration</th>
+                                        <th class="px-5 py-3 text-center">Type</th>
+                                        <th class="px-5 py-3 text-right">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody class="divide-y divide-slate-100 dark:divide-slate-800 text-sm">
                                     @forelse($subjects as $subject)
-                                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors {{ in_array($subject->id, $selectedSubjects) ? 'bg-blue-50/50 dark:bg-indigo-900/20' : '' }} align-middle">
+                                    <tr class="align-middle hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors {{ in_array($subject->id, $selectedSubjects) ? 'bg-blue-50/50 dark:bg-indigo-900/20' : '' }}">
 
                                         {{-- Checkbox --}}
-                                        <td class="pl-4 pr-2 py-3.5">
+                                        <td class="pl-6 pr-3 py-4 align-middle">
                                             <input type="checkbox" wire:model.live="selectedSubjects" value="{{ $subject->id }}"
                                                 @disabled($catalogMode !== 'active')
                                                 class="w-3.5 h-3.5 rounded border-slate-300 dark:border-slate-600 dark:bg-slate-900 text-blue-600 focus:ring-blue-500 transition-all">
                                         </td>
 
                                         {{-- EDP Code --}}
-                                        <td class="px-3 py-3.5">
-                                            <span class="font-extrabold text-blue-700 dark:text-indigo-400 text-xs uppercase tracking-wide">{{ $subject->edp_code }}</span>
+                                        <td class="px-4 py-4 align-middle">
+                                            <span class="text-sm font-extrabold text-blue-700 dark:text-blue-400 uppercase tracking-wide">{{ $subject->edp_code }}</span>
                                         </td>
 
                                         {{-- Subject --}}
-                                        <td class="px-3 py-3.5 max-w-[180px]">
-                                            <p class="font-bold uppercase text-xs text-slate-900 dark:text-slate-200 truncate">{{ $subject->subject_code }}</p>
-                                            <p class="text-[11px] text-slate-400 dark:text-slate-500 truncate mt-0.5">{{ $subject->description }}</p>
+                                        <td class="px-5 py-4 align-middle max-w-[240px]">
+                                            <p class="text-base font-extrabold text-slate-900 dark:text-slate-100 uppercase truncate">{{ $subject->subject_code }}</p>
+                                            <p class="text-xs text-slate-600 dark:text-slate-400 font-medium mt-0.5 truncate">{{ $subject->description }}</p>
                                         </td>
 
                                         {{-- Section --}}
-                                        <td class="px-2 py-3.5">
-                                            <span class="px-2 py-0.5 bg-slate-100 dark:bg-slate-700/80 rounded-md text-[11px] font-bold border border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300">
+                                        <td class="px-4 py-4 align-middle text-center">
+                                            <span class="inline-flex min-w-9 items-center justify-center px-2.5 py-1 rounded-lg border border-slate-200 bg-slate-50 text-sm font-bold text-slate-800 dark:border-slate-600 dark:bg-slate-700/80 dark:text-slate-100">
                                                 {{ $subject->section }}
                                             </span>
                                         </td>
 
                                         {{-- Year --}}
-                                        <td class="px-2 py-3.5 text-xs font-bold text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                                        <td class="px-4 py-4 align-middle text-center text-sm font-semibold text-slate-800 dark:text-slate-200 whitespace-nowrap">
                                             Y{{ $subject->year_level }}
                                         </td>
 
                                         {{-- Duration --}}
-                                        <td class="px-2 py-3.5 text-xs font-bold text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                                        <td class="px-4 py-4 align-middle text-center text-sm font-semibold text-slate-800 dark:text-slate-200 whitespace-nowrap">
                                             {{ $subject->duration_hours }}h
                                         </td>
 
                                         {{-- Type --}}
-                                        <td class="px-2 py-3.5">
-                                            <div class="flex flex-col gap-0.5">
-                                                <span class="inline-block px-2 py-0.5 border rounded-md text-[10px] font-black uppercase {{ strtolower($subject->type) === 'major' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-400 dark:border-emerald-800' : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-400 dark:border-amber-800' }}">
+                                        <td class="px-5 py-4 align-middle text-center">
+                                            <div class="flex flex-col items-center justify-center">
+                                                <span class="inline-flex min-w-[6.5rem] items-center justify-center px-3 py-1 border rounded-md text-xs font-extrabold uppercase tracking-wide {{ strtolower($subject->type) === 'major' ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:border-emerald-800' : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-800' }}">
                                                     {{ $subject->type }}
                                                 </span>
-                                                <span class="text-[10px] font-bold text-slate-400 uppercase">{{ $subject->units }}u</span>
-                                            </div>
-                                        </td>
-
-                                        {{-- ============================================================
-                                             COMBINED PREFERENCES COLUMN
-                                             ============================================================ --}}
-                                        <td class="px-3 py-3.5 min-w-[200px]">
-                                            <div class="flex flex-col gap-1">
-
-                                                {{-- Faculty preference pill --}}
-                                                @if($subject->preferredFaculty)
-                                                    <div class="flex items-center gap-1.5">
-                                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 text-[10px] font-bold text-blue-700 dark:text-blue-300 max-w-[170px]">
-                                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                                                                <path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"/>
-                                                            </svg>
-                                                            <span class="truncate">{{ $subject->preferredFaculty->full_name }}</span>
-                                                        </span>
-                                                    </div>
-                                                @endif
-
-                                                {{-- Room preference pill --}}
-                                                @if($subject->preferredRoom)
-                                                    <div class="flex items-center gap-1.5">
-                                                        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 text-[10px] font-bold text-purple-700 dark:text-purple-300 max-w-[170px]">
-                                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5 shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                                                                <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4zm3 1h2v2H7V5zm2 4H7v2h2V9zm2-4h2v2h-2V5zm2 4h-2v2h2V9z" clip-rule="evenodd"/>
-                                                            </svg>
-                                                            <span class="truncate">{{ $subject->preferredRoom->room_name }}</span>
-                                                        </span>
-                                                    </div>
-                                                @endif
-
-                                                @if(!$subject->preferredFaculty && !$subject->preferredRoom)
-                                                    <span class="text-[11px] text-slate-400 dark:text-slate-500 italic">No preference set</span>
-                                                @endif
-
-                                                {{-- Edit Preferences button --}}
-                                                @if($catalogMode === 'active')
-                                                    <button
-                                                        x-on:click="openPrefModal({{ $subject->id }}, {{ $subject->preferred_faculty_id ?? 'null' }}, {{ $subject->preferred_room_id ?? 'null' }})"
-                                                        class="inline-flex items-center gap-1 text-[10px] font-black text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-200 transition w-fit mt-0.5 group">
-                                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3 group-hover:rotate-12 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                                                        </svg>
-                                                        Assign Preferences
-                                                    </button>
-                                                @endif
+                                                <span class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400 tracking-wide">{{ $subject->units }} Units</span>
                                             </div>
                                         </td>
 
                                         {{-- Actions --}}
-                                        <td class="px-3 py-3.5 text-right whitespace-nowrap">
+                                        <td class="px-5 py-4 align-middle text-right whitespace-nowrap">
                                             @if($catalogMode === 'active')
                                                 <button wire:click="editSubject({{ $subject->id }})" title="Edit"
                                                     class="inline-flex items-center justify-center w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/40 transition border border-blue-200 dark:border-blue-800 mr-1">
@@ -479,332 +358,6 @@
             </div>
         </div>
     </main>
-
-    {{-- ================================================================
-         SMART COMBINED PREFERENCES MODAL
-         ================================================================ --}}
-    <div
-        x-show="prefOpen"
-        x-cloak
-        class="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md"
-        x-transition:enter="transition ease-out duration-200"
-        x-transition:enter-start="opacity-0"
-        x-transition:enter-end="opacity-100"
-        x-transition:leave="transition ease-in duration-150"
-        x-transition:leave-start="opacity-100"
-        x-transition:leave-end="opacity-0">
-
-        <div class="bg-white dark:bg-slate-900 w-full max-w-3xl rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-800 overflow-hidden flex flex-col max-h-[92vh]"
-            x-transition:enter="transition ease-out duration-200"
-            x-transition:enter-start="opacity-0 scale-95 translate-y-2"
-            x-transition:enter-end="opacity-100 scale-100 translate-y-0"
-            @click.away="prefOpen = false">
-
-            {{-- ── MODAL HEADER ── --}}
-            <div class="px-6 py-4 border-b border-slate-100 dark:border-slate-800 bg-gradient-to-r from-slate-50 to-white dark:from-slate-900 dark:to-slate-800/50 flex items-start justify-between shrink-0">
-                <div>
-                    <div class="flex items-center gap-2 mb-1">
-                        <div class="h-7 w-7 rounded-lg bg-blue-600 flex items-center justify-center">
-                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
-                            </svg>
-                        </div>
-                        <h3 class="text-base font-black uppercase tracking-wide text-slate-800 dark:text-white">Assign Preferences</h3>
-                    </div>
-                    <p class="text-xs text-slate-400 ml-9">Smart-filtered faculty and room options based on subject type and department</p>
-                </div>
-                <button @click="prefOpen = false" class="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition mt-0.5">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
-                    </svg>
-                </button>
-            </div>
-
-            {{-- ── SUBJECT INFO BADGE ── --}}
-            <div class="px-6 py-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-800 shrink-0">
-                <template x-if="prefHint.subject_info && prefHint.subject_info.subject_code">
-                    <div class="flex flex-wrap items-center gap-2">
-                        <span class="text-[10px] font-black uppercase tracking-widest text-slate-400">Configuring:</span>
-                        <span class="font-extrabold text-xs text-blue-700 dark:text-blue-300 uppercase" x-text="prefHint.subject_info.subject_code"></span>
-                        <span class="text-[10px] text-slate-400" x-text="'— ' + (prefHint.subject_info.description || '')"></span>
-                        <span class="inline-block px-1.5 py-0.5 rounded text-[9px] font-black uppercase"
-                            :class="prefHint.subject_info.type === 'Major' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400'"
-                            x-text="prefHint.subject_info.type || 'Major'">
-                        </span>
-                        <span class="inline-block px-1.5 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-[9px] font-bold text-slate-600 dark:text-slate-300"
-                            x-text="(prefHint.subject_info.major || '') + ' / ' + (prefHint.subject_info.department || '')">
-                        </span>
-                        <template x-if="prefHint.subject_info.requires_lab">
-                            <span class="inline-block px-1.5 py-0.5 rounded bg-orange-100 dark:bg-orange-900/20 text-[9px] font-black text-orange-700 dark:text-orange-400 uppercase">⚗️ Requires Lab</span>
-                        </template>
-                    </div>
-                </template>
-            </div>
-
-            {{-- ── LOADING STATE ── --}}
-            <div x-show="prefLoading" class="flex items-center justify-center py-16 shrink-0">
-                <div class="flex flex-col items-center gap-3">
-                    <div class="relative h-10 w-10">
-                        <div class="absolute inset-0 rounded-full border-4 border-blue-100 dark:border-blue-900/30"></div>
-                        <div class="absolute inset-0 rounded-full border-4 border-blue-600 border-t-transparent animate-spin"></div>
-                    </div>
-                    <p class="text-xs font-bold text-slate-400 uppercase tracking-wide animate-pulse">Filtering eligible options…</p>
-                </div>
-            </div>
-
-            {{-- ── MAIN SCROLLABLE CONTENT ── --}}
-            <div x-show="!prefLoading" class="flex-1 overflow-y-auto">
-                <div class="grid grid-cols-2 divide-x divide-slate-100 dark:divide-slate-800 min-h-0">
-
-                    {{-- ========== LEFT: FACULTY PANEL ========== --}}
-                    <div class="flex flex-col">
-                        <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-blue-50/50 dark:bg-blue-900/10">
-                            <div class="flex items-center gap-2 mb-2">
-                                <div class="h-6 w-6 rounded-md bg-blue-600 flex items-center justify-center shrink-0">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-white" viewBox="0 0 20 20" fill="currentColor">
-                                        <path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"/>
-                                    </svg>
-                                </div>
-                                <span class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">Preferred Faculty</span>
-                            </div>
-                            {{-- Smart hint --}}
-                            <p class="text-[10px] text-blue-700 dark:text-blue-300 font-semibold bg-blue-100 dark:bg-blue-900/30 rounded-lg px-2.5 py-1.5 leading-relaxed" x-text="prefHint.faculty_hint"></p>
-                        </div>
-
-                        {{-- Faculty search --}}
-                        <div class="px-5 py-2.5 border-b border-slate-100 dark:border-slate-800">
-                            <div class="relative">
-                                <input type="text" x-model="prefSearch" placeholder="Search faculty…"
-                                    class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg pl-7 pr-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 transition">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                                </svg>
-                            </div>
-                        </div>
-
-                        {{-- Clear faculty --}}
-                        <div class="px-5 py-2 border-b border-slate-100 dark:border-slate-800">
-                            <button @click="prefFacultyId = null"
-                                :class="!prefFacultyId ? 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-black ring-2 ring-slate-400 dark:ring-slate-500' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'"
-                                class="w-full text-left px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition">
-                                — No Preference (Clear)
-                            </button>
-                        </div>
-
-                        {{-- Faculty list --}}
-                        <div class="flex-1 overflow-y-auto px-5 py-2 space-y-1 max-h-72">
-                            <template x-if="filteredFaculties.length === 0">
-                                <div class="py-8 text-center">
-                                    <p class="text-xs text-slate-400 font-semibold">No eligible faculty found</p>
-                                </div>
-                            </template>
-                            <template x-for="faculty in filteredFaculties" :key="faculty.id">
-                                <button @click="prefFacultyId = faculty.id"
-                                    :class="prefFacultyId == faculty.id
-                                        ? 'bg-blue-600 text-white border-blue-700 shadow-md shadow-blue-500/20'
-                                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-blue-300 dark:hover:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/10'"
-                                    class="w-full text-left px-3 py-2.5 rounded-xl border transition-all flex items-start gap-2.5">
-                                    <div class="h-7 w-7 rounded-full flex items-center justify-center shrink-0 mt-0.5"
-                                        :class="prefFacultyId == faculty.id ? 'bg-white/20' : 'bg-slate-100 dark:bg-slate-700'">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" :class="prefFacultyId == faculty.id ? 'text-white' : 'text-slate-500'" viewBox="0 0 20 20" fill="currentColor">
-                                            <path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"/>
-                                        </svg>
-                                    </div>
-                                    <div class="min-w-0 flex-1">
-                                        <p class="text-xs font-bold truncate leading-tight" x-text="faculty.full_name"></p>
-                                        <div class="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                            <span class="text-[9px] font-black uppercase px-1.5 py-0.5 rounded"
-                                                :class="prefFacultyId == faculty.id ? 'bg-white/20 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-500 dark:text-slate-400'"
-                                                x-text="faculty.scope_label">
-                                            </span>
-                                            <span class="text-[9px] font-semibold opacity-75" x-text="faculty.employment_type"></span>
-                                        </div>
-                                    </div>
-                                    <template x-if="prefFacultyId == faculty.id">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-white shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
-                                        </svg>
-                                    </template>
-                                </button>
-                            </template>
-                        </div>
-
-                        {{-- Faculty count --}}
-                        <div class="px-5 py-2 border-t border-slate-100 dark:border-slate-800 shrink-0">
-                            <p class="text-[10px] text-slate-400 font-semibold" x-text="filteredFaculties.length + ' eligible faculty shown'"></p>
-                        </div>
-                    </div>
-
-                    {{-- ========== RIGHT: ROOM PANEL ========== --}}
-                    <div class="flex flex-col">
-                        <div class="px-5 py-4 border-b border-slate-100 dark:border-slate-800 bg-purple-50/50 dark:bg-purple-900/10">
-                            <div class="flex items-center gap-2 mb-2">
-                                <div class="h-6 w-6 rounded-md bg-purple-600 flex items-center justify-center shrink-0">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-white" viewBox="0 0 20 20" fill="currentColor">
-                                        <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4zm3 1h2v2H7V5zm2 4H7v2h2V9zm2-4h2v2h-2V5zm2 4h-2v2h2V9z" clip-rule="evenodd"/>
-                                    </svg>
-                                </div>
-                                <span class="text-xs font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">Preferred Room</span>
-                            </div>
-                            {{-- Smart hint --}}
-                            <p class="text-[10px] text-purple-700 dark:text-purple-300 font-semibold bg-purple-100 dark:bg-purple-900/30 rounded-lg px-2.5 py-1.5 leading-relaxed" x-text="prefHint.room_hint"></p>
-                        </div>
-
-                        {{-- Room search + filter --}}
-                        <div class="px-5 py-2.5 border-b border-slate-100 dark:border-slate-800 space-y-1.5">
-                            <div class="relative">
-                                <input type="text" x-model="prefRoomSearch" placeholder="Search rooms…"
-                                    class="w-full bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg pl-7 pr-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-slate-200 placeholder-slate-400 focus:ring-1 focus:ring-purple-500 focus:border-purple-500 transition">
-                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-                                </svg>
-                            </div>
-                            {{-- Tier filter tabs --}}
-                            <div class="flex gap-1">
-                                <button @click="prefRoomFilter = 'all'"
-                                    :class="prefRoomFilter === 'all' ? 'bg-slate-700 text-white dark:bg-slate-200 dark:text-slate-800' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'"
-                                    class="flex-1 text-[9px] font-black uppercase tracking-wide py-1 rounded-md transition">All</button>
-                                <button @click="prefRoomFilter = 'recommended'"
-                                    :class="prefRoomFilter === 'recommended' ? 'bg-emerald-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-emerald-50 dark:hover:bg-emerald-900/10'"
-                                    class="flex-1 text-[9px] font-black uppercase tracking-wide py-1 rounded-md transition">⭐ Best</button>
-                                <button @click="prefRoomFilter = 'available'"
-                                    :class="prefRoomFilter === 'available' ? 'bg-slate-600 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'"
-                                    class="flex-1 text-[9px] font-black uppercase tracking-wide py-1 rounded-md transition">Other</button>
-                            </div>
-                        </div>
-
-                        {{-- Clear room --}}
-                        <div class="px-5 py-2 border-b border-slate-100 dark:border-slate-800">
-                            <button @click="prefRoomId = null"
-                                :class="!prefRoomId ? 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 font-black ring-2 ring-slate-400 dark:ring-slate-500' : 'bg-slate-100 dark:bg-slate-800 text-slate-500 hover:bg-slate-200 dark:hover:bg-slate-700'"
-                                class="w-full text-left px-3 py-2 rounded-lg text-[10px] font-bold uppercase tracking-wider transition">
-                                — No Preference (Clear)
-                            </button>
-                        </div>
-
-                        {{-- Room list --}}
-                        <div class="flex-1 overflow-y-auto px-5 py-2 space-y-1 max-h-72">
-                            <template x-if="filteredRooms.length === 0">
-                                <div class="py-8 text-center">
-                                    <p class="text-xs text-slate-400 font-semibold">No rooms match the filter</p>
-                                </div>
-                            </template>
-                            <template x-for="room in filteredRooms" :key="room.id">
-                                <button @click="prefRoomId = room.id"
-                                    :class="prefRoomId == room.id
-                                        ? 'bg-purple-600 text-white border-purple-700 shadow-md shadow-purple-500/20'
-                                        : 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-purple-300 dark:hover:border-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/10'"
-                                    class="w-full text-left px-3 py-2.5 rounded-xl border transition-all flex items-start gap-2.5">
-                                    {{-- Room type icon --}}
-                                    <div class="h-7 w-7 rounded-full flex items-center justify-center shrink-0 mt-0.5"
-                                        :class="prefRoomId == room.id ? 'bg-white/20' : (room.tier === 'recommended' ? 'bg-emerald-100 dark:bg-emerald-900/30' : 'bg-slate-100 dark:bg-slate-700')">
-                                        <template x-if="room.type && room.type.toLowerCase().includes('lab')">
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" :class="prefRoomId == room.id ? 'text-white' : (room.tier === 'recommended' ? 'text-emerald-600' : 'text-slate-400')" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fill-rule="evenodd" d="M7 2a1 1 0 00-.707 1.707L7 4.414v3.758a1 1 0 01-.293.707l-4 4C.817 14.769 2.156 18 4.828 18h10.343c2.673 0 4.012-3.231 2.122-5.121l-4-4A1 1 0 0113 8.172V4.414l.707-.707A1 1 0 0013 2H7zm2 6.172V4h2v4.172a3 3 0 00.879 2.12l1.027 1.028a4 4 0 00-2.171.102l-.47.156a4 4 0 01-2.53 0l-.563-.187a1.993 1.993 0 00-.114-.035l1.063-1.063A3 3 0 009 8.172z" clip-rule="evenodd"/>
-                                            </svg>
-                                        </template>
-                                        <template x-if="!room.type || !room.type.toLowerCase().includes('lab')">
-                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" :class="prefRoomId == room.id ? 'text-white' : 'text-slate-400'" viewBox="0 0 20 20" fill="currentColor">
-                                                <path fill-rule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4zm3 1h2v2H7V5zm2 4H7v2h2V9zm2-4h2v2h-2V5zm2 4h-2v2h2V9z" clip-rule="evenodd"/>
-                                            </svg>
-                                        </template>
-                                    </div>
-                                    <div class="min-w-0 flex-1">
-                                        <div class="flex items-center gap-1.5">
-                                            <p class="text-xs font-bold truncate leading-tight" x-text="room.room_name"></p>
-                                            <template x-if="room.tier === 'recommended' && prefRoomId != room.id">
-                                                <span class="shrink-0 text-[8px] font-black bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 px-1 py-0.5 rounded uppercase">Best</span>
-                                            </template>
-                                        </div>
-                                        <div class="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                                            <span class="text-[9px] font-bold"
-                                                :class="prefRoomId == room.id ? 'text-white/70' : 'text-slate-400'"
-                                                x-text="room.type">
-                                            </span>
-                                            <template x-if="room.specialization">
-                                                <span class="text-[9px] font-semibold"
-                                                    :class="prefRoomId == room.id ? 'text-white/60' : 'text-slate-400'"
-                                                    x-text="'· ' + room.specialization">
-                                                </span>
-                                            </template>
-                                            <span class="text-[9px]"
-                                                :class="prefRoomId == room.id ? 'text-white/50' : 'text-slate-400'"
-                                                x-text="room.capacity ? '· Cap: ' + room.capacity : ''">
-                                            </span>
-                                        </div>
-                                        <p class="text-[9px] mt-0.5 leading-tight"
-                                            :class="prefRoomId == room.id ? 'text-white/60' : 'text-slate-400'"
-                                            x-text="room.reason">
-                                        </p>
-                                    </div>
-                                    <template x-if="prefRoomId == room.id">
-                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 text-white shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
-                                        </svg>
-                                    </template>
-                                </button>
-                            </template>
-                        </div>
-
-                        {{-- Room count --}}
-                        <div class="px-5 py-2 border-t border-slate-100 dark:border-slate-800 shrink-0">
-                            <p class="text-[10px] text-slate-400 font-semibold" x-text="filteredRooms.length + ' rooms shown'"></p>
-                        </div>
-                    </div>
-                </div>
-
-                {{-- ── CURRENT SELECTION SUMMARY ── --}}
-                <div class="px-6 py-3 bg-slate-50 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800">
-                    <div class="flex items-center gap-3 flex-wrap">
-                        <span class="text-[10px] font-black uppercase tracking-widest text-slate-400">Selection:</span>
-                        <div class="flex items-center gap-1.5 flex-wrap">
-                            <template x-if="selectedFacultyName">
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-[10px] font-bold">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5" viewBox="0 0 20 20" fill="currentColor"><path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"/></svg>
-                                    <span x-text="selectedFacultyName"></span>
-                                </span>
-                            </template>
-                            <template x-if="!selectedFacultyName">
-                                <span class="text-[10px] text-slate-400 italic">No faculty</span>
-                            </template>
-                            <span class="text-slate-300 dark:text-slate-600">·</span>
-                            <template x-if="selectedRoomName">
-                                <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 text-[10px] font-bold">
-                                    <svg xmlns="http://www.w3.org/2000/svg" class="h-2.5 w-2.5" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M4 4a2 2 0 012-2h8a2 2 0 012 2v12a1 1 0 01-1 1H5a1 1 0 01-1-1V4zm3 1h2v2H7V5zm2 4H7v2h2V9zm2-4h2v2h-2V5zm2 4h-2v2h2V9z" clip-rule="evenodd"/></svg>
-                                    <span x-text="selectedRoomName"></span>
-                                </span>
-                            </template>
-                            <template x-if="!selectedRoomName">
-                                <span class="text-[10px] text-slate-400 italic">No room</span>
-                            </template>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {{-- ── MODAL FOOTER ── --}}
-            <div class="px-6 py-4 bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-800 flex gap-3 shrink-0">
-                <button @click="prefOpen = false"
-                    class="flex-1 py-2.5 bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-200 rounded-xl border-2 border-slate-200 dark:border-slate-600 font-bold text-xs uppercase tracking-wide hover:bg-slate-100 dark:hover:bg-slate-600 transition">
-                    Cancel
-                </button>
-                <button
-                    x-on:click="
-                        $wire.set('assignFacultyId', prefFacultyId || null);
-                        $wire.set('assignRoomId', prefRoomId || null);
-                        $wire.savePreferredFacultyAndRoom(prefSubjectId);
-                        prefOpen = false;
-                    "
-                    class="flex-1 py-2.5 bg-blue-600 text-white rounded-xl font-bold text-xs uppercase tracking-wide shadow-md shadow-blue-500/20 hover:bg-blue-700 active:scale-95 transition flex items-center justify-center gap-2">
-                    <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
-                    </svg>
-                    Save Preferences
-                </button>
-            </div>
-        </div>
-    </div>
 
     {{-- ================================================================
          PROTECTED DELETE MODAL (unchanged)
