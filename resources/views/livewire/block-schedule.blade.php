@@ -97,7 +97,7 @@
                     <div>
                         <h1 class="text-[28px] font-black uppercase tracking-tighter
                                    text-slate-800 dark:text-slate-100 leading-none">
-                            Study Load
+                            Blocked Schedule
                         </h1>
                         <h2 class="text-[17px] font-bold text-blue-600 dark:text-blue-400
                                    uppercase tracking-tight mt-1">

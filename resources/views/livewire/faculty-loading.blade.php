@@ -25,46 +25,8 @@
 @endphp
 <div
     x-data="{
-        assignmentOpen: @entangle('scheduleModalOpen').live,
-        toasts: [],
-        addToast(toast) {
-            const id = Date.now() + Math.random();
-            const item = {
-                id,
-                type: toast.type || 'success',
-                message: toast.message || '',
-                timeout: null
-            };
-            this.toasts.push(item);
-            item.timeout = setTimeout(() => this.removeToast(id), 4200);
-        },
-        removeToast(id) {
-            const toast = this.toasts.find((item) => item.id === id);
-            if (toast && toast.timeout) {
-                clearTimeout(toast.timeout);
-            }
-            this.toasts = this.toasts.filter((item) => item.id !== id);
-        },
-        toastClasses(type) {
-            return {
-                success: 'border-emerald-400/60 bg-emerald-500 text-white shadow-emerald-950/30',
-                warning: 'border-amber-300/70 bg-amber-500 text-slate-950 shadow-amber-950/20',
-                error:   'border-red-400/70 bg-red-600 text-white shadow-red-950/30'
-            }[type] || 'border-sky-400/60 bg-slate-900 text-white shadow-slate-950/30';
-        },
-        toastIcon(type) {
-            return {
-                success: 'OK',
-                warning: '!',
-                error:   '!'
-            }[type] || 'i';
-        },
-        initLoadingModule() {
-            console.log('Faculty Loading Module Initialized');
-        }
+        assignmentOpen: @entangle('scheduleModalOpen').live
     }"
-    x-init="initLoadingModule()"
-    x-on:toast.window="addToast($event.detail)"
     class="faculty-loading-shell h-[calc(100vh-7rem)] min-h-[36rem] overflow-hidden bg-slate-100 text-slate-900 dark:bg-[#06111f] dark:text-slate-100 md:h-[calc(100vh-8rem)]"
 >
     <div class="flex h-full min-h-0 flex-col overflow-hidden lg:flex-row">
@@ -280,22 +242,19 @@
                                 {{ $currentFaculty->employee_id }} / {{ $currentFaculty->displayDepartment() }}
                             </p>
                         </div>
-                        <div class="no-print flex flex-wrap gap-2">
-                            <button type="button" wire:click="openAssignmentPanel({{ $currentFaculty->id }})" class="rounded-lg bg-sky-500 px-4 py-2 text-xs font-black uppercase tracking-widest text-white shadow-sm transition hover:bg-sky-600 active:scale-95 dark:bg-sky-400 dark:text-slate-950 dark:shadow-lg dark:shadow-sky-950/30 dark:hover:bg-sky-300">
+                        <div class="no-print flex flex-wrap items-center gap-2">
+                            {{-- Main Action Button - Enlarged --}}
+                            <button type="button" wire:click="openAssignmentPanel({{ $currentFaculty->id }})" 
+                                class="flex-1 rounded-lg bg-sky-500 px-6 py-3 text-sm font-black uppercase tracking-widest text-white shadow-md transition hover:bg-sky-600 active:scale-95 dark:bg-sky-400 dark:text-slate-950 dark:shadow-lg dark:shadow-sky-950/30 dark:hover:bg-sky-300 min-w-[200px]">
                                 Assign Subject / Schedule
                             </button>
-                            <button type="button" wire:click="submitFacultyLoading" class="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-black uppercase tracking-widest text-emerald-700 transition hover:bg-emerald-100 active:scale-95 dark:border-emerald-300/30 dark:bg-emerald-400/12 dark:text-emerald-100 dark:hover:bg-emerald-400/20">
-                                Submit Loading
-                            </button>
-                            <button type="button" x-on:click="window.print()" class="rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-50 active:scale-95 dark:border-white/10 dark:bg-white/8 dark:text-white dark:hover:bg-white/12">
-                                Print
-                            </button>
+                            
                         </div>
                     </div>
                     {{-- Specialized Faculty Load Cards --}}
                     <div class="mt-5 grid gap-4 md:grid-cols-2">
                         @if(!$currentFaculty->isGenEd())
-                        <div class="load-card rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-amber-300/20 dark:bg-slate-900/40 dark:shadow-xl dark:shadow-amber-950/10">
+                        <div class="load-card rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-amber-300/20 dark:bg-slate-900/40 dark:shadow-xl dark:shadow-amber-950/10 {{ !$currentFaculty->canTeachMinorSubjects() ? 'md:col-span-2' : '' }}">
                             <div class="mb-4 flex items-center justify-between">
                                 <div>
                                     <p class="text-[11px] font-black uppercase tracking-[0.22em] text-amber-600 dark:text-amber-300">Major Load</p>
@@ -330,6 +289,7 @@
                             @endif
                         </div>
                         @endif
+                        @if($currentFaculty->canTeachMinorSubjects())
                         <div class="load-card rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:bg-slate-900/40 dark:backdrop-blur-md {{ $currentFaculty->isGenEd() ? 'md:col-span-2 dark:border-sky-300/25 dark:shadow-sky-950/10' : 'dark:border-violet-300/20 dark:shadow-violet-950/10' }}">
                             <div class="mb-4 flex items-center justify-between">
                                 <div>
@@ -381,6 +341,7 @@
                                 </div>
                             @endif
                         </div>
+                        @endif
                     </div>
                     {{-- Total load progress bar --}}
                     <div class="mt-4 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-white/10 dark:bg-white/[0.03]">
@@ -532,6 +493,13 @@
                                     </button>
                                 </div>
                             @endif
+                            {{-- PRINT BUTTON BELOW TABLE --}}
+                            <div class="no-print border-t border-slate-200 bg-slate-50/70 p-4 dark:border-white/10 dark:bg-white/[0.025] flex justify-end">
+                                <button type="button" x-on:click="window.print()" 
+                                    class="rounded-lg border border-slate-300 bg-white px-5 py-2.5 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-100 active:scale-95 dark:border-white/20 dark:bg-white/10 dark:text-white dark:hover:bg-white/15 shadow-sm">
+                                    Print Schedule
+                                </button>
+                            </div>
                         </div>
                     @endif
                     @if($activeTab === 'schedule')
@@ -718,12 +686,7 @@
                                 @endif
                             </p>
                         </div>
-                        <button wire:click="generateSchedules"
-                                wire:loading.attr="disabled"
-                                class="shrink-0 rounded-xl bg-gradient-to-r from-sky-500 to-blue-600 px-6 py-3 text-xs font-black uppercase tracking-widest text-white shadow-sm transition hover:scale-105 hover:shadow-md active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 dark:shadow-xl dark:shadow-sky-950/30">
-                            <span wire:loading.remove wire:target="generateSchedules">⚡ Auto-Generate Schedule</span>
-                            <span wire:loading wire:target="generateSchedules">🔄 Processing...</span>
-                        </button>
+                        
                     </div>
                     {{-- Overview cards --}}
                     <div class="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -1373,33 +1336,6 @@
     {{-- ============================================================ --}}
     {{-- TOAST NOTIFICATIONS --}}
     {{-- ============================================================ --}}
-    <div class="faculty-loading-toasts pointer-events-none fixed right-5 top-5 z-[120] w-[min(24rem,calc(100vw-2rem))] space-y-3">
-        <template x-for="toast in toasts" :key="toast.id">
-            <div
-                x-transition:enter="transition ease-out duration-300"
-                x-transition:enter-start="opacity-0 translate-x-6 scale-95"
-                x-transition:enter-end="opacity-100 translate-x-0 scale-100"
-                x-transition:leave="transition ease-in duration-200"
-                x-transition:leave-start="opacity-100 translate-x-0 scale-100"
-                x-transition:leave-end="opacity-0 translate-x-6 scale-95"
-                class="pointer-events-auto flex items-start gap-3 rounded-xl border px-4 py-3 shadow-2xl"
-                :class="toastClasses(toast.type)"
-            >
-                <div class="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/20 text-sm font-black">
-                    <span x-text="toastIcon(toast.type)"></span>
-                </div>
-                <p class="min-w-0 flex-1 text-sm font-bold leading-5 tracking-wide" x-text="toast.message"></p>
-                <button
-                    type="button"
-                    x-on:click="removeToast(toast.id)"
-                    class="rounded-md px-1.5 text-lg font-black leading-none text-current/80 transition hover:bg-white/15 hover:text-current"
-                    aria-label="Dismiss notification"
-                >
-                    &times;
-                </button>
-            </div>
-        </template>
-    </div>
     {{-- ============================================================ --}}
     {{-- STYLES --}}
     {{-- ============================================================ --}}
@@ -1448,6 +1384,96 @@
                 background: white !important;
                 color: #0f172a !important;
             }
+            /* Print stylesheet - Show only schedule table */
+            body {
+                background: white !important;
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                padding: 0;
+                margin: 0;
+            }
+            .faculty-loading-shell {
+                display: flex;
+                flex-direction: column;
+                height: auto !important;
+                background: white !important;
+                color: #0f172a !important;
+                padding: 40px;
+            }
+            /* Hide everything except header and subjects table */
+            .faculty-loading-shell > div > section:not(:has(table)) {
+                display: none !important;
+            }
+            .faculty-loading-shell > div > section:nth-of-type(1) {
+                display: block !important;
+                page-break-inside: avoid;
+                border: none !important;
+                background: transparent !important;
+                padding: 0 !important;
+            }
+            /* Hide tabs and other UI elements */
+            [role='tablist'], .no-print, [x-on\:click] { display: none !important; }
+            /* Format table for print */
+            table {
+                width: 100%;
+                border-collapse: collapse;
+                margin-top: 30px;
+                page-break-inside: avoid;
+            }
+            thead {
+                background: #f3f4f6 !important;
+                color: #1f2937 !important;
+                font-weight: 600 !important;
+                border-top: 2px solid #1f2937 !important;
+                border-bottom: 2px solid #1f2937 !important;
+            }
+            th {
+                padding: 12px 8px !important;
+                text-align: left !important;
+                font-size: 11px !important;
+                font-weight: 700 !important;
+            }
+            td {
+                padding: 10px 8px !important;
+                border-bottom: 1px solid #d1d5db !important;
+                font-size: 10px !important;
+            }
+            tbody tr {
+                page-break-inside: avoid;
+            }
+            /* Hide action buttons in print */
+            td:last-child { display: none !important; }
+            th:last-child { display: none !important; }
+            /* Print header styling */
+            h1, h2 {
+                color: #1f2937 !important;
+                margin: 0 0 5px 0 !important;
+                font-size: 28px !important;
+                font-weight: 700 !important;
+            }
+            .rounded-full, .shadow-sm, .shadow-md, [class*='shadow'] {
+                box-shadow: none !important;
+            }
+            /* Keep only essential columns */
+            .custom-scrollbar {
+                overflow: visible !important;
+            }
+            /* Print-friendly colors */
+            .bg-blue-50, .bg-amber-50, .bg-indigo-50 {
+                background: white !important;
+                color: #000 !important;
+            }
+            .text-sky-700, .text-amber-700, .text-indigo-700, .text-emerald-700 {
+                color: #1f2937 !important;
+            }
+            /* Prevent page breaks in middle of content */
+            .rounded-xl, .border {
+                page-break-inside: avoid;
+                border-color: #d1d5db !important;
+            }
+        }
+        @page {
+            margin: 1cm;
+            size: A4 portrait;
         }
     </style>
 </div>

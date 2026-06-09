@@ -376,25 +376,12 @@
         {{-- ── Logo ── --}}
         <div class="flex items-center h-16 px-4 border-b shrink-0" style="border-color: var(--sidebar-border);">
             <div class="flex items-center gap-3 w-full overflow-hidden">
-                {{-- Icon mark --}}
-                <div class="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 text-white font-black text-sm"
-                     style="background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%); box-shadow: 0 0 16px rgba(37,99,235,0.5);">
-                    C
-                </div>
+                {{-- Logo Image --}}
+                <img src="{{ asset('logo.png') }}" alt="Classly Logo" class="w-8 h-8 shrink-0">
                 {{-- Wordmark --}}
                 <div class="logo-wordmark flex flex-col leading-none">
                     <span class="text-white font-black text-[15px] tracking-tight uppercase">Classly<span class="text-blue-500">.</span></span>
-                    <span class="text-slate-600 font-bold text-[8px] uppercase tracking-[0.2em] mt-0.5">Academy OS</span>
-                </div>
-                {{-- Spacer + pin --}}
-                <div class="ml-auto pin-btn shrink-0">
-                    <button @click="togglePin()" title="Pin sidebar"
-                        class="p-1.5 rounded-md transition-all duration-150 text-slate-600 hover:text-blue-400 hover:bg-white/5"
-                        :class="{ 'text-blue-400': sidebarPinned }">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" fill="currentColor" viewBox="0 0 24 24">
-                            <path d="M16 12V4h1V2H7v2h1v8l-2 2v2h5.2v6h1.6v-6H18v-2l-2-2z"/>
-                        </svg>
-                    </button>
+                    <span class="text-slate-600 font-bold text-[7px] uppercase tracking-[0.2em] mt-0.5">Your Friendly Class Scheduler</span>
                 </div>
             </div>
         </div>
@@ -636,7 +623,7 @@
                     Professional Academy of the Philippines
                 </h3>
                 <p class="text-[9px] text-blue-500 font-black uppercase tracking-[0.28em] leading-tight mt-0.5 hidden sm:block">
-                    Academic Personnel Management
+                    ClassLy - Class Scheduling Management System
                 </p>
                 <h3 class="text-[13px] font-black text-slate-100 tracking-tight uppercase sm:hidden">PAP</h3>
             </div>

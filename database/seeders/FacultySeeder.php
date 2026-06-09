@@ -14,36 +14,23 @@ class FacultySeeder extends Seeder
     {
         // Primary Test Entry
         Faculty::create([
-            'full_name' => 'Jemer Paul Agujetas',
-            'employee_id' => 'FAC-2026-001',
-            'department' => 'CCS',
-            'faculty_scope' => Faculty::SCOPE_DEPARTMENTAL,
-            'can_teach_minor' => false,
+        'full_name' => 'Simon Demo',
+        'employee_id' => 'FAC-2026-001',
+        'faculty_id' => 1, // Or whatever value your database is looking for!
+        'department' => 'CCS',
+        'faculty_scope' => Faculty::SCOPE_DEPARTMENTAL,
+        'can_teach_minor' => false,
         ]);
 
         // Additional Team Members for testing the Grid
         Faculty::create([
-            'full_name' => 'Eurel Panilag',
+            'full_name' => 'Rasmus Demo',
             'employee_id' => 'FAC-2026-002',
+            'faculty_id' => 2,
             'department' => 'CCS',
             'faculty_scope' => Faculty::SCOPE_DEPARTMENTAL,
             'can_teach_minor' => true,
         ]);
 
-        Faculty::create([
-            'full_name' => 'Trixie Tinapao',
-            'employee_id' => 'FAC-2026-003',
-            'department' => 'CCS',
-            'faculty_scope' => Faculty::SCOPE_CROSS_DEPARTMENT,
-            'can_teach_minor' => true,
-        ]);
-
-        Faculty::create([
-            'full_name' => 'Mitch Lombreno',
-            'employee_id' => 'FAC-2026-004',
-            'department' => null,
-            'faculty_scope' => Faculty::SCOPE_GENED,
-            'can_teach_minor' => true,
-        ]);
     }
 }

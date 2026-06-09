@@ -122,21 +122,25 @@ class FacultyLoading extends Component
         $this->activeTab = $tab;
     }
 
-    public function openAssignmentPanel(?int $facultyId = null): void
-    {
-        if ($facultyId !== null && (int) $this->selectedFacultyId !== $facultyId) {
-            $this->selectFaculty($facultyId);
+    public function openAssignmentPanel(?int $scheduleId = null, ?int $facultyId = null): void
+{
+    if ($scheduleId) {
+        // Load the schedule to get the CURRENT faculty assignment
+        $schedule = Schedule::activeTerm()->find($scheduleId);
+        
+        if ($schedule) {
+            // Pre-select the CURRENT faculty, don't pick a random one
+            $this->selectedFacultyId = $schedule->faculty_id;
+            $this->pendingAssignmentScheduleId = $scheduleId;
+            // ... open modal
         }
-
-        if (! $this->selectedFacultyId) {
-            $this->toast('error', 'Please select a faculty member first.');
-
-            return;
-        }
-
-        $this->scheduleModalOpen = true;
-        $this->activeTab = 'subjects';
+    } elseif ($facultyId) {
+        // Coming from the "Open Assignment Panel" button
+        $this->selectedFacultyId = $facultyId;
     }
+    
+    $this->scheduleModalOpen = true;
+}
 
     public function initializeRawSubjectAssignment(int $subjectId, string $section = 'A', ?int $facultyId = null): void
 {

@@ -19,7 +19,7 @@ return new class extends Migration
             }
 
             if (!Schema::hasColumn('schedules', 'department')) {
-                $table->string('department')->nullable()->after('user_id')->index();
+                $table->string('department')->nullable()->after('faculty_id')->index();
             }
 
             if (!Schema::hasColumn('schedules', 'major')) {

@@ -2,6 +2,7 @@
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 
 return new class extends Migration
 {
@@ -19,7 +20,6 @@ return new class extends Migration
             SET status = 'faculty_locked'
             WHERE status = 'faculty_assigned'
             AND (day IS NULL OR start_time IS NULL OR end_time IS NULL OR room_id IS NULL)
-            AND faculty_id IS NOT NULL
         ");
     }
 
@@ -28,6 +28,10 @@ return new class extends Migration
      */
     public function down(): void
     {
+        if (!Schema::hasColumn('schedules', 'status')) {
+            return;
+        }
+
         // Revert status changes
         DB::statement("
             UPDATE schedules 
