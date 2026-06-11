@@ -27,6 +27,7 @@ class Subject extends Model
         'subject_type',
         'requires_lab',
         'preferred_room_type',
+        'preferred_room_id',
         'specialization',
         'meetings_per_week',
         'faculty_id',

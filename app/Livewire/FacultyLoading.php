@@ -461,7 +461,7 @@ public function confirmRawSubjectAssignment(bool $overridden = false): void
 
         return $this->activeScheduleQuery()
             ->where('faculty_id', $this->selectedFacultyId)
-            ->with(['subject', 'room'])
+            ->with(['subject.preferredRoom', 'room'])
             ->orderBy('start_time')
             ->get()
             ->pipe(fn (Collection $schedules) => $this->sortSchedules($schedules));
@@ -549,8 +549,16 @@ public function confirmRawSubjectAssignment(bool $overridden = false): void
  
             // If pre-assigned but no room yet, use fallback
             $displayRoom = $room?->room_name ?? 'No room';
+            $preferredRoomName = null;
             if ($isPreAssigned && !$hasFullyScheduled) {
-                $displayRoom = 'No room'; // Will be converted to "TBA" in blade
+                // Check if the subject has a room pre-assigned via ManageRooms
+                $preferredRoom = $first->subject?->preferredRoom;
+                if ($preferredRoom) {
+                    $preferredRoomName = $preferredRoom->room_name;
+                    $displayRoom = $preferredRoom->room_name;
+                } else {
+                    $displayRoom = 'No room'; // Will be converted to "TBA" in blade
+                }
             }
  
             return [
@@ -559,6 +567,7 @@ public function confirmRawSubjectAssignment(bool $overridden = false): void
                 'description'       => $subject?->description ?? 'Untitled subject',
                 'group'             => "{$department} / {$major} / Y{$year} / {$section}",
                 'room'              => $displayRoom,
+                'preferred_room_name' => $preferredRoomName,
                 'schedule'          => $scheduleLines,
                 'units'             => $subject?->units ?? 0,
                 'type'              => $subject?->type ?? 'N/A',

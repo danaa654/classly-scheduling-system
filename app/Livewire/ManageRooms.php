@@ -3,11 +3,13 @@
 namespace App\Livewire;
 
 use App\Models\Room;
+use App\Models\Subject;  
 use App\Models\User;
 use Livewire\Component;
 use Livewire\WithPagination;
 use Livewire\WithFileUploads;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\DB;
 use App\Notifications\GeneralNotification;
 
 class ManageRooms extends Component
@@ -33,10 +35,25 @@ class ManageRooms extends Component
     public $department_owner = '';
     public $allowed_departments = [];
     public bool $is_specialized = false;
+
+      // ─── Assign Subjects Modal ─────────────────────────────────────────────
+    public bool   $showAssignModal     = false;
+    public ?int   $assigningRoomId     = null;
+    public array  $assigningRoomData   = [];   // Serialised room metadata for Blade
+    public array  $modalSubjects       = [];   // Smart-filtered eligible subjects
+    public array  $selectedSubjectIds  = [];   // Checkbox-bound IDs (Livewire stores as strings)
+    public float  $selectedWeeklyHours = 0.0;  // Live running total of selected hours
+    public string $capacityWarning     = '';   // Non-empty string → alert shown in modal
+ 
+    // Maximum teaching hours one room should absorb per week (used for validation)
+    private const MAX_WEEKLY_ROOM_HOURS = 40;
     
     public $showModal = false;
     public $bulkOpen = false; 
     public $isEditMode = false;
+
+    /** Tracks which room rows are currently expanded to show their allocated subjects. */
+    public $expandedRooms = [];
 
     protected function messages() {
         return [
@@ -388,16 +405,450 @@ class ManageRooms extends Component
         ]);
     }
 
-    public function render() 
+    public function openAssignModal(int $roomId): void
+    {
+        $this->resetAssignModal();
+ 
+        $room     = Room::findOrFail($roomId);
+        $roomType = strtoupper(trim($room->type ?? ''));
+        $groupKey = $this->detectSpecializationGroupKey($room);
+        $allowedDepts = $groupKey ? self::roomSpecializationGroups()[$groupKey] : [];
+ 
+        // ── Store room metadata for the Blade view ──────────────────────────
+        $this->assigningRoomId  = $room->id;
+        $this->assigningRoomData = [
+            'id'               => $room->id,
+            'room_name'        => $room->room_name,
+            'type'             => $roomType,
+            'specialization'   => $room->specialization ?? '',
+            'filter_label' => $this->getFilterLabel($room),
+            'department_owner' => $room->department_owner ?? '',
+            'capacity'         => $room->capacity,
+            // Human-readable label shown in the modal filter badge
+            'filter_label'     => $allowedDepts
+                ? implode(' / ', $allowedDepts) . ' · ' . ucfirst(strtolower($roomType)) . ($roomType === 'LAB' ? ' · MAJOR' : ' · MINOR')
+                : ucfirst(strtolower($roomType)) . ($roomType === 'LAB' ? ' (All Departments) · MAJOR' : ' (All Departments) · MINOR'),
+        ];
+ 
+        $query = Subject::activeTerm()
+            ->orderBy('department')
+            ->orderBy('year_level')
+            ->orderBy('section')
+            ->orderBy('subject_code');
+ 
+        // ── TIER 1: Room-type filtering (LAB vs LECTURE) ────────────────────
+        // LAB rooms  → Major subjects only  (core departmental courses)
+        // LECTURE rooms → Minor subjects only (general ed, electives)
+        if ($roomType === 'LAB') {
+            $query->where('type', 'Major');
+        } else {
+            $query->where('type', 'Minor');
+        }
+ 
+        if ($allowedDepts && ! empty($allowedDepts)) {
+            $query->where(function ($q) use ($allowedDepts) {
+                // Match 1: Subject's department is in the allowed departments
+                $q->whereIn('department', $allowedDepts)
+                  // Match 2: Subject's major is in the allowed departments
+                  ->orWhereIn('major', $allowedDepts)
+                  // Match 3: Subject's specialization contains keywords from allowed depts
+                  ->orWhere(function ($inner) use ($allowedDepts) {
+                      foreach ($allowedDepts as $dept) {
+                          $inner->orWhere('specialization', 'like', "%{$dept}%");
+                      }
+                  });
+            });
+        }
+
+        $this->modalSubjects = $query
+            ->with('preferredRoom')   // avoids N+1 when rendering the "claimed by" badge
+            ->get()
+            ->map(fn (Subject $s) => [
+                'id'                  => $s->id,
+                'edp_code'            => $s->edp_code,
+                'subject_code'        => $s->subject_code,
+                'description'         => $s->description,
+                'department'          => $s->department,
+                'major'               => $s->major,
+                'year_level'          => $s->year_level,
+                'section'             => $s->section ?? '—',
+                'units'               => (int) $s->units,
+                'duration_hours'      => (float) $s->duration_hours,
+                'meetings_per_week'   => (int) ($s->meetings_per_week ?? 1),
+                // Pre-computed so Blade & capacity calc never divide by zero
+                'weekly_hours'        => round(
+                    (float) $s->duration_hours * max(1, (int) ($s->meetings_per_week ?? 1)),
+                    1
+                ),
+                'requires_lab'        => (bool) $s->requires_lab,
+                // Preferred-room data — used to render the "⚠️ Prefers Room: X" badge
+                // when the subject is already bound to a *different* room.
+                'preferred_room_id'   => $s->preferred_room_id,
+                'preferred_room_name' => $s->preferredRoom?->room_name,
+            ])
+            ->toArray();
+ 
+        // ── Pre-tick subjects already bound to this room ─────────────────────
+        $this->selectedSubjectIds = Subject::activeTerm()
+            ->where('preferred_room_id', $roomId)
+            ->pluck('id')
+            ->map(fn ($id) => (string) $id) // Livewire checkboxes store strings
+            ->toArray();
+ 
+        $this->recalculateCapacity();
+        $this->showAssignModal = true;
+    }
+ 
+    public function loadAvailableSubjects(): void
+{
+    if (! $this->assigningRoomId) {
+        $this->modalSubjects = [];
+        return;
+    }
+
+    $room     = Room::findOrFail($this->assigningRoomId);
+    
+    // =====================================================================
+    // CRITICAL FIX: Determine room type (case-insensitive)
+    // Handle both 'Lab', 'LAB', 'Laboratory', and 'Lecture', 'LECTURE'
+    // =====================================================================
+    $rawRoomType = strtoupper(trim($room->type ?? ''));
+    $isLabRoom = in_array($rawRoomType, ['LAB', 'LABORATORY'], true);
+    
+    $groupKey = $this->detectSpecializationGroupKey($room);
+    $allowedDepts = $groupKey ? self::roomSpecializationGroups()[$groupKey] : [];
+
+    // Start base query with ordering
+    $query = Subject::activeTerm()
+        ->orderBy('department')
+        ->orderBy('year_level')
+        ->orderBy('section')
+        ->orderBy('subject_code');
+
+    // =====================================================================
+    // ROOM-TYPE FILTERING (by subject type: Major vs Minor)
+    // =====================================================================
+    // LAB rooms are designated for MAJOR subjects (core departmental courses)
+    // LECTURE rooms are designated for MINOR subjects (general ed, electives)
+    if ($isLabRoom) {
+        // For LAB rooms: accept MAJOR subjects only
+        $query->where('type', 'Major');
+    } else {
+        // For LECTURE rooms: accept MINOR subjects only
+        $query->where('type', 'Minor');
+    }
+
+    // =====================================================================
+    // IMPROVED DEPARTMENT/SPECIALIZATION FILTERING
+    // =====================================================================
+    // Apply department filter ONLY if a specialization group was detected
+    if ($allowedDepts && ! empty($allowedDepts)) {
+        $query->where(function ($q) use ($allowedDepts) {
+            // PRIMARY: Check 'major' field directly
+            $q->whereIn('major', $allowedDepts)
+              // SECONDARY: Check 'department' field
+              ->orWhereIn('department', $allowedDepts)
+              // TERTIARY: Extract dept from edp_code (format: XX-NNNNNNN)
+              ->orWhere(function ($inner) use ($allowedDepts) {
+                  foreach ($allowedDepts as $dept) {
+                      $inner->orWhere('edp_code', 'like', $dept . '-%');
+                  }
+              })
+              // QUATERNARY: Extract dept from subject_code (format: XXNNN)
+              ->orWhere(function ($inner) use ($allowedDepts) {
+                  foreach ($allowedDepts as $dept) {
+                      $inner->orWhere('subject_code', 'like', $dept . '%');
+                  }
+              })
+              // FALLBACK: Check specialization field
+              ->orWhere(function ($innermost) use ($allowedDepts) {
+                  foreach ($allowedDepts as $dept) {
+                      $innermost->orWhere('specialization', 'like', "%{$dept}%");
+                  }
+              });
+        });
+    }
+    // If NO specialization group detected, allow ALL subjects of the correct type
+    // (no department restriction)
+
+    // =====================================================================
+    // SERIALIZE RESULTS
+    // =====================================================================
+    $results = $query->with('preferredRoom')->get();   // avoids N+1 when rendering the "claimed by" badge
+    
+    $this->modalSubjects = $results
+        ->map(fn (Subject $s) => [
+            'id'                  => $s->id,
+            'edp_code'            => $s->edp_code,
+            'subject_code'        => $s->subject_code,
+            'description'         => $s->description,
+            'department'          => $s->department,
+            'major'               => $s->major,
+            'year_level'          => $s->year_level,
+            'section'             => $s->section ?? '—',
+            'units'               => (int) $s->units,
+            'duration_hours'      => (float) $s->duration_hours,
+            'meetings_per_week'   => (int) ($s->meetings_per_week ?? 1),
+            'weekly_hours'        => round(
+                (float) $s->duration_hours * max(1, (int) ($s->meetings_per_week ?? 1)),
+                1
+            ),
+            'requires_lab'        => (bool) $s->requires_lab,
+            // Preferred-room data — used to render the "⚠️ Prefers Room: X" badge
+            // when the subject is already bound to a *different* room.
+            'preferred_room_id'   => $s->preferred_room_id,
+            'preferred_room_name' => $s->preferredRoom?->room_name,
+        ])
+        ->toArray();
+
+    $this->recalculateCapacity();
+}
+ 
+    /**
+     * Toggle a single subject ID in / out of the selected list.
+     *
+     * This replaces the old  wire:click="$toggle('selectedSubjectIds.X')"  magic
+     * call that was on every row div.  $toggle() is designed for boolean properties;
+     * using it on an array path with the fallback key 'new' corrupted
+     * $selectedSubjectIds from a proper sequential array ["1","2"] into an
+     * associative PHP array ["0"=>"1","new"=>true].  When Livewire serialises that
+     * to JSON it becomes a JS *object* instead of an *array*, which broke Alpine's
+     * wire:model checkbox binding and caused every checkbox to appear checked.
+     */
+    public function toggleSubjectId(string $id): void
+    {
+        $id = (string) $id;
+
+        if (in_array($id, $this->selectedSubjectIds, true)) {
+            // Remove: keep all other IDs, re-index so it stays a JSON array
+            $this->selectedSubjectIds = array_values(
+                array_filter($this->selectedSubjectIds, fn ($v) => $v !== $id)
+            );
+        } else {
+            $this->selectedSubjectIds[] = $id;
+        }
+
+        $this->recalculateCapacity();
+    }
+
+    /**
+     * Called automatically by Livewire every time a checkbox changes.
+     * Recalculates the running hours total and updates the warning string.
+     */
+    public function updatedSelectedSubjectIds(): void
+    {
+        $this->recalculateCapacity();
+    }
+ 
+    /**
+     * Persist preferred_room_id assignments in a single DB transaction.
+     *
+     * Selected subjects  → preferred_room_id = this room
+     * Deselected subjects that were previously bound → preferred_room_id = null
+     *
+     * NOTE: Uses the Query Builder update() path intentionally.
+     *       Eloquent model events (saving / saved) are NOT fired for bulk
+     *       updates, which is correct here — we never want EDP-code
+     *       validation or semester normalisation to run on a room FK change.
+     */
+    public function saveRoomAssignments(): void
+    {
+        if (! $this->assigningRoomId) {
+            return;
+        }
+ 
+        $selectedIds = collect($this->selectedSubjectIds)
+            ->map(fn ($id) => (int) $id)
+            ->filter()
+            ->unique()
+            ->values()
+            ->all();
+ 
+        DB::transaction(function () use ($selectedIds) {
+            // 1. Bind newly selected subjects to this room
+            if (! empty($selectedIds)) {
+                Subject::activeTerm()
+                    ->whereIn('id', $selectedIds)
+                    ->update(['preferred_room_id' => $this->assigningRoomId]);
+            }
+ 
+            // 2. Unbind subjects that were previously linked here but were
+            //    deselected in the current modal session
+            Subject::activeTerm()
+                ->where('preferred_room_id', $this->assigningRoomId)
+                ->when(
+                    ! empty($selectedIds),
+                    fn ($q) => $q->whereNotIn('id', $selectedIds)
+                )
+                ->update(['preferred_room_id' => null]);
+        });
+ 
+        $roomName = $this->assigningRoomData['room_name'] ?? "Room #{$this->assigningRoomId}";
+        $count    = count($selectedIds);
+ 
+        $this->closeAssignModal();
+ 
+        $this->dispatch('toast', [
+            'type'    => 'success',
+            'message' => 'Assignments Saved',
+            'detail'  => "{$count} subject(s) have been preferred-assigned to {$roomName}.",
+        ]);
+    }
+ 
+    /**
+     * Close the modal and reset all transient state.
+     * Called by the Cancel button and the ✕ icon (via $wire.closeAssignModal()).
+     */
+    public function closeAssignModal(): void
+    {
+        $this->showAssignModal = false;
+        $this->resetAssignModal();
+    }
+ 
+    // =========================================================================
+    // PRIVATE HELPERS
+    // =========================================================================
+ 
+    /**
+     * Sum the weekly hours of every currently-selected subject and update
+     * $selectedWeeklyHours + $capacityWarning accordingly.
+     */
+    private function recalculateCapacity(): void
+    {
+        $selectedIds = array_map('intval', $this->selectedSubjectIds);
+ 
+        $this->selectedWeeklyHours = (float) collect($this->modalSubjects)
+            ->whereIn('id', $selectedIds)
+            ->sum('weekly_hours');
+ 
+        $this->capacityWarning = $this->selectedWeeklyHours > self::MAX_WEEKLY_ROOM_HOURS
+            ? sprintf(
+                'Selected subjects require %.1f weekly hours, exceeding the %dh maximum for a single room.',
+                $this->selectedWeeklyHours,
+                self::MAX_WEEKLY_ROOM_HOURS
+            )
+            : '';
+    }
+ 
+    /**
+     * Detect the canonical department-family key for a room so the correct
+     * subject filter can be applied.
+     *
+     * Strategy:
+     *   1. Use room->department_owner (already normalised by inferDepartmentOwner())
+     *   2. Fall back to scanning the raw specialization string with keyword matching
+     *
+     * Mirrors AutoScheduleService::SPECIALIZATION_GROUPS for consistency.
+     */
+    private function detectSpecializationGroupKey(Room $room): ?string
+    {
+        $deptOwner = strtoupper(trim($room->department_owner ?? ''));
+ 
+        // Fast path: department_owner is already normalised
+        if ($deptOwner && array_key_exists($deptOwner, self::roomSpecializationGroups())) {
+            return $deptOwner;
+        }
+ 
+        // Fallback: scan the raw specialization text
+        $text = strtoupper(trim($room->specialization ?? ''));
+        if (! $text) {
+            return null;
+        }
+ 
+        return match (true) {
+            $this->textContainsAny($text, ['IT', 'ACT', 'ICT', 'CCS', 'COMPUTER', 'WORKSHOP']) => 'CCS',
+            $this->textContainsAny($text, ['CTE', 'EDUCATION', 'TEACHING'])                    => 'CTE',
+            $this->textContainsAny($text, ['SHTM', 'HM', 'TM', 'HOSPITALITY', 'KITCHEN'])     => 'SHTM',
+            $this->textContainsAny($text, ['COC', 'FB', 'LD', 'QD', 'FORENSIC', 'CRIM'])      => 'COC',
+            default                                                                              => null,
+        };
+    }
+
+    private function getFilterLabel(Room $room): string
+    {
+        $groupKey     = $this->detectSpecializationGroupKey($room);
+        $rawRoomType  = strtoupper(trim($room->type ?? ''));
+        $isLabRoom    = in_array($rawRoomType, ['LAB', 'LABORATORY'], true);
+        // LAB → Major subjects | LECTURE → Minor subjects
+        $subjectType  = $isLabRoom ? 'MAJOR' : 'MINOR';
+
+        if (! $groupKey) {
+            return ucfirst(strtolower($rawRoomType)) . " (All Departments) · {$subjectType} Subjects";
+        }
+
+        $groups = self::roomSpecializationGroups();
+        $depts  = $groups[$groupKey] ?? [];
+
+        return implode(' / ', $depts) . ' · ' . ucfirst(strtolower($rawRoomType)) . " · {$subjectType}";
+    }
+ 
+    /**
+     * Maps each department-owner code to the family of department codes
+     * that are eligible to use rooms owned by that department.
+     *
+     * Kept in sync with AutoScheduleService::SPECIALIZATION_GROUPS.
+     */
+    private static function roomSpecializationGroups(): array
+    {
+        return [
+            'CCS'  => ['IT', 'ACT', 'CCS'],
+            'CTE'  => ['CTE', 'ED'],
+            'SHTM' => ['HM', 'TM', 'SHTM'],
+            'COC'  => ['FB', 'LD', 'QD', 'COC'],
+        ];
+    }
+ 
+    private function textContainsAny(string $haystack, array $needles): bool
+    {
+        foreach ($needles as $needle) {
+            if (str_contains($haystack, $needle)) {
+                return true;
+            }
+        }
+ 
+        return false;
+    }
+ 
+    /** Wipe all assign-modal state so openAssignModal() starts clean. */
+    private function resetAssignModal(): void
+    {
+        $this->assigningRoomId     = null;
+        $this->assigningRoomData   = [];
+        $this->modalSubjects       = [];
+        $this->selectedSubjectIds  = [];
+        $this->selectedWeeklyHours = 0.0;
+        $this->capacityWarning     = '';
+    }
+
+    /**
+     * Toggle the inline subject accordion for a given room row.
+     * Adds the ID to $expandedRooms to open, removes it to close.
+     */
+    public function toggleRoomDetails(int $roomId): void
+    {
+        if (in_array($roomId, $this->expandedRooms)) {
+            $this->expandedRooms = array_values(array_diff($this->expandedRooms, [$roomId]));
+        } else {
+            $this->expandedRooms[] = $roomId;
+        }
+    }
+
+    public function render()
     {
         $query = Room::query()
-            ->when($this->search, fn($q) => $q->where('room_name', 'like', '%' . $this->search . '%')
+            ->when($this->search, fn ($q) => $q->where('room_name', 'like', '%' . $this->search . '%')
                 ->orWhere('specialization', 'like', '%' . $this->search . '%')
                 ->orWhere('floor', 'like', '%' . $this->search . '%'))
-            ->when($this->filterType, fn($q) => $q->where('type', $this->filterType));
-
+            ->when($this->filterType, fn ($q) => $q->whereRaw('UPPER(type) = ?', [strtoupper($this->filterType)]));
+ 
         return view('livewire.manage-rooms', [
-            'rooms' => $query->orderBy('room_name', 'asc')->paginate(10)
+            // Eager-load preferred-assigned subjects (active term only) so the
+            // utilisation indicator in the Blade template never fires N+1 queries.
+            'rooms' => $query
+                ->orderBy('room_name', 'asc')
+                ->with(['subjects' => fn ($q) => $q->activeTerm()])
+                ->paginate(10),
+            'maxWeeklyHours' => self::MAX_WEEKLY_ROOM_HOURS,
         ]);
     }
 }

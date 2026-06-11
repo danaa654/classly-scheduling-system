@@ -2549,6 +2549,12 @@ class AutoScheduleService
 
     private function compatibleRooms(Collection $rooms, Subject $subject, ?Collection $existingSchedules = null, int $meetingIndex = 0): Collection
     {
+        // preferred_room_id is set by ManageRooms when an admin pre-assigns a subject to a room.
+        // The scheduler MUST try that room first before falling back to general scoring.
+        $preferredRoomId = filled($subject->preferred_room_id ?? null)
+            ? (int) $subject->preferred_room_id
+            : null;
+
         $strictRooms = $rooms
             ->filter(fn (Room $room) => $this->isRoomCompatible($room, $subject, allowMinorLabFallback: false))
             ->map(fn (Room $room) => [
@@ -2573,7 +2579,16 @@ class AutoScheduleService
         }
 
         $sorted = $candidateRooms
-            ->sort(function (array $a, array $b) {
+            ->sort(function (array $a, array $b) use ($preferredRoomId) {
+                // Pre-assigned room from ManageRooms always wins, regardless of score
+                if ($preferredRoomId) {
+                    $aIsPinned = (int) $a['room']->id === $preferredRoomId;
+                    $bIsPinned = (int) $b['room']->id === $preferredRoomId;
+                    if ($aIsPinned !== $bIsPinned) {
+                        return $aIsPinned ? -1 : 1;
+                    }
+                }
+
                 if ($a['score'] !== $b['score']) {
                     return $b['score'] <=> $a['score'];
                 }
@@ -2587,6 +2602,12 @@ class AutoScheduleService
             ->values();
 
         if ($sorted->count() <= 1) {
+            return $sorted;
+        }
+
+        // When a preferred room is pinned at position 0, skip the meetingIndex rotation
+        // so it is always tried first — rotation would defeat the purpose of pinning.
+        if ($preferredRoomId && (int) ($sorted->first()['room']->id ?? 0) === $preferredRoomId) {
             return $sorted;
         }
 
@@ -3389,7 +3410,7 @@ class AutoScheduleService
     {
         $columns = ['id', 'edp_code', 'subject_code', 'description', 'section', 'major', 'year_level', 'department', 'units', 'duration_hours', 'type', 'subject_type', 'specialization', 'meetings_per_week', 'faculty_id'];
 
-        foreach (['requires_lab', 'preferred_room_type'] as $column) {
+        foreach (['requires_lab', 'preferred_room_type', 'preferred_room_id'] as $column) {
             if (Schema::hasColumn('subjects', $column)) {
                 $columns[] = $column;
             }

@@ -40,6 +40,21 @@ class Room extends Model
         return $this->hasMany(Schedule::class);
     }
 
+    /**
+     * Subjects that have been preferred-assigned to this room
+     * (linked via Subject.preferred_room_id FK).
+     *
+     * Eager-load with activeTerm scope in the controller/component to prevent
+     * N+1 queries and to keep the result scoped to the active semester.
+     *
+     * Used for weekly-utilisation calculations on the room list view:
+     *   totalHours = sum(duration_hours × meetings_per_week) across assigned subjects
+     */
+    public function subjects(): HasMany
+    {
+        return $this->hasMany(Subject::class, 'preferred_room_id');
+    }
+
     protected function roomName(): Attribute
     {
         return Attribute::make(get: fn ($value) => self::cleanText($value));
