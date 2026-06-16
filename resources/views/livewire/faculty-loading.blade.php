@@ -164,7 +164,7 @@
                             x-on:click.outside="open = false"
                             class="absolute right-3 top-14 z-40 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white p-1 shadow-lg dark:border-sky-300/20 dark:bg-[#081a2d]/95 dark:shadow-2xl dark:shadow-black/40"
                         >
-                            <button type="button" wire:click="openAssignmentPanel({{ $faculty->id }})" x-on:click="open = false" class="w-full rounded-lg px-3 py-2 text-left text-xs font-black uppercase tracking-wider text-slate-700 transition hover:bg-sky-50 hover:text-sky-700 dark:text-slate-200 dark:hover:bg-sky-400/15 dark:hover:text-white">
+                            <button type="button" wire:click="openAssignmentPanel(null, {{ $faculty->id }})" x-on:click="open = false" class="w-full rounded-lg px-3 py-2 text-left text-xs font-black uppercase tracking-wider text-slate-700 transition hover:bg-sky-50 hover:text-sky-700 dark:text-slate-200 dark:hover:bg-sky-400/15 dark:hover:text-white">
                                 Assign Subject / Schedule
                             </button>
                             <button type="button" wire:click="showFacultyLoad({{ $faculty->id }})" x-on:click="open = false" class="w-full rounded-lg px-3 py-2 text-left text-xs font-black uppercase tracking-wider text-slate-700 transition hover:bg-sky-50 hover:text-sky-700 dark:text-slate-200 dark:hover:bg-sky-400/15 dark:hover:text-white">
@@ -220,6 +220,30 @@
                 </div>
                 {{-- Faculty Header + Load Cards --}}
                 <section class="border-b border-slate-200 bg-white/60 p-4 backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.045] sm:p-6">
+
+                    {{-- ← Back navigation / breadcrumb --}}
+                    <div class="no-print mb-4 flex items-center gap-2">
+                        <button
+                            type="button"
+                            wire:click="$set('selectedFacultyId', null)"
+                            class="group inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-slate-500 shadow-sm transition duration-150 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-700 active:scale-95 dark:border-white/10 dark:bg-white/[0.04] dark:text-slate-400 dark:hover:border-sky-400/40 dark:hover:bg-sky-400/[0.08] dark:hover:text-sky-300"
+                        >
+                            {{-- Left chevron — slides left on hover --}}
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 transition-transform duration-150 group-hover:-translate-x-0.5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fill-rule="evenodd" d="M12.707 5.293a1 1 0 010 1.414L9.414 10l3.293 3.293a1 1 0 01-1.414 1.414l-4-4a1 1 0 010-1.414l4-4a1 1 0 011.414 0z" clip-rule="evenodd" />
+                            </svg>
+                            Overview
+                        </button>
+                        {{-- Breadcrumb separator --}}
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5 shrink-0 text-slate-300 dark:text-white/20" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                        {{-- Current faculty name (truncated) --}}
+                        <span class="truncate text-[10px] font-black uppercase tracking-widest text-slate-600 dark:text-slate-300">
+                            {{ $currentFaculty->full_name }}
+                        </span>
+                    </div>
+
                     <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                         <div class="min-w-0">
                             <div class="mb-3 flex flex-wrap items-center gap-2">
@@ -244,7 +268,7 @@
                         </div>
                         <div class="no-print flex flex-wrap items-center gap-2">
                             {{-- Main Action Button - Enlarged --}}
-                            <button type="button" wire:click="openAssignmentPanel({{ $currentFaculty->id }})" 
+                            <button type="button" wire:click="openAssignmentPanel(null, {{ $currentFaculty->id }})" 
                                 class="flex-1 rounded-lg bg-sky-500 px-6 py-3 text-sm font-black uppercase tracking-widest text-white shadow-md transition hover:bg-sky-600 active:scale-95 dark:bg-sky-400 dark:text-slate-950 dark:shadow-lg dark:shadow-sky-950/30 dark:hover:bg-sky-300 min-w-[200px]">
                                 Assign Subject / Schedule
                             </button>
@@ -495,7 +519,7 @@
                             @else
                                 <div class="flex h-64 flex-col items-center justify-center text-center">
                                     <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-500">No assigned subjects</p>
-                                    <button type="button" wire:click="openAssignmentPanel({{ $currentFaculty->id }})" class="mt-4 rounded-lg bg-sky-500 px-4 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-sky-600 dark:bg-sky-400 dark:text-slate-950 dark:hover:bg-sky-300">
+                                    <button type="button" wire:click="openAssignmentPanel(null, {{ $currentFaculty->id }})" class="mt-4 rounded-lg bg-sky-500 px-4 py-2 text-xs font-black uppercase tracking-widest text-white transition hover:bg-sky-600 dark:bg-sky-400 dark:text-slate-950 dark:hover:bg-sky-300">
                                         Open Assignment Panel
                                     </button>
                                 </div>
@@ -1138,7 +1162,7 @@
                             $assignedElsewhere = $group['faculty_id'] && ! $assignedToCurrent;
                             $isFinalized       = $group['is_finalized'];
                         @endphp
-                        <article wire:key="assignable-group-{{ $group['first_schedule_id'] }}" class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.055] dark:hover:border-sky-300/40 dark:hover:bg-white/[0.075]">
+                        <article wire:key="assignable-group-{{ $group['subject_id'] }}-{{ $group['section'] }}" class="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition hover:border-sky-300 hover:bg-slate-50 dark:border-white/10 dark:bg-white/[0.055] dark:hover:border-sky-300/40 dark:hover:bg-white/[0.075]">
                             <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                                 <div class="min-w-0 flex-1">
                                     <div class="flex flex-wrap items-center gap-2">
@@ -1163,7 +1187,18 @@
                                         <p>Department: <span class="text-slate-700 dark:text-slate-200">{{ $group['department'] }}</span></p>
                                         <p>Major: <span class="text-slate-700 dark:text-slate-200">{{ $group['major'] }}</span></p>
                                         <p>Year / Section: <span class="text-slate-700 dark:text-slate-200">Y{{ $group['year'] }} / {{ $group['section'] }}</span></p>
-                                        <p>Room: <span class="text-slate-700 dark:text-slate-200">{{ $group['room'] }}</span></p>
+                                        <p>Room:
+                                            @if(!empty($group['preferred_room_name']))
+                                                <span class="inline-flex items-center gap-1 font-semibold text-violet-700 dark:text-violet-300">
+                                                    📌 {{ $group['preferred_room_name'] }}
+                                                    <span class="rounded-full border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-violet-600 dark:border-violet-300/30 dark:bg-violet-400/10 dark:text-violet-300">Pre-assigned</span>
+                                                </span>
+                                            @elseif($group['room'] !== 'No room')
+                                                <span class="text-slate-700 dark:text-slate-200">🏛️ {{ $group['room'] }}</span>
+                                            @else
+                                                <span class="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[9px] font-black uppercase tracking-wider text-amber-700 dark:border-amber-300/30 dark:bg-amber-400/10 dark:text-amber-200">TBA</span>
+                                            @endif
+                                        </p>
                                         <p>Day: <span class="text-slate-700 dark:text-slate-200">{{ $group['days'] }}</span></p>
                                         <p>Time: <span class="text-slate-700 dark:text-slate-200">{{ $group['time'] }}</span></p>
                                         <p>Units: <span class="text-slate-700 dark:text-slate-200">{{ $group['units'] }}</span></p>

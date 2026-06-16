@@ -2513,7 +2513,26 @@ class AutoScheduleService
         }
 
         if ($this->isEducationSubject($subject) && !$requiresLab) {
-            return $this->roomIsLecture($room) && !$this->roomIsSpecialized($room);
+            if (!$this->roomIsLecture($room)) {
+                return false;
+            }
+
+            // Plain, unflagged general-purpose lecture rooms are always fine.
+            if (!$this->roomIsSpecialized($room)) {
+                return true;
+            }
+
+            // Specialized lecture rooms (is_specialized = true, or tagged with
+            // a domain keyword) can still host Education classes when the
+            // specialization column is multi-valued and explicitly includes
+            // ED/CTE, e.g. "General,ED". Explode on the same separators used
+            // throughout this class instead of treating the column as one
+            // opaque string, so "ED" is recognized inside "General,ED".
+            $roomSpecs = $this->splitSpecialization((string) $room->specialization);
+
+            return $isGeneral
+                || in_array('ED', $roomSpecs, true)
+                || in_array('CTE', $roomSpecs, true);
         }
 
         if ($this->isHospitalityPracticalSubject($subject)) {
@@ -2547,7 +2566,7 @@ class AutoScheduleService
         return $isGeneral || !$isLab || $allowMinorLabFallback;
     }
 
-    private function compatibleRooms(Collection $rooms, Subject $subject, ?Collection $existingSchedules = null, int $meetingIndex = 0): Collection
+   private function compatibleRooms(Collection $rooms, Subject $subject, ?Collection $existingSchedules = null, int $meetingIndex = 0): Collection
     {
         // preferred_room_id is set by ManageRooms when an admin pre-assigns a subject to a room.
         // The scheduler MUST try that room first before falling back to general scoring.
@@ -2567,6 +2586,28 @@ class AutoScheduleService
 
         $candidateRooms = $strictRooms;
 
+        // 👇 NEW CTE & GENERAL FALLBACK LOGIC
+        // If strict room checks failed and this is a CTE/Education subject, fall back to "General" Lecture rooms
+        $subjectDept = strtoupper($subject->department ?? '');
+        if ($candidateRooms->isEmpty() && ($subjectDept === 'CTE' || $subjectDept === 'EDUCATION')) {
+            $candidateRooms = $rooms
+                ->filter(function (Room $room) {
+                    // Make sure it's a general purpose Lecture room, never a specialized lab
+                    $isLecture = strtoupper($room->room_type ?? '') === 'LECTURE';
+                    $roomSpecs = array_map('trim', explode(',', strtoupper($room->specialization ?? '')));
+                    $isGeneral = in_array('GENERAL', $roomSpecs) || in_array('COMMON', $roomSpecs);
+                    
+                    return $isLecture && $isGeneral;
+                })
+                ->map(fn (Room $room) => [
+                    'room' => $room,
+                    'score' => 50, // Give it a safe baseline compatibility score
+                    'fallback' => true,
+                    'load' => $this->roomLoad($existingSchedules, $room->id),
+                ]);
+        }
+
+        // Original fallback block for general minor subjects
         if ($candidateRooms->isEmpty() && strtoupper((string) $subject->type) === 'MINOR') {
             $candidateRooms = $rooms
                 ->filter(fn (Room $room) => $this->isRoomCompatible($room, $subject, allowMinorLabFallback: true))
@@ -2578,6 +2619,10 @@ class AutoScheduleService
                 ]);
         }
 
+        // Keep the internal structural array mapping elements if they are still mapped objects
+        // Convert the structural mapped arrays back to standard Eloquent Room collections if your scheduler expects raw models
+        $isReturningArrayFormat = $candidateRooms->isNotEmpty() && is_array($candidateRooms->first());
+        
         $sorted = $candidateRooms
             ->sort(function (array $a, array $b) use ($preferredRoomId) {
                 // Pre-assigned room from ManageRooms always wins, regardless of score
@@ -2602,6 +2647,8 @@ class AutoScheduleService
             ->values();
 
         if ($sorted->count() <= 1) {
+            // If the rest of your file loop expects raw Room instances rather than the scoped array wrapping, 
+            // you can pluck them out using: return $sorted->pluck('room');
             return $sorted;
         }
 
@@ -2612,10 +2659,11 @@ class AutoScheduleService
         }
 
         $offset = $meetingIndex % $sorted->count();
+        $rotated = $sorted->slice($offset)->concat($sorted->slice(0, $offset))->values();
 
-        return $sorted->slice($offset)->concat($sorted->slice(0, $offset))->values();
+        return $rotated;
     }
-
+    
     private function applyRoomPreference(Collection $candidateRooms, ?string $preferredRoomHint): Collection
     {
         $hint = strtoupper(trim((string) $preferredRoomHint));

@@ -98,21 +98,33 @@ class FacultyLoading extends Component
         $this->resetPendingAssignment();
     }
 
-    private function resetFilters()
+    private function resetFilters(): void
     {
         $this->subjectDepartmentFilter = 'all';
+        $this->subjectMajorFilter      = 'all';
+        $this->subjectYearLevelFilter  = 'all';
+        $this->subjectSectionFilter    = 'all';
+        $this->subjectTypeFilter       = 'all';
+        $this->showUnassignedOnly      = false;
+    }
+
+    /**
+     * Livewire lifecycle hook — fires whenever $subjectDepartmentFilter changes.
+     *
+     * Resets the Major dropdown to "all" so a stale value (e.g. 'IT') can never
+     * combine with the new department (e.g. 'CTE') to produce an impossible query
+     * like  dept=CTE AND major=IT  → 0 rows → empty panel.
+     */
+    public function updatedSubjectDepartmentFilter(): void
+    {
         $this->subjectMajorFilter = 'all';
-        $this->subjectYearLevelFilter = 'all';
-        $this->subjectSectionFilter = 'all';
-        $this->subjectTypeFilter = 'all';
-        $this->showUnassignedOnly = false;
     }
 
     #[Computed]
     public function selectedFaculty()
     {
         return $this->selectedFacultyId
-            ? Faculty::with(['schedules' => fn ($query) => $query->activeTerm()->with(['subject', 'room'])])
+            ? Faculty::with(['schedules' => fn ($query) => $query->activeTerm()->with(['subject.preferredRoom', 'room'])])
                 ->find($this->selectedFacultyId)
             : null;
     }
@@ -2442,11 +2454,19 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
         })
         ->where('subjects.is_archived', 0)
         // NOW apply the joins
-        ->leftJoin('schedules', function ($join) {
-            $join->on('subjects.id', '=', 'schedules.subject_id');
-        })
+        ->leftJoin('schedules', function ($join) use ($semester, $schoolYear, $workspaceKey) {
+    $join->on('subjects.id', '=', 'schedules.subject_id')
+         ->where('schedules.semester', $semester)
+         ->where(function ($q) use ($schoolYear, $workspaceKey) {
+             $q->where('schedules.workspace_key', $workspaceKey)
+               ->orWhere('schedules.school_year', $schoolYear)
+               ->orWhere('schedules.academic_year', $schoolYear);
+         })
+         ->where('schedules.is_archived', false);
+})
         ->leftJoin('faculties', 'schedules.faculty_id', '=', 'faculties.id')
         ->leftJoin('rooms', 'schedules.room_id', '=', 'rooms.id')
+        ->leftJoin('rooms as preferred_rooms', 'subjects.preferred_room_id', '=', 'preferred_rooms.id')
         ->select(
             'subjects.id as subject_id',
             'subjects.*',
@@ -2463,7 +2483,10 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
             'schedules.year_level as schedule_year_level',
             'faculties.full_name as faculty_name',
             'rooms.room_name',
-            'rooms.id as room_id'
+            'rooms.id as room_id',
+            // Preferred room from subjects.preferred_room_id (set via Manage Rooms)
+            'preferred_rooms.room_name as preferred_room_name',
+            'preferred_rooms.id as preferred_room_fk_id'
         )
         ->distinct();
 
@@ -2483,52 +2506,66 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
     }
 
     // ────────────────────────────────────────────────────────────────────────────────────
-    // UI FILTER: Department
+    // UI FILTERS — refactored to ->when() so each clause is only appended when the
+    // filter value is explicitly set (not 'all' / empty / falsy).
+    // This makes impossible combinations (dept=CTE + major=IT) impossible to reach:
+    // updatedSubjectDepartmentFilter() resets major to 'all' first, and the major
+    // dropdown now only shows codes that belong to the active department.
     // ────────────────────────────────────────────────────────────────────────────────────
-    if ($this->subjectDepartmentFilter !== 'all') {
-        $aliases = $this->departmentAliases($this->subjectDepartmentFilter);
-        $query->where(function (Builder $filterQuery) use ($aliases) {
-            $filterQuery->whereIn('subjects.department', $aliases)
-                ->orWhereIn('schedules.department', $aliases);
-        });
-    }
 
-    // ────────────────────────────────────────────────────────────────────────────────────
-    // UI FILTER: Major
-    // ────────────────────────────────────────────────────────────────────────────────────
-    if ($this->subjectMajorFilter !== 'all') {
-        $query->where(function (Builder $filterQuery) {
-            $filterQuery->where('subjects.major', $this->subjectMajorFilter)
-                ->orWhere('schedules.major', $this->subjectMajorFilter);
-        });
-    }
+    // Department
+    $query->when(
+        $this->subjectDepartmentFilter !== 'all' && filled($this->subjectDepartmentFilter),
+        function (Builder $q) {
+            $aliases = $this->departmentAliases($this->subjectDepartmentFilter);
+            $q->where(function (Builder $f) use ($aliases) {
+                $f->whereIn('subjects.department', $aliases)
+                  ->orWhereIn('schedules.department', $aliases);
+            });
+        }
+    );
 
-    // ────────────────────────────────────────────────────────────────────────────────────
-    // UI FILTER: Year Level
-    // ────────────────────────────────────────────────────────────────────────────────────
-    if ($this->subjectYearLevelFilter !== 'all') {
-        $query->where(function (Builder $filterQuery) {
-            $filterQuery->where('subjects.year_level', (int) $this->subjectYearLevelFilter)
-                ->orWhere('schedules.year_level', (int) $this->subjectYearLevelFilter);
-        });
-    }
+    // Major — only applied if ALSO consistent with the dept filter (safety net)
+    $query->when(
+        $this->subjectMajorFilter !== 'all' && filled($this->subjectMajorFilter),
+        function (Builder $q) {
+            $major = $this->subjectMajorFilter;
+            $q->where(function (Builder $f) use ($major) {
+                $f->where('subjects.major', $major)
+                  ->orWhere('schedules.major', $major);
+            });
+        }
+    );
 
-    // ────────────────────────────────────────────────────────────────────────────────────
-    // UI FILTER: Section
-    // ────────────────────────────────────────────────────────────────────────────────────
-    if ($this->subjectSectionFilter !== 'all') {
-        $query->where(function (Builder $filterQuery) {
-            $filterQuery->where('subjects.section', $this->subjectSectionFilter)
-                ->orWhere('schedules.section', $this->subjectSectionFilter);
-        });
-    }
+    // Year Level
+    $query->when(
+        $this->subjectYearLevelFilter !== 'all' && filled($this->subjectYearLevelFilter),
+        function (Builder $q) {
+            $year = (int) $this->subjectYearLevelFilter;
+            $q->where(function (Builder $f) use ($year) {
+                $f->where('subjects.year_level', $year)
+                  ->orWhere('schedules.year_level', $year);
+            });
+        }
+    );
 
-    // ────────────────────────────────────────────────────────────────────────────────────
-    // UI FILTER: Type (Major/Minor)
-    // ────────────────────────────────────────────────────────────────────────────────────
-    if ($this->subjectTypeFilter !== 'all') {
-        $query->where('subjects.type', $this->subjectTypeFilter);
-    }
+    // Section
+    $query->when(
+        $this->subjectSectionFilter !== 'all' && filled($this->subjectSectionFilter),
+        function (Builder $q) {
+            $section = $this->subjectSectionFilter;
+            $q->where(function (Builder $f) use ($section) {
+                $f->where('subjects.section', $section)
+                  ->orWhere('schedules.section', $section);
+            });
+        }
+    );
+
+    // Type (Major / Minor)
+    $query->when(
+        $this->subjectTypeFilter !== 'all' && filled($this->subjectTypeFilter),
+        fn (Builder $q) => $q->where('subjects.type', $this->subjectTypeFilter)
+    );
 
     // ────────────────────────────────────────────────────────────────────────────────────
     // SEARCH: Subject code, description, EDP code, section
@@ -2568,21 +2605,23 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
     $results = $query->orderBy('subjects.subject_code')->get();
 
     if ($this->selectedFacultyId) {
-        $faculty = Faculty::find($this->selectedFacultyId);
-        
-        if ($faculty) {
-            $results = $results->filter(function ($row) use ($user, $faculty) {
-                // Include if already assigned to this faculty
-                if ((int) ($row->faculty_id ?? 0) === (int) $faculty->id) {
-                    return true;
-                }
-                
-                // Include if faculty can teach this subject
-                $subject = Subject::find($row->subject_id);
-                return $subject ? $this->canAssignSubject($user, $faculty, $subject) : false;
-            })->values();
-        }
+    $faculty = Faculty::find($this->selectedFacultyId);
+
+    if ($faculty) {
+        // Pre-load every subject touched by the result set — 1 query instead of N
+        $subjectCache = Subject::findMany(
+            $results->pluck('subject_id')->unique()->all()
+        )->keyBy('id');
+
+        $results = $results->filter(function ($row) use ($user, $faculty, $subjectCache) {
+            if ((int) ($row->faculty_id ?? 0) === (int) $faculty->id) {
+                return true;
+            }
+            $subject = $subjectCache->get($row->subject_id);
+            return $subject ? $this->canAssignSubject($user, $faculty, $subject) : false;
+        })->values();
     }
+}
 
     return $results;
 }
@@ -2621,7 +2660,8 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
                 // UNSCHEDULED: No schedule row exists yet
                 $days = 'Unscheduled';
                 $time = 'No time assigned';
-                $room = 'No room';
+                // Fall back to preferred room set via Manage Rooms
+                $room = $first->preferred_room_name ?? 'No room';
                 $isUnscheduled = true;
             } else {
                 // SCHEDULED: Format day/time from schedule rows
@@ -2634,9 +2674,21 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
                 $startTime = $first->start_time ? Carbon::parse($first->start_time)->format('h:i A') : 'N/A';
                 $endTime = $first->end_time ? Carbon::parse($first->end_time)->format('h:i A') : 'N/A';
                 $time = "{$startTime} - {$endTime}";
-                
-                $room = $first->room_name ?? 'No room';
+
+                // Use the scheduled room; fall back to preferred room for faculty_locked rows
+                $room = $first->room_name ?? $first->preferred_room_name ?? 'No room';
                 $isUnscheduled = false;
+
+                // A schedule row exists but spacetime is still null → treat as "awaiting auto-gen"
+                if (blank($first->day) && blank($first->start_time)) {
+                    $isUnscheduled = true;
+                }
+            }
+
+            // Track whether the room shown is a pre-assigned preferred room (not a confirmed slot)
+            $preferredRoomName = null;
+            if (($room !== 'No room') && blank($first->room_name) && filled($first->preferred_room_name)) {
+                $preferredRoomName = $first->preferred_room_name;
             }
 
             // ────────────────────────────────────────────────────────────────────────────
@@ -2675,13 +2727,14 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
                 'year'                  => $year,
                 'section'               => $section,
                 'room'                  => $room,
+                'preferred_room_name'   => $preferredRoomName,  // non-null only when room is pre-assigned
                 'days'                  => $days,
                 'time'                  => $time,
                 'faculty_id'            => $assignedFacultyId,
                 'faculty_name'          => $assignedFacultyName,
                 'is_finalized'          => $isFinalized,
-                'is_unscheduled'        => $isUnscheduled,  // ← NEW: Flag for UI styling
-                'subject_id'            => $first->subject_id,  // ← NEW: For pre-assignment
+                'is_unscheduled'        => $isUnscheduled,
+                'subject_id'            => $first->subject_id,
             ];
         })
         ->values();
@@ -2945,7 +2998,22 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
         $subjectDepartments  = $this->activeSubjectQuery()->select('department')->distinct()->pluck('department');
         $departmentCodes     = Department::query()->select('code')->distinct()->pluck('code');
 
-        return $this->collectDepartmentCodes($scheduleDepartments, $subjectDepartments, $departmentCodes);
+        $all = $this->collectDepartmentCodes($scheduleDepartments, $subjectDepartments, $departmentCodes);
+
+        // ─── Smart scope filter ────────────────────────────────────────────────────
+        // Departmental faculty → only their own department in the dropdown.
+        // GenEd / Cross-Department → all departments (they work across the college).
+        // ──────────────────────────────────────────────────────────────────────────
+        if ($this->selectedFacultyId) {
+            $faculty = Faculty::find($this->selectedFacultyId);
+
+            if ($faculty && $faculty->isDepartmental() && filled($faculty->department)) {
+                $normalized = Department::normalizeCode($faculty->department);
+                return array_values(array_filter($all, fn ($d) => $d === $normalized));
+            }
+        }
+
+        return $all;
     }
 
     private function collectDepartmentCodes(...$collections): array
@@ -2963,12 +3031,12 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
         return $codes ?: ['CCS', 'CTE', 'COC', 'SHTM'];
     }
 
-    private function getAvailableMajors()
+    private function getAvailableMajors(): array
     {
         $scheduleMajors = $this->activeScheduleQuery()->select('major')->distinct()->pluck('major');
         $subjectMajors  = $this->activeSubjectQuery()->select('major')->distinct()->pluck('major');
 
-        return collect(self::DEFAULT_MAJOR_FILTERS)
+        $allMajors = collect(self::DEFAULT_MAJOR_FILTERS)
             ->merge($scheduleMajors)
             ->merge($subjectMajors)
             ->filter()
@@ -2978,6 +3046,51 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
             ->sort()
             ->values()
             ->all();
+
+        // ─── Smart scope filter ────────────────────────────────────────────────────
+        // When a faculty is selected, restrict the Major dropdown to only the codes
+        // they are actually eligible to teach:
+        //
+        //   • Departmental (e.g. CCS) → only their department's sub-majors (IT, ACT)
+        //   • Cross-Department         → all majors (they cross into other departments)
+        //   • GenEd / Institution-wide → all majors (they teach minors across all depts)
+        //
+        // If no faculty is selected the full list is shown so the user can still
+        // filter the subject list before picking a faculty.
+        // ──────────────────────────────────────────────────────────────────────────
+        if ($this->selectedFacultyId) {
+            $faculty = Faculty::find($this->selectedFacultyId);
+
+            if ($faculty && $faculty->isDepartmental() && filled($faculty->department)) {
+                // aliasesFor('CCS') → ['CCS','IT','ACT']
+                // Subjects store their major as 'IT' / 'ACT' (not 'CCS'), so
+                // comparing against the full alias list is safe and correct.
+                $allowedCodes = Department::aliasesFor($faculty->department);
+
+                return collect($allMajors)
+                    ->filter(fn (string $major) => in_array($major, $allowedCodes, true))
+                    ->values()
+                    ->all();
+            }
+
+            // GenEd and Cross-Department: fall through to the department-filter below.
+        }
+
+        // ─── Scope 2: Department filter ───────────────────────────────────────────
+        // When the user has also picked a department in the UI, narrow further so
+        // the major options only reflect what actually exists in that department.
+        // This prevents cross-department / gened faculty from seeing an 'IT' option
+        // while 'CTE' is the active department filter (which would still give 0 rows).
+        if ($this->subjectDepartmentFilter !== 'all') {
+            $deptAliases = Department::aliasesFor($this->subjectDepartmentFilter);
+
+            $allMajors = collect($allMajors)
+                ->filter(fn (string $major) => in_array($major, $deptAliases, true))
+                ->values()
+                ->all();
+        }
+
+        return $allMajors;
     }
 
     private function getAvailableYearLevels()
@@ -3146,7 +3259,7 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
                     ->sum('units');
             });
  
-        $availableSubjects = $this->getAvailableSubjects();
+       
         $groupedAvailableSubjects = $this->getGroupedAvailableSubjects();
         $currentFaculty = $this->selectedFaculty;
         $assignedSchedules = $this->assignedSchedules();
@@ -3171,7 +3284,7 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
  
         return view('livewire.faculty-loading', [
             'faculties' => $faculties,
-            'availableSubjects' => $availableSubjects,
+            
             'groupedAvailableSubjects' => $groupedAvailableSubjects,
             'assignedSchedules' => $assignedSchedules,
             'assignedSubjects' => $assignedSubjects,

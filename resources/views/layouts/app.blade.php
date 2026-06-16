@@ -307,6 +307,18 @@
                     timerProgressBar: true,
                     didOpen: (toast) => {
                         toast.style.zIndex = "10000";
+
+                        // `toast` here is the .swal2-popup, not the .swal2-container.
+                        // The popup's z-index only matters inside the container's own
+                        // stacking context, so it never lifts the toast above page
+                        // content. The container is the element that actually competes
+                        // with the app's modals (some go up to z-[10050]), so that's
+                        // the one that needs the override.
+                        const container = Swal.getContainer();
+                        if (container) {
+                            container.style.setProperty('z-index', '999999', 'important');
+                        }
+
                         toast.addEventListener('mouseenter', Swal.stopTimer);
                         toast.addEventListener('mouseleave', Swal.resumeTimer);
                     }
@@ -680,7 +692,8 @@
         }
     }"
     @notify.window="add($event)"
-    class="fixed bottom-6 right-6 z-[200] flex flex-col gap-2 w-full max-w-sm pointer-events-none"
+    class="fixed bottom-6 right-6 flex flex-col gap-2 w-full max-w-sm pointer-events-none"
+    style="z-index: 999999 !important;"
 >
 </div>
 

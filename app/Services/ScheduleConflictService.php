@@ -36,19 +36,22 @@ class ScheduleConflictService
         $subject->loadMissing('faculty:id,full_name,availability');
 
         try {
+            // Core structural checks that always apply regardless of instructor assignment
             $checks = [
                 $this->checkInactiveDayConflict($day, $subject, $room, $startTime, $endTime, $ignoreScheduleId),
                 $this->checkCapacityConflict($subject, $room, $day, $startTime, $endTime, $ignoreScheduleId),
                 $this->checkRoomTypeConflict($subject, $room, $day, $startTime, $endTime, $ignoreScheduleId),
                 $this->checkRoomConflict($room->id, $day, $startTime, $endTime, $ignoreScheduleId, $subject, $room),
                 $this->checkSectionConflict($subject, $day, $startTime, $endTime, $ignoreScheduleId, $room),
-                $this->checkFacultyConflict($subject, $day, $startTime, $endTime, $ignoreScheduleId, $room),
             ];
 
-            if ($subject->faculty_id && $subject->faculty) {
+            // 👇 FIX: Only validate instructor schedule overlaps if a faculty member is assigned
+            if (filled($subject->faculty_id ?? null) && $subject->faculty) {
+                $checks[] = $this->checkFacultyConflict($subject, $day, $startTime, $endTime, $ignoreScheduleId, $room);
                 $checks[] = $this->checkFacultyAvailability($subject->faculty, $day, $startTime, $endTime, $subject, $room, $ignoreScheduleId);
             }
 
+            // Loop through and validate all criteria entries
             foreach ($checks as $check) {
                 if (($check['success'] ?? $check['status'] ?? true) === false) {
                     return $check;

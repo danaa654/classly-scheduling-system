@@ -645,133 +645,189 @@
         {{-- --- BULK IMPORT MODAL --- --}}
         <div
             x-show="bulkOpen"
-            class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/70 backdrop-blur-md"
+            class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm"
             x-cloak
             x-transition>
             <div
-                class="bg-white dark:bg-slate-900 w-full max-w-xl rounded-3xl p-8 md:p-10 shadow-2xl border
-                       border-slate-200 dark:border-slate-800 transition-colors"
+                class="bg-white dark:bg-slate-900 w-full max-w-lg rounded-3xl p-8 md:p-10 shadow-2xl border
+                       border-slate-100 dark:border-slate-800 transition-colors"
                 @click.away="bulkOpen = false">
-                <div class="flex justify-between items-start mb-2">
-                    <h3 class="text-2xl font-black text-slate-800 dark:text-slate-100 tracking-tight uppercase">
-                        Batch Room Import
-                    </h3>
-                    <button @click="bulkOpen = false" class="text-slate-400 hover:text-red-500 text-2xl font-bold transition-colors">✕</button>
+
+                {{-- Header --}}
+                <div class="flex items-start justify-between mb-1">
+                    <div>
+                        <h3 class="text-2xl font-black text-slate-800 dark:text-slate-100">
+                            Batch Room Import
+                        </h3>
+                        <p class="text-sm text-slate-400 dark:text-slate-500 italic mt-0.5">
+                            Upload a CSV file to import multiple rooms at once.
+                        </p>
+                    </div>
+                    <button
+                        @click="bulkOpen = false"
+                        class="mt-1 p-1 text-slate-300 hover:text-slate-500 dark:text-slate-600
+                               dark:hover:text-slate-400 rounded-lg transition-colors">
+                        <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
                 </div>
-                
-                <p
-                    class="text-sm text-slate-500 dark:text-slate-400 mb-6 font-medium italic">
-                    CSV Required Headers:
-                    <span class="text-slate-700 dark:text-slate-300 font-bold italic block mt-1 bg-slate-50 dark:bg-slate-800 p-2 rounded max-w-max">
-                        room_name, room_type, specialization, capacity, floor
-                    </span>
-                </p>
 
-                <div class="space-y-6">
-                    <div
-                        class="group border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-2xl p-8
-                               flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-800/30
-                               hover:bg-white dark:hover:bg-slate-800/50 hover:border-blue-500 transition-all
-                               cursor-pointer relative shadow-inner"
-                        wire:loading.class="opacity-50 pointer-events-none"
-                        wire:target="importFile">
+                {{-- Required CSV Headers --}}
+                <div class="mt-6 mb-5">
+                    <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">
+                        Required CSV Headers
+                    </p>
+                    <div class="flex flex-wrap gap-2">
+                        @foreach(['room_name', 'room_type', 'specialization', 'capacity', 'floor'] as $csvHeader)
+                            <span class="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300
+                                         rounded-lg text-xs font-mono font-black border border-slate-200 dark:border-slate-700
+                                         tracking-tight">
+                                {{ $csvHeader }}
+                            </span>
+                        @endforeach
+                    </div>
+                </div>
 
-                        <input type="file" wire:model.live="importFile" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
+                <div class="space-y-5">
+                    {{-- Upload Dropzone --}}
+                    <div>
+                        <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">
+                            Upload File
+                        </p>
+                        <div
+                            class="relative border-2 border-dashed border-slate-200 dark:border-slate-700 rounded-2xl p-8
+                                   flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-800/40
+                                   hover:border-blue-400 dark:hover:border-blue-600
+                                   hover:bg-blue-50/40 dark:hover:bg-blue-900/10 transition-all cursor-pointer"
+                            wire:loading.class="opacity-50 pointer-events-none"
+                            wire:target="importFile">
 
-                        <div wire:loading wire:target="importFile" class="text-center">
-                            <div
-                                class="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3">
+                            <input type="file" wire:model.live="importFile" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
+
+                            {{-- Loading state --}}
+                            <div wire:loading wire:target="importFile" class="text-center">
+                                <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                                <span class="text-xs font-black text-blue-500 uppercase tracking-widest">
+                                    Analyzing CSV Structure…
+                                </span>
                             </div>
-                            <span
-                                class="text-xs font-black text-blue-600 uppercase tracking-widest">
-                                Analyzing CSV Structure...
-                            </span>
-                        </div>
 
-                        <div wire:loading.remove wire:target="importFile" class="text-center">
-                            <span class="text-5xl mb-4 transition-transform group-hover:scale-110 block">📊</span>
-                            <span class="text-sm font-bold text-slate-700 dark:text-slate-300">
-                                {{ $importFile ? $importFile->getClientOriginalName() : 'Drop room CSV here or click to browse' }}
-                            </span>
+                            {{-- Idle / File loaded state --}}
+                            <div wire:loading.remove wire:target="importFile" class="text-center">
+                                @if($importFile)
+                                    <div class="w-14 h-14 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center
+                                                justify-center text-2xl mx-auto mb-3 border border-blue-100 dark:border-blue-800">
+                                        📊
+                                    </div>
+                                    <span class="text-sm font-black text-blue-600 dark:text-blue-400 block">
+                                        {{ $importFile->getClientOriginalName() }}
+                                    </span>
+                                    <span class="text-xs text-slate-400 dark:text-slate-500 font-bold mt-1 block">
+                                        File ready — see preview below
+                                    </span>
+                                @else
+                                    <div class="w-14 h-14 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center
+                                                justify-center text-2xl mx-auto mb-3 border border-slate-200 dark:border-slate-700">
+                                        📂
+                                    </div>
+                                    <span class="text-sm font-bold text-slate-500 dark:text-slate-400 block">
+                                        Drop your CSV here or click to browse
+                                    </span>
+                                    <span class="text-xs text-slate-400 dark:text-slate-500 font-medium mt-1 block">
+                                        .csv files only
+                                    </span>
+                                @endif
+                            </div>
                         </div>
                     </div>
 
+                    {{-- Preview Table --}}
                     @if(count($importPreview) > 0)
-                        <div class="mt-4 border border-slate-200 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm">
-                            <div class="max-h-64 overflow-y-auto custom-scrollbar bg-white dark:bg-slate-800/50">
-                                <table class="w-full text-left border-collapse">
-                                    <thead
-                                        class="bg-slate-100 dark:bg-slate-800 sticky top-0 backdrop-blur-sm z-10 border-b border-slate-200 dark:border-slate-700">
-                                    <tr
-                                        class="text-xs uppercase font-black text-slate-500 dark:text-slate-400 tracking-wider">
-                                        <th class="px-4 py-3">Room Name</th>
-                                        <th class="px-4 py-3">Type</th>
-                                        <th class="px-4 py-3">Floor</th>
-                                        <th class="px-4 py-3 text-right">Status</th>
-                                    </tr>
-                                    </thead>
-                                    <tbody class="divide-y divide-slate-100 dark:divide-slate-700 text-sm">
-                                    @foreach($importPreview as $preview)
-                                        <tr class="font-bold dark:hover:bg-slate-700/50 transition-colors">
-                                            <td class="px-4 py-3 text-slate-800 dark:text-slate-200">
-                                                {{ $preview['room_name'] }}
-                                            </td>
-                                            <td
-                                                class="px-4 py-3 text-slate-500 dark:text-slate-400 italic font-medium uppercase text-xs">
-                                                {{ $preview['type'] }}
-                                            </td>
-                                            <td class="px-4 py-3 text-slate-600 dark:text-slate-300">
-                                                {{ $preview['floor'] ?? 'N/A' }}
-                                            </td>
-                                            <td class="px-4 py-3 text-right">
-                                                <span
-                                                    title="{{ $preview['errors'] ?? '' }}"
-                                                    class="px-3 py-1 rounded-full text-[10px] uppercase font-black tracking-wider
-                                                           {{ $preview['status'] === 'INVALID'
-                                                                ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300'
-                                                                : ($preview['status'] === 'DUPLICATE'
-                                                                    ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
-                                                                    : 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400') }}">
-                                                    {{ $preview['status'] }}
-                                                </span>
-                                                @if(($preview['status'] ?? '') === 'INVALID')
-                                                    <div
-                                                        class="mt-1.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">
-                                                        {{ $preview['errors'] ?? 'Invalid row' }}
-                                                    </div>
-                                                @endif
-                                            </td>
-                                        </tr>
-                                    @endforeach
-                                    </tbody>
-                                </table>
+                        <div>
+                            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">
+                                Preview &mdash; {{ count($importPreview) }} {{ Str::plural('Row', count($importPreview)) }} Detected
+                            </p>
+                            <div class="border border-slate-100 dark:border-slate-700 rounded-2xl overflow-hidden shadow-sm">
+                                <div class="max-h-52 overflow-y-auto custom-scrollbar">
+                                    <table class="w-full text-left border-collapse">
+                                        <thead class="bg-slate-50 dark:bg-slate-800 sticky top-0 border-b border-slate-100 dark:border-slate-700">
+                                            <tr class="text-[10px] uppercase font-black text-slate-400 dark:text-slate-500 tracking-widest">
+                                                <th class="px-4 py-3">Room Name</th>
+                                                <th class="px-4 py-3">Type</th>
+                                                <th class="px-4 py-3">Floor</th>
+                                                <th class="px-4 py-3 text-right">Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody class="divide-y divide-slate-50 dark:divide-slate-800 bg-white dark:bg-slate-900/50">
+                                        @foreach($importPreview as $preview)
+                                            <tr class="hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors">
+                                                <td class="px-4 py-3 font-black text-slate-800 dark:text-slate-200 text-sm">
+                                                    {{ $preview['room_name'] }}
+                                                </td>
+                                                <td class="px-4 py-3 font-black text-slate-400 dark:text-slate-500 uppercase text-xs tracking-widest">
+                                                    {{ $preview['type'] }}
+                                                </td>
+                                                <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300 text-sm">
+                                                    {{ $preview['floor'] ?? 'N/A' }}
+                                                </td>
+                                                <td class="px-4 py-3 text-right">
+                                                    <span
+                                                        title="{{ $preview['errors'] ?? '' }}"
+                                                        class="px-3 py-1 rounded-full text-[10px] uppercase font-black tracking-wider
+                                                               {{ $preview['status'] === 'INVALID'
+                                                                    ? 'bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-300'
+                                                                    : ($preview['status'] === 'DUPLICATE'
+                                                                        ? 'bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400'
+                                                                        : 'bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400') }}">
+                                                        {{ $preview['status'] }}
+                                                    </span>
+                                                    @if(($preview['status'] ?? '') === 'INVALID')
+                                                        <div class="mt-1 text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                                                            {{ $preview['errors'] ?? 'Invalid row' }}
+                                                        </div>
+                                                    @endif
+                                                </td>
+                                            </tr>
+                                        @endforeach
+                                        </tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
-
-                        <button
-                            wire:click="processImport"
-                            wire:loading.attr="disabled"
-                            class="w-full mt-4 py-4 bg-blue-600 dark:bg-blue-700 text-white rounded-2xl font-black
-                                   uppercase tracking-widest hover:bg-blue-800 dark:hover:bg-blue-600
-                                   shadow-lg shadow-blue-200 dark:shadow-none transition-all text-xs">
-                            <span wire:loading.remove wire:target="processImport">
-                                Confirm & Import Valid Rooms
-                            </span>
-                            <span wire:loading wire:target="processImport">
-                                Saving to Database...
-                            </span>
-                        </button>
                     @endif
+                </div>
 
-                    <div class="flex justify-center pt-2">
-                        <button
-                            type="button"
-                            @click="bulkOpen = false; $wire.reset(['importFile', 'importPreview'])"
-                            class="font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest
-                                   text-xs hover:text-slate-700 dark:hover:text-slate-300 transition-colors">
-                            Close Importer
-                        </button>
-                    </div>
+                {{-- Footer Actions --}}
+                <div class="flex items-center justify-between mt-8">
+                    <button
+                        type="button"
+                        @click="bulkOpen = false; $wire.reset(['importFile', 'importPreview'])"
+                        class="font-black text-slate-400 dark:text-slate-500 uppercase tracking-widest text-xs
+                               hover:text-slate-600 dark:hover:text-slate-300 transition-colors">
+                        Cancel
+                    </button>
+
+                    <button
+                        wire:click="processImport"
+                        wire:loading.attr="disabled"
+                        @disabled(count($importPreview) === 0)
+                        class="px-8 py-3.5 bg-blue-600 text-white rounded-full font-black uppercase tracking-widest
+                               text-xs shadow-lg shadow-blue-200 dark:shadow-none
+                               hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-500
+                               transition-all disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none
+                               {{ count($importPreview) === 0 ? 'opacity-40 cursor-not-allowed' : '' }}">
+                        <span wire:loading.remove wire:target="processImport">
+                            Confirm &amp; Import Valid Rooms
+                        </span>
+                        <span wire:loading wire:target="processImport" class="flex items-center gap-2">
+                            <svg class="animate-spin w-3.5 h-3.5" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                            </svg>
+                            Saving to Database…
+                        </span>
+                    </button>
                 </div>
             </div>
         </div>
