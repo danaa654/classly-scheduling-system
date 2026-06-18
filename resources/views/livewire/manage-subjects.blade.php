@@ -1,4 +1,4 @@
-<div class="manage-subjects-readable min-h-screen bg-[#E6E6E6] dark:bg-[#020617] transition-colors duration-500"
+<div class="manage-subjects-readable min-h-screen bg-[#eef3f8] dark:bg-[#020617] transition-colors duration-500"
      x-data="{
         open: @entangle('showModal'),
         bulkOpen: @entangle('bulkOpen')
@@ -45,18 +45,17 @@
                 @endif
                 @if($catalogMode === 'active')
                     <button @click.prevent="bulkOpen = true"
-                        class="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-400 rounded-2xl font-extrabold text-[10px] uppercase hover:bg-slate-200 dark:hover:bg-slate-700 transition shadow-sm border border-slate-200 dark:border-slate-700">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"/>
-                        </svg>
-                        Bulk Import
+                            class="flex items-center px-4 py-2 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-400 
+                                rounded-xl font-black text-sm hover:bg-slate-200 dark:hover:bg-slate-700 
+                                transition shadow-sm border border-slate-200 dark:border-slate-700">
+                        <span class="mr-2 text-base">📥</span> Bulk Import
                     </button>
+
                     <button wire:click="openModal"
-                        class="flex items-center gap-1.5 px-4 py-1.5 bg-blue-700 dark:bg-indigo-700 text-white rounded-2xl font-extrabold shadow-md shadow-blue-600/40 text-[10px] uppercase hover:scale-105 active:scale-95 transition-all">
-                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd" />
-                        </svg>
-                        Add Subject
+                            class="flex items-center px-4 py-2 bg-blue-700 dark:bg-indigo-700 text-white 
+                                rounded-xl font-black shadow-md shadow-blue-600/40 dark:shadow-none 
+                                text-sm hover:scale-105 active:scale-95 transition-all">
+                        <span class="mr-1.5 text-base">+</span> Add Subject
                     </button>
                 @endif
             </div>

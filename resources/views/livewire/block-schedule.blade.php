@@ -1,15 +1,3 @@
-{{-- ============================================================
-     BLOCK SCHEDULE — livewire/block-schedule.blade.php
-     ============================================================
-     UPDATED VERSION:
-       • Real-time conflict detection enabled in edit mode
-       • Added Cancel Editing button with snapshot restore
-       • Updated banner message to reflect live detection
-       • Added conflict type badges (ROOM, FACULTY, TIME)
-       • Removed blocking behavior—editing always allowed
-       • Improved UX with better visual feedback
-     ============================================================ --}}
-
 <div class="min-h-screen bg-[#eef3f8] dark:bg-[#020617] transition-colors duration-500 py-6 px-5">
     <div class="max-w-[1500px] mx-auto space-y-4">
 
@@ -1685,18 +1673,11 @@
                     </button>
                 </div>
 
-            </div>{{-- /modal card --}}
-        </div>{{-- /modal overlay --}}
+            </div>
+        </div>
     @endif
 
-</div>{{-- /root --}}
-
-
-{{-- ============================================================
-     PRINT STYLESHEET
-     A4 Landscape · Hides ALL chrome UI · Full-width table
-     No blank pages · Proper header repeats on multi-page
-     ============================================================ --}}
+</div>
 <style>
     @page {
         size: A4 landscape;

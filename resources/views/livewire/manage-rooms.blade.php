@@ -1,4 +1,4 @@
-<div class="min-h-screen bg-[#E6E6E6] dark:bg-[#020617] transition-colors duration-500">
+<div class="min-h-screen bg-[#eef3f8] dark:bg-[#020617] transition-colors duration-500">
 
     <div class="flex min-h-screen font-sans antialiased text-slate-900 dark:text-white"
          x-data="{ 
@@ -9,61 +9,67 @@
 
         <main class="flex-1 flex flex-col overflow-hidden">
             {{-- Header Section --}}
-            <header
-                class="h-20 bg-white dark:bg-slate-900/60 border-b border-slate-200 dark:border-slate-800
-                       flex items-center justify-between px-8 shadow-sm shrink-0 backdrop-blur-xl
-                       rounded-b-3xl transition-colors">
-                <div>
-                    <h2 class="text-2xl font-black text-slate-800 dark:text-slate-100 uppercase tracking-tight">
+             <header class="mx-auto mt-2 h-14 w-[97%] max-w-[1600px] bg-white dark:bg-slate-900/60 border border-slate-300 dark:border-slate-700 flex items-center justify-between px-5 shadow-xl backdrop-blur-xl rounded-full transition-colors z-20">
+                <div class="flex items-center gap-3">
+                    <h2 class="text-base font-extrabold text-slate-900 dark:text-slate-100 uppercase tracking-tight">
                         Room Management
                     </h2>
                     <p class="text-sm text-slate-500 dark:text-indigo-400/80 font-medium italic">
                         Institutional Space Allocation
                     </p>
-                </div>
+                </div>  
 
                 @if(in_array(auth()->user()->role, ['admin', 'registrar']))
                     <div class="flex items-center space-x-3">
                         @if(count($selectedRooms) > 0)
                             <button
                                 wire:click="$set('confirmingDeletion', true)"
-                                class="px-5 py-2.5 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400
-                                       rounded-xl text-sm font-black hover:bg-red-100 dark:hover:bg-red-900/30
-                                       transition-all border border-red-200 dark:border-red-800 shadow-sm">
+                                class="px-4 py-2 bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400
+                                    rounded-xl text-sm font-black hover:bg-red-100 dark:hover:bg-red-900/30
+                                    transition-all border border-red-200 dark:border-red-800 shadow-sm">
                                 🗑️ Delete Selected ({{ count($selectedRooms) }})
                             </button>
                         @endif
 
                         <button
                             @click="bulkOpen = true"
-                            class="px-5 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200
-                                   rounded-xl text-sm font-black hover:bg-slate-200 dark:hover:bg-slate-700
-                                   transition-all flex items-center border border-slate-200 dark:border-slate-700">
-                            <span class="mr-2 text-lg">📥</span> Bulk Import
+                            class="group relative overflow-hidden cursor-pointer px-5 py-2.5 bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200
+                                rounded-2xl text-sm font-black border border-slate-200 dark:border-slate-700 shadow-sm
+                                transition-all duration-300 ease-out
+                                hover:-translate-y-0.5 hover:scale-[1.02] hover:bg-white dark:hover:bg-slate-700
+                                hover:shadow-[0_10px_25px_rgba(15,23,42,0.12)] dark:hover:shadow-[0_10px_25px_rgba(0,0,0,0.35)]
+                                active:scale-[0.98] active:translate-y-0 flex items-center">
+                            <span class="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-r from-slate-200/40 via-white/70 to-slate-200/40 dark:from-slate-700/20 dark:via-slate-600/20 dark:to-slate-700/20"></span>
+                            <span class="absolute -inset-y-full left-[-40%] w-1/3 rotate-12 bg-white/40 dark:bg-white/10 blur-md group-hover:left-[120%] transition-all duration-700"></span>
+                            <span class="relative z-10 mr-2 text-base transition-transform duration-300 group-hover:scale-110 group-hover:-translate-y-0.5">📥</span>
+                            <span class="relative z-10">Bulk Import</span>
                         </button>
 
                         <button
                             wire:click="openModal"
-                            class="group relative px-6 py-2.5 bg-blue-600 text-white rounded-xl text-sm
-                                   font-black shadow-md shadow-blue-200 dark:shadow-none overflow-hidden
-                                   transition-all active:scale-95">
+                            class="group relative overflow-hidden cursor-pointer px-5 py-2.5 bg-blue-600 text-white rounded-2xl text-sm
+                                font-black shadow-md shadow-blue-200 dark:shadow-none
+                                transition-all duration-300 ease-out active:scale-95
+                                hover:-translate-y-0.5 hover:scale-[1.02]
+                                hover:shadow-[0_12px_30px_rgba(37,99,235,0.35)]">
                             <span class="relative z-10">+ Add New Room</span>
                             <div
-                                class="absolute inset-0 bg-gradient-to-r from-blue-400 to-indigo-600
-                                       opacity-0 group-hover:opacity-100 transition-opacity duration-500">
+                                class="absolute inset-0 bg-gradient-to-r from-blue-500 via-indigo-500 to-blue-700
+                                    opacity-0 group-hover:opacity-100 transition-opacity duration-500">
                             </div>
+                            <div class="absolute -inset-y-full left-[-30%] w-1/3 rotate-12 bg-white/30 blur-md group-hover:left-[120%] transition-all duration-700"></div>
                         </button>
                     </div>
                 @endif
             </header>
 
             {{-- Content Body --}}
-            <div class="p-6 pb-4 overflow-y-auto space-y-5 custom-scrollbar">
+            <div class="p-4 md:p-5 pb-3 overflow-y-auto space-y-4 custom-scrollbar">
 
                 {{-- Search & Filter Bar --}}
                 <div
-                    class="flex flex-col md:flex-row md:items-center justify-between gap-4
-                           bg-white dark:bg-slate-900/50 p-5 rounded-2xl border border-slate-200
+                    class="flex flex-col md:flex-row md:items-center justify-between gap-3
+                           bg-white dark:bg-slate-900/50 p-4 rounded-2xl border border-slate-200
                            dark:border-slate-800 shadow-sm transition-colors">
                     <div class="relative flex-1 max-w-2xl">
                         <span class="absolute inset-y-0 left-4 flex items-center text-slate-400 text-lg">🔍</span>
@@ -77,7 +83,7 @@
                     </div>
 
                     <div class="flex items-center space-x-3">
-                        <span class="text-xs font-black uppercase text-slate-500 dark:text-slate-400 tracking-widest">
+                        <span class="text-xs font-black uppercase text-slate-500 dark:text-slate-400 tracking-widest whitespace-nowrap">
                             Filter Type:
                         </span>
                         <select
@@ -127,7 +133,7 @@
                             <tr
                                 class="hover:bg-blue-50/40 dark:hover:bg-blue-900/10 transition-colors
                                        {{ in_array($room->id, $selectedRooms) ? 'bg-blue-50/60 dark:bg-blue-900/20' : '' }}">
-                                <td class="px-5 py-4 text-center align-middle">
+                                <td class="px-5 py-3 text-center align-middle">
                                     @if(in_array(auth()->user()->role, ['admin', 'registrar']))
                                         <input
                                             type="checkbox"
@@ -137,7 +143,7 @@
                                                    text-blue-600 focus:ring-blue-500 h-4 w-4 cursor-pointer">
                                     @endif
                                 </td>
-                                <td class="px-6 py-4 align-middle">
+                                <td class="px-6 py-3 align-middle">
                                     <div class="flex flex-col leading-tight space-y-1">
                                         <span
                                             class="font-black text-slate-800 dark:text-slate-100 text-base lg:text-lg uppercase tracking-tight">
@@ -148,26 +154,15 @@
                                             Main Campus Building
                                         </span>
 
-                                        {{-- ══════════════════════════════════════════════════════════
-                                             WEEKLY UTILISATION INDICATOR
-                                             Max institutional cap: 60 hrs / week
-                                             Source: subjects preferred-assigned via preferred_room_id,
-                                                     scoped to the active academic term.
-                                             ══════════════════════════════════════════════════════════ --}}
                                         @php
-                                            // Sum (duration_hours × meetings_per_week) across all
-                                            // active-term subjects preferred-assigned to this room.
                                             $roomTotalHours = $room->subjects->sum(
                                                 fn ($s) => (float) $s->duration_hours
                                                          * max(1, (int) ($s->meetings_per_week ?? 1))
                                             );
 
-                                            // Cap display at 100 %; over-capacity is surfaced via
-                                            // the "OVER CAPACITY" label and the pulsing dot instead.
                                             $roomUtilPct    = min(100, (int) round(($roomTotalHours / 60) * 100));
                                             $roomOverCap    = $roomTotalHours > 60;
 
-                                            // Indicator dot: green / amber / red / red+pulse
                                             $roomDotClass   = match (true) {
                                                 $roomOverCap            => 'bg-red-500 animate-pulse',
                                                 $roomUtilPct >= 86      => 'bg-red-500',
@@ -175,14 +170,12 @@
                                                 default                 => 'bg-green-500',
                                             };
 
-                                            // Progress bar fill colour (no pulse on bar — keeps it calm)
                                             $roomBarClass   = match (true) {
                                                 $roomUtilPct >= 86      => 'bg-red-500',
                                                 $roomUtilPct >= 61      => 'bg-amber-500',
                                                 default                 => 'bg-green-500',
                                             };
 
-                                            // Label text colour
                                             $roomTextClass  = match (true) {
                                                 $roomUtilPct >= 86      => 'text-red-600 dark:text-red-400',
                                                 $roomUtilPct >= 61      => 'text-amber-600 dark:text-amber-400',
@@ -190,13 +183,11 @@
                                             };
                                         @endphp
 
-                                        {{-- ─── CLICKABLE UTILISATION TRIGGER ────────────────────── --}}
                                         <button
                                             wire:click="toggleRoomDetails({{ $room->id }})"
-                                            class="mt-2 w-full text-left focus:outline-none cursor-pointer group/util"
+                                            class="mt-1.5 w-full text-left focus:outline-none cursor-pointer group/util"
                                             title="{{ in_array($room->id, $expandedRooms) ? 'Collapse subject list' : 'Show allocated subjects' }}">
 
-                                            {{-- Indicator dot + badge text + chevron --}}
                                             <div class="flex items-center gap-1.5">
                                                 <span class="inline-block w-2 h-2 rounded-full shrink-0 {{ $roomDotClass }}"></span>
                                                 <span class="text-[10px] font-black uppercase tracking-widest {{ $roomTextClass }}">
@@ -207,14 +198,12 @@
                                                         ({{ $roomUtilPct }}%)
                                                     @endif
                                                 </span>
-                                                {{-- Rotating chevron shows expand / collapse state --}}
                                                 <svg class="ml-auto w-3 h-3 text-slate-400 dark:text-slate-500 transition-transform duration-200 {{ in_array($room->id, $expandedRooms) ? 'rotate-180' : '' }}"
                                                      fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
                                                     <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
                                                 </svg>
                                             </div>
 
-                                            {{-- Micro progress bar — subtly widens on hover --}}
                                             <div class="mt-1.5 w-full max-w-[180px] h-1.5 bg-slate-100 dark:bg-slate-700/60 rounded-full overflow-hidden group-hover/util:max-w-[220px] transition-all duration-300">
                                                 <div class="h-full rounded-full transition-all duration-500 {{ $roomBarClass }}"
                                                      style="width: {{ $roomUtilPct }}%">
@@ -223,7 +212,7 @@
                                         </button>
                                     </div>
                                 </td>
-                                <td class="px-5 py-4 text-center align-middle">
+                                <td class="px-5 py-3 text-center align-middle">
                                     <span
                                         class="px-4 py-1.5 text-xs uppercase font-black tracking-tight border rounded-xl
                                                {{ strtoupper($room->type) === 'LAB'
@@ -232,7 +221,7 @@
                                         {{ strtoupper($room->type) === 'LECTURE' ? 'Lecture' : 'Lab' }}
                                     </span>
                                 </td>
-                                <td class="px-5 py-4 align-middle">
+                                <td class="px-5 py-3 align-middle">
                                     <div class="flex flex-col space-y-0.5">
                                         <span
                                             class="text-slate-800 dark:text-slate-100 font-black text-xl tracking-tight">
@@ -244,7 +233,7 @@
                                         </span>
                                     </div>
                                 </td>
-                                <td class="px-5 py-4 align-middle">
+                                <td class="px-5 py-3 align-middle">
                                     <div class="flex flex-col space-y-1">
                                         <span
                                             class="text-sm font-bold text-slate-700 dark:text-slate-300 leading-tight">
@@ -257,7 +246,7 @@
                                         @endif
                                         @if($room->department_owner || $room->is_specialized)
                                             <span
-                                                class="text-xs font-black uppercase tracking-widest text-indigo-500 dark:text-indigo-400 mt-1">
+                                                class="text-xs font-black uppercase tracking-widest text-indigo-500 dark:text-indigo-400 mt-0.5">
                                                 {{ $room->department_owner ?: 'Shared' }} {{ $room->is_specialized ? '/ Specialized' : '' }}
                                             </span>
                                         @endif
@@ -265,8 +254,7 @@
                                 </td>
 
                                 @if(in_array(auth()->user()->role, ['admin', 'registrar']))
-                                    {{-- Separated Assignments Column --}}
-                                    <td class="px-5 py-4 text-center align-middle">
+                                    <td class="px-5 py-3 text-center align-middle">
                                         <button
                                             wire:click="openAssignModal({{ $room->id }})"
                                             wire:loading.attr="disabled"
@@ -288,8 +276,7 @@
                                         </button>
                                     </td>
 
-                                    {{-- Standard Actions Column --}}
-                                    <td class="px-5 py-4 text-right align-middle space-x-2 whitespace-nowrap">
+                                    <td class="px-5 py-3 text-right align-middle space-x-2 whitespace-nowrap">
                                         <button
                                             wire:click="editRoom({{ $room->id }})"
                                             class="px-4 py-2 text-xs bg-white dark:bg-slate-800
@@ -313,8 +300,7 @@
                                         </button>
                                     </td>
                                 @elseif(in_array(auth()->user()->role, ['dean', 'oic', 'associate_dean']))
-                                    {{-- View-only Assignments Column for Department Officials --}}
-                                    <td class="px-5 py-4 text-center align-middle">
+                                    <td class="px-5 py-3 text-center align-middle">
                                         <button
                                             wire:click="openAssignModal({{ $room->id }})"
                                             wire:loading.attr="disabled"
@@ -338,15 +324,13 @@
                                 @endif
                             </tr>
 
-                        {{-- ── INLINE SUBJECT ACCORDION ──────────────────────────────── --}}
                         @if(in_array($room->id, $expandedRooms))
                             <tr wire:key="room-expand-{{ $room->id }}" class="border-0">
                                 <td colspan="{{ in_array(auth()->user()->role, ['admin', 'registrar']) ? 7 : (in_array(auth()->user()->role, ['dean', 'oic', 'associate_dean']) ? 6 : 5) }}"
-                                    class="px-6 pb-5 pt-0">
+                                    class="px-6 pb-4 pt-0">
 
                                     <div class="room-expand-anim ml-4 rounded-2xl border border-slate-200 dark:border-slate-700 overflow-hidden bg-white dark:bg-slate-900/70 shadow-sm">
 
-                                        {{-- Strip header --}}
                                         <div class="flex items-center justify-between px-4 py-2.5 bg-blue-900 dark:bg-blue-950 border-b border-blue-800 dark:border-blue-900">
                                             <span class="text-[10px] font-black uppercase tracking-widest text-blue-100 dark:text-blue-200">
                                                 📋 Allocated Subjects
@@ -361,14 +345,12 @@
                                         </div>
 
                                         @if($room->subjects->isEmpty())
-                                            {{-- Empty state --}}
-                                            <div class="py-6 px-4 text-center">
+                                            <div class="py-5 px-4 text-center">
                                                 <p class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
                                                     No subjects allocated to this room yet.
                                                 </p>
                                             </div>
                                         @else
-                                            {{-- Subject rows --}}
                                             @foreach($room->subjects as $subject)
                                                 @php
                                                     $subjectWklyHrs = round(
@@ -380,28 +362,22 @@
                                                      class="flex items-center gap-3 px-4 py-3
                                                             {{ !$loop->last ? 'border-b border-slate-100 dark:border-slate-700/50' : '' }}
                                                             hover:bg-blue-50/40 dark:hover:bg-blue-900/10 transition-colors">
-
-                                                    {{-- EDP code --}}
                                                     <span class="font-black font-mono text-xs text-slate-500 dark:text-slate-400 uppercase tracking-widest w-28 shrink-0">
                                                         {{ $subject->edp_code }}
                                                     </span>
 
-                                                    {{-- Subject code --}}
                                                     <span class="font-black text-xs text-slate-800 dark:text-slate-100 uppercase tracking-tight w-24 shrink-0">
                                                         {{ $subject->subject_code }}
                                                     </span>
 
-                                                    {{-- Description --}}
                                                     <span class="text-xs text-slate-500 dark:text-slate-400 font-medium flex-1 truncate">
                                                         {{ $subject->description }}
                                                     </span>
 
-                                                    {{-- Section badge --}}
                                                     <span class="px-2.5 py-1 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg text-[10px] font-black uppercase tracking-widest border border-indigo-200 dark:border-indigo-800 shrink-0">
                                                         Sec&nbsp;{{ $subject->section ?? '—' }}
                                                     </span>
 
-                                                    {{-- Major / Minor badge --}}
                                                     <span class="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest shrink-0
                                                         {{ strtolower($subject->type) === 'minor'
                                                             ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800'
@@ -409,14 +385,12 @@
                                                         {{ $subject->type }}
                                                     </span>
 
-                                                    {{-- Weekly hours --}}
                                                     <span class="text-xs font-black text-slate-600 dark:text-slate-300 tabular-nums shrink-0 w-14 text-right">
                                                         {{ $subjectWklyHrs }}h<span class="text-slate-400 dark:text-slate-500 font-bold text-[10px]">/wk</span>
                                                     </span>
                                                 </div>
                                             @endforeach
                                         @endif
-
                                     </div>
                                 </td>
                             </tr>
@@ -424,7 +398,7 @@
 
                         @empty
                             <tr>
-                                <td colspan="{{ in_array(auth()->user()->role, ['admin', 'registrar']) ? 7 : (in_array(auth()->user()->role, ['dean', 'oic', 'associate_dean']) ? 6 : 5) }}" class="px-8 py-24 text-center">
+                                <td colspan="{{ in_array(auth()->user()->role, ['admin', 'registrar']) ? 7 : (in_array(auth()->user()->role, ['dean', 'oic', 'associate_dean']) ? 6 : 5) }}" class="px-8 py-20 text-center">
                                     <div class="flex flex-col items-center">
                                         <span class="text-5xl mb-4 opacity-50">🏫</span>
                                         <p
@@ -440,7 +414,7 @@
                 </div>
 
                 {{-- Pagination --}}
-                <div class="mt-5 mb-6 flex justify-center">
+                <div class="mt-3 mb-3 flex justify-center">
                     {{ $rooms->links('livewire.custom-pagination') }}
                 </div>
             </div>
@@ -473,7 +447,6 @@
                 <form
                     wire:submit.prevent="{{ $isEditMode ? 'updateRoom' : 'saveRoom' }}"
                     class="space-y-6">
-                    {{-- Room Identifier --}}
                     <div>
                         <label
                             class="block text-xs font-black uppercase text-slate-500 dark:text-slate-400 tracking-widest mb-2 ml-1">
@@ -495,7 +468,6 @@
                     </div>
 
                     <div class="grid grid-cols-2 gap-5">
-                        {{-- Room Type --}}
                         <div>
                             <label
                                 class="block text-xs font-black uppercase text-slate-500 dark:text-slate-400 tracking-widest mb-2 ml-1">
@@ -510,7 +482,6 @@
                                 <option value="LAB">Lab</option>
                             </select>
                         </div>
-                        {{-- Capacity --}}
                         <div>
                             <label
                                 class="block text-xs font-black uppercase text-slate-500 dark:text-slate-400 tracking-widest mb-2 ml-1">
@@ -531,7 +502,6 @@
                         </div>
                     </div>
 
-                    {{-- Floor and Specialization --}}
                     <div class="grid grid-cols-2 gap-5">
                         <div>
                             <label
@@ -621,7 +591,6 @@
                         </p>
                     </div>
 
-                    {{-- Actions --}}
                     <div class="flex space-x-4 pt-6 mt-2 border-t border-slate-100 dark:border-slate-800">
                         <button
                             type="button"
@@ -653,7 +622,6 @@
                        border-slate-100 dark:border-slate-800 transition-colors"
                 @click.away="bulkOpen = false">
 
-                {{-- Header --}}
                 <div class="flex items-start justify-between mb-1">
                     <div>
                         <h3 class="text-2xl font-black text-slate-800 dark:text-slate-100">
@@ -673,7 +641,6 @@
                     </button>
                 </div>
 
-                {{-- Required CSV Headers --}}
                 <div class="mt-6 mb-5">
                     <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">
                         Required CSV Headers
@@ -690,7 +657,6 @@
                 </div>
 
                 <div class="space-y-5">
-                    {{-- Upload Dropzone --}}
                     <div>
                         <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">
                             Upload File
@@ -705,15 +671,13 @@
 
                             <input type="file" wire:model.live="importFile" class="absolute inset-0 opacity-0 cursor-pointer w-full h-full">
 
-                            {{-- Loading state --}}
                             <div wire:loading wire:target="importFile" class="text-center">
                                 <div class="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
                                 <span class="text-xs font-black text-blue-500 uppercase tracking-widest">
-                                    Analyzing CSV Structure…
+                                    Analyzing CSV Structure...
                                 </span>
                             </div>
 
-                            {{-- Idle / File loaded state --}}
                             <div wire:loading.remove wire:target="importFile" class="text-center">
                                 @if($importFile)
                                     <div class="w-14 h-14 bg-blue-50 dark:bg-blue-900/30 rounded-2xl flex items-center
@@ -724,7 +688,7 @@
                                         {{ $importFile->getClientOriginalName() }}
                                     </span>
                                     <span class="text-xs text-slate-400 dark:text-slate-500 font-bold mt-1 block">
-                                        File ready — see preview below
+                                        File ready - see preview below
                                     </span>
                                 @else
                                     <div class="w-14 h-14 bg-slate-100 dark:bg-slate-800 rounded-2xl flex items-center
@@ -742,7 +706,6 @@
                         </div>
                     </div>
 
-                    {{-- Preview Table --}}
                     @if(count($importPreview) > 0)
                         <div>
                             <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">
@@ -798,7 +761,6 @@
                     @endif
                 </div>
 
-                {{-- Footer Actions --}}
                 <div class="flex items-center justify-between mt-8">
                     <button
                         type="button"
@@ -825,7 +787,7 @@
                                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
                                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
                             </svg>
-                            Saving to Database…
+                            Saving to Database...
                         </span>
                     </button>
                 </div>
@@ -876,18 +838,16 @@
             </div>
         </div>
 
-        {{-- ── ACCORDION ENTRY ANIMATION ─────────────────────────────────── --}}
         <style>
             .room-expand-anim {
                 animation: roomExpandIn 0.18s ease-out both;
             }
             @keyframes roomExpandIn {
                 from { opacity: 0; transform: translateY(-5px); }
-                to   { opacity: 1; transform: translateY(0);    }
+                to   { opacity: 1; transform: translateY(0); }
             }
         </style>
 
-        {{-- --- TOAST NOTIFICATION SCRIPT --- --}}
         <script>
             document.addEventListener('livewire:init', () => {
                 Livewire.on('toast', (event) => {
@@ -944,7 +904,7 @@
                 },
                 clearFilters() { this.filterDept = ''; this.filterMajor = ''; this.filterYear = ''; this.filterSection = ''; }
             }"
-        x-effect="if (!open) { search = ''; filterDept = ''; filterMajor = ''; filterYear = ''; filterSection = ''; }"
+            x-effect="if (!open) { search = ''; filterDept = ''; filterMajor = ''; filterYear = ''; filterSection = ''; }"
             x-show="open"
             x-cloak
             x-transition:enter="transition ease-out duration-200"
@@ -968,7 +928,6 @@
                        rounded-3xl shadow-2xl border border-slate-200 dark:border-slate-800
                        transition-colors duration-300">
 
-                {{-- HEADER --}}
                 <div class="px-8 pt-8 pb-4 flex-shrink-0 space-y-4 border-b border-slate-100 dark:border-slate-800">
                     <div class="flex items-start justify-between">
                         <div>
@@ -1017,7 +976,6 @@
                         </div>
                     @endif
 
-                    {{-- Capacity meter --}}
                     <div class="pt-2">
                         <div class="flex items-center justify-between mb-2">
                             <span
@@ -1074,13 +1032,11 @@
                                    focus:ring-indigo-500 transition shadow-sm">
                     </div>
 
-                    {{-- ── Subject Filters ─────────────────────────────────── --}}
                     <div class="flex flex-wrap items-center gap-2 pt-1">
                         <span class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 self-center mr-1">
                             Filter:
                         </span>
 
-                        {{-- Department --}}
                         <select
                             x-model="filterDept"
                             @change="filterMajor = ''"
@@ -1095,7 +1051,6 @@
                             <option value="SHTM">SHTM</option>
                         </select>
 
-                        {{-- Major — options are driven by selected department --}}
                         <select
                             x-model="filterMajor"
                             :disabled="filterDept === ''"
@@ -1109,7 +1064,6 @@
                             </template>
                         </select>
 
-                        {{-- Year Level --}}
                         <select
                             x-model="filterYear"
                             :class="filterYear !== ''
@@ -1123,7 +1077,6 @@
                             <option value="4">4th Year</option>
                         </select>
 
-                        {{-- Section --}}
                         <select
                             x-model="filterSection"
                             :class="filterSection !== ''
@@ -1135,7 +1088,6 @@
                             <option value="B">Sec B</option>
                         </select>
 
-                        {{-- Clear all active filters --}}
                         <button
                             x-show="hasActiveFilters"
                             @click="clearFilters()"
@@ -1153,7 +1105,6 @@
                     </div>
                 </div>
 
-                {{-- SCROLLABLE SUBJECT LIST --}}
                 <div class="flex-1 overflow-y-auto px-8 py-2 min-h-0 custom-scrollbar text-base">
                     @if(empty($modalSubjects))
                         <div class="py-24 text-center">
@@ -1175,7 +1126,7 @@
                             </div>
                             <p
                                 class="text-xs font-black text-indigo-500 uppercase tracking-widest">
-                                Loading subjects…
+                                Loading subjects...
                             </p>
                         </div>
 
@@ -1194,7 +1145,7 @@
                                                text-indigo-600 focus:ring-indigo-500 bg-white dark:bg-slate-800 cursor-pointer"
                                         x-on:change="
                                             const visible = $el.closest('[x-data]')
-                                                .querySelectorAll('[data-subject-row]:not([style*=''display: none'']) input[type=checkbox]');
+                                                .querySelectorAll('[data-subject-row]:not([style*='display: none']) input[type=checkbox]');
                                             visible.forEach(cb => {
                                                 if (cb.checked !== $el.checked) cb.click();
                                             });
@@ -1209,8 +1160,6 @@
 
                             @foreach($modalSubjects as $subject)
                                 @php
-                                    // True when this subject already prefers a DIFFERENT room —
-                                    // used to mute the row and show the amber warning badge.
                                     $claimedByOtherRoom = !empty($subject['preferred_room_id'])
                                         && (int) $subject['preferred_room_id'] !== (int) $assigningRoomId;
                                 @endphp
@@ -1244,11 +1193,8 @@
                                         })()
                                     "
                                     @class([
-                                        // Base — always present
                                         'grid items-center gap-4 px-4 py-3.5 mb-1 rounded-2xl cursor-pointer select-none transition-all group',
-                                        // Default (unclaimed) row
                                         'border border-transparent hover:bg-indigo-50/80 dark:hover:bg-indigo-900/20 hover:border-indigo-200 dark:hover:border-indigo-800' => !$claimedByOtherRoom,
-                                        // Claimed-by-other-room row — amber tint so it reads as "caution"
                                         'border border-amber-200/60 dark:border-amber-700/30 bg-amber-50/30 dark:bg-amber-950/10 hover:bg-amber-50/70 dark:hover:bg-amber-950/25' => $claimedByOtherRoom,
                                     ])
                                     style="grid-template-columns: 2rem 1fr 9rem 4rem 6rem"
@@ -1289,8 +1235,6 @@
                                                 </span>
                                             @endif
                                             @if($claimedByOtherRoom)
-                                                {{-- Guardrail badge: subject already preferred-bound to another room.
-                                                     Row stays clickable so admins can consciously reassign it. --}}
                                                 <span
                                                     class="bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400
                                                            text-[10px] font-bold uppercase px-2 py-0.5 rounded tracking-wide whitespace-nowrap">
@@ -1380,7 +1324,6 @@
                     @endif
                 </div>
 
-                {{-- FOOTER --}}
                 <div
                     class="px-8 py-5 flex-shrink-0 border-t border-slate-200 dark:border-slate-800
                            flex items-center justify-between gap-4 bg-slate-50 dark:bg-slate-900 rounded-b-3xl">
@@ -1433,7 +1376,7 @@
                                           d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
                                 </svg>
                             </span>
-                            <span wire:loading wire:target="saveRoomAssignments">Saving…</span>
+                            <span wire:loading wire:target="saveRoomAssignments">Saving...</span>
 
                             <span wire:loading.remove wire:target="saveRoomAssignments" class="flex items-center">
                                 💾 Save Assignments
