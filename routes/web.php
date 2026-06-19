@@ -16,6 +16,7 @@ use App\Livewire\NotificationCenter;
 use App\Livewire\GlobalSettings;
 use App\Livewire\BlockSchedule;
 use App\Http\Controllers\DiagnosticController;
+use App\Livewire\Admin\LoginLogsTable;
 
 
 
@@ -63,6 +64,7 @@ Route::middleware(['auth'])->group(function () {
     Route::middleware(['auth'])->group(function () {
     Route::get('/settings', GlobalSettings::class)->name('settings');
     Route::get('/block-schedule', BlockSchedule::class)->name('block-schedule');
+    Route::get('/admin/security-logs', LoginLogsTable::class)->name('admin.security-logs');
 });
 
 Route::get('/diagnostic/summary', [DiagnosticController::class, 'summary']);

@@ -1,4 +1,4 @@
-<div class="min-h-screen bg-[#eef3f8] dark:bg-[#020617] transition-colors duration-500 py-6 px-5">
+<div wire:poll.3s class="min-h-screen bg-[#eef3f8] dark:bg-[#020617] transition-colors duration-500 py-6 px-5">
     <div class="max-w-[1500px] mx-auto space-y-4">
 
         {{-- ── Flash Message ─────────────────────────────────────────────── --}}

@@ -21,20 +21,6 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Livewire\Component;
 
-/**
- * BlockSchedule – Livewire Component
- *
- * Displays the official study-load (block schedule) for a chosen
- * department / year-level / section, and handles:
- *  - Inline faculty assignment with conflict detection
- *  - Finalization workflow (with pre-flight validation)
- *  - Role-based access control (Admin always; Registrar if delegated)
- *  - Workspace editing with real-time conflict detection (Admin, Registrar, Dean, OIC, Associate Dean)
- *  - Registrar finalization permission toggle (Admin-only)
- *  - Department-based faculty filtering (CCS vs COC vs GenEd)
- *  - Full audit logging via PermissionLog
- *  - Print-ready output
- */
 class BlockSchedule extends Component
 {
     // ── Filter State ────────────────────────────────────────────────────────

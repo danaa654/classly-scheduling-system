@@ -1,4 +1,4 @@
-<div class="min-h-screen bg-[#eef3f8] dark:bg-[#020617] transition-colors duration-500">
+<div wire:poll.3s class="min-h-screen bg-[#eef3f8] dark:bg-[#020617] transition-colors duration-500">
 
     <div class="flex min-h-screen font-sans antialiased text-slate-900 dark:text-white"
          x-data="{ 

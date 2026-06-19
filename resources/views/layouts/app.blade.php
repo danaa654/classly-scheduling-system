@@ -569,6 +569,26 @@
             </div>
             @endif
 
+            {{-- Security Logs Link - Restricted Strictly to Admin --}}
+                @if(auth()->user()->role === 'admin')
+                <div class="nav-link-wrap relative">
+                    <a href="/admin/security-logs" wire:navigate
+                        class="relative flex items-center gap-3 px-2 py-2.5 rounded-xl transition-all duration-150 group
+                        {{ request()->is('admin/security-logs')
+                            ? 'nav-link-active'
+                            : 'text-slate-400 hover:text-slate-100 hover:bg-white/5 border border-transparent' }}">
+                        
+                        @if(request()->is('admin/security-logs'))
+                            <span class="active-pip"></span>
+                        @endif
+                        
+                        <span class="nav-item-icon text-base transition-transform duration-150 group-hover:scale-110">🛡️</span>
+                        <span class="nav-label">Security Logs</span>
+                    </a>
+                    <span class="nav-tooltip">Security Logs</span>
+                </div>
+                @endif
+
         </nav>
 
         {{-- ── Bottom: User + Logout ── --}}

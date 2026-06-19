@@ -1,4 +1,4 @@
-<div class="master-grid-shell flex h-[calc(100vh-7rem)] min-h-[36rem] w-full max-w-full overflow-hidden rounded-none bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 shadow-xl shadow-slate-300/30 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:shadow-black/20 md:h-[calc(100vh-8rem)]"
+<div wire:poll.3s class="master-grid-shell flex h-[calc(100vh-7rem)] min-h-[36rem] w-full max-w-full overflow-hidden rounded-none bg-gradient-to-br from-slate-50 via-blue-50 to-slate-100 shadow-xl shadow-slate-300/30 dark:from-slate-950 dark:via-slate-900 dark:to-slate-950 dark:shadow-black/20 md:h-[calc(100vh-8rem)]"
      x-data="{
         roomsOpen: true,
         subjectsOpen: true

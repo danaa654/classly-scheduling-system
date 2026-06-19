@@ -23,7 +23,7 @@
         'activeDepartment' => 'All',
     ];
 @endphp
-<div
+<div wire:poll.3s   
     x-data="{
         assignmentOpen: @entangle('scheduleModalOpen').live
     }"
