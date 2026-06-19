@@ -15,7 +15,10 @@ class FacultyFactory extends Factory
             'full_name' => $this->faker->name(),
             'employee_id' => $this->faker->unique()->numerify('EMP-####'),
             'department' => $this->faker->randomElement(['IT', 'CCS', 'ACT']),
-            'specialization' => $this->faker->randomElement(['Systems', 'Networks', 'Web']),
+            'employment_type' => 'Full-time',
+            'faculty_scope' => 'departmental',
+            'can_teach_minor' => false,
+            'max_units' => 21,
             'availability' => json_encode([
                 'Monday' => ['start' => '08:00', 'end' => '17:00'],
                 'Tuesday' => ['start' => '08:00', 'end' => '17:00'],
@@ -23,7 +26,61 @@ class FacultyFactory extends Factory
                 'Thursday' => ['start' => '08:00', 'end' => '17:00'],
                 'Friday' => ['start' => '08:00', 'end' => '17:00'],
             ]),
-            'is_available' => true,
         ];
+    }
+
+    /**
+     * Indicate that the faculty has restricted availability windows.
+     */
+    public function withRestrictedAvailability(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'availability' => json_encode([
+                'Monday' => [['start' => '08:00:00', 'end' => '12:00:00']],
+                'Tuesday' => [['start' => '14:00:00', 'end' => '17:00:00']],
+            ]),
+        ]);
+    }
+
+    /**
+     * Indicate that the faculty has no availability.
+     */
+    public function withNoAvailability(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'availability' => json_encode([]),
+        ]);
+    }
+
+    /**
+     * Indicate that the faculty is pending approval.
+     */
+    public function pending(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'status' => 'pending',
+        ]);
+    }
+
+    /**
+     * Indicate that the faculty is rejected.
+     */
+    public function rejected(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'status' => 'rejected',
+        ]);
+    }
+
+    /**
+     * Indicate that the faculty is a GenEd faculty member.
+     */
+    public function gened(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'faculty_scope' => 'gened',
+            'department' => null,
+            'can_teach_minor' => true,
+        ]);
     }
 }
