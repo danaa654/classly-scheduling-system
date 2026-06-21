@@ -1,5 +1,618 @@
-<div wire:poll.3s class="min-h-screen bg-[#eef3f8] dark:bg-[#020617] transition-colors duration-500 py-6 px-5">
-    <div class="max-w-[1500px] mx-auto space-y-4">
+<div wire:poll.3s class="min-h-screen bg-[#eef3f8] dark:bg-[#020617] transition-colors duration-500"
+     x-data="{
+         openCollege: null,
+         openMajor: null,
+         colleges: {
+             // NOTE: dean / facultyCount / blocksComplete / blocksTotal / section rows below are
+             // placeholder values for layout purposes — wire these to real Livewire data
+             // (e.g. a getCollegeWorkspaceStats() method similar to getDashboardSnapshot()) when ready.
+             CCS: {
+                 label: 'College of Computer Studies',
+                 dean: 'Dr. Information Technology Lead',
+                 facultyCount: 14,
+                 blocksComplete: 8,
+                 blocksTotal: 12,
+                 majors: {
+                     IT:  { label: 'IT - Information Technology', sections: [
+                         { code: 'BSIT 1-A', units: 21, maxUnits: 21, updated: '08:02 AM' },
+                         { code: 'BSIT 2-A', units: 18, maxUnits: 21, updated: '09:45 AM' },
+                         { code: 'BSIT 3-A', units: 21, maxUnits: 21, updated: '11:20 AM' },
+                         { code: 'BSIT 4-A', units: 15, maxUnits: 21, updated: '03:14 PM' }
+                     ] },
+                     ACT: { label: 'ACT - Associate in Computer Technology', sections: [
+                         { code: 'ACT 1-A', units: 21, maxUnits: 21, updated: '10:05 AM' },
+                         { code: 'ACT 2-A', units: 12, maxUnits: 21, updated: '01:30 PM' }
+                     ] }
+                 }
+             },
+             CTE: {
+                 label: 'College of Teacher Education',
+                 dean: 'Dr. Teacher Education Lead',
+                 facultyCount: 9,
+                 blocksComplete: 5,
+                 blocksTotal: 8,
+                 majors: {
+                     ED: { label: 'ED - Education', sections: [
+                         { code: 'BSED 1-A', units: 21, maxUnits: 21, updated: '08:30 AM' },
+                         { code: 'BSED 2-A', units: 19, maxUnits: 21, updated: '10:15 AM' },
+                         { code: 'BSED 3-A', units: 21, maxUnits: 21, updated: '01:05 PM' }
+                     ] }
+                 }
+             },
+             COC: {
+                 label: 'College of Criminology',
+                 dean: 'Dr. Criminology Lead',
+                 facultyCount: 11,
+                 blocksComplete: 6,
+                 blocksTotal: 10,
+                 majors: {
+                     FB: { label: 'FB - Forensic Biology', sections: [
+                         { code: 'FB 1-A', units: 21, maxUnits: 21, updated: '09:00 AM' },
+                         { code: 'FB 2-A', units: 15, maxUnits: 21, updated: '11:40 AM' }
+                     ] },
+                     LD: { label: 'LD - Lie Detection', sections: [
+                         { code: 'LD 1-A', units: 18, maxUnits: 21, updated: '02:25 PM' }
+                     ] },
+                     QD: { label: 'QD - Questioned Document', sections: [
+                         { code: 'QD 1-A', units: 21, maxUnits: 21, updated: '04:10 PM' }
+                     ] }
+                 }
+             },
+             SHTM: {
+                 label: 'School of Hospitality & Tourism Management',
+                 dean: 'Dr. Hospitality & Tourism Lead',
+                 facultyCount: 7,
+                 blocksComplete: 4,
+                 blocksTotal: 6,
+                 majors: {
+                     HM: { label: 'HM - Hospitality Management', sections: [
+                         { code: 'HM 1-A', units: 21, maxUnits: 21, updated: '07:55 AM' },
+                         { code: 'HM 2-A', units: 12, maxUnits: 21, updated: '12:30 PM' }
+                     ] },
+                     TM: { label: 'TM - Tourism Management', sections: [
+                         { code: 'TM 1-A', units: 21, maxUnits: 21, updated: '03:48 PM' }
+                     ] }
+                 }
+             }
+         },
+         colors: {
+             CCS:  { bg: 'from-yellow-400 to-amber-500',   border: 'border-yellow-400',   ring: 'ring-yellow-400',   text: 'text-yellow-700 dark:text-yellow-300',   icon: 'text-yellow-500',   tab: 'bg-yellow-400',   light: 'bg-yellow-50 dark:bg-yellow-900/20',   badge: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',   folder: '#f59e0b', shadow: 'shadow-yellow-200 dark:shadow-yellow-900/30' },
+             CTE:  { bg: 'from-blue-500 to-indigo-600',    border: 'border-blue-500',     ring: 'ring-blue-500',     text: 'text-blue-700 dark:text-blue-300',       icon: 'text-blue-500',     tab: 'bg-blue-500',     light: 'bg-blue-50 dark:bg-blue-900/20',       badge: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',       folder: '#3b82f6', shadow: 'shadow-blue-200 dark:shadow-blue-900/30' },
+             COC:  { bg: 'from-violet-500 to-purple-600',  border: 'border-violet-500',   ring: 'ring-violet-500',   text: 'text-violet-700 dark:text-violet-300',   icon: 'text-violet-500',   tab: 'bg-violet-500',   light: 'bg-violet-50 dark:bg-violet-900/20',   badge: 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300', folder: '#8b5cf6', shadow: 'shadow-violet-200 dark:shadow-violet-900/30' },
+             SHTM: { bg: 'from-orange-400 to-red-500',     border: 'border-orange-400',   ring: 'ring-orange-400',   text: 'text-orange-700 dark:text-orange-300',   icon: 'text-orange-500',   tab: 'bg-orange-400',   light: 'bg-orange-50 dark:bg-orange-900/20',   badge: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300', folder: '#f97316', shadow: 'shadow-orange-200 dark:shadow-orange-900/30' }
+         },
+         icons: { CCS: '💻', CTE: '📖', COC: '⚖️', SHTM: '🏨' },
+         selectMajor(college, majorCode) {
+             this.openCollege = college;
+             this.openMajor = majorCode;
+         },
+         isScheduleVisible() { return this.openCollege !== null && this.openMajor !== null; },
+         completionPercent(college) {
+             return college.blocksTotal ? Math.round((college.blocksComplete / college.blocksTotal) * 100) : 0;
+         },
+         collegeSections(college) {
+             return Object.values(college.majors).flatMap(major => major.sections || []);
+         }
+     }">
+
+    {{-- ════════════════════════════════════════════════════════════════════
+         FOLDER NAVIGATION
+    ════════════════════════════════════════════════════════════════════ --}}
+    <div class="pt-6 pb-2 px-5">
+        <div class="max-w-[1500px] mx-auto">
+
+            {{-- Page title --}}
+            <div class="mb-6 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center shadow-md">
+                    <span class="text-xl">📋</span>
+                </div>
+                <div>
+                    <h1 class="text-[22px] font-black uppercase tracking-tight text-slate-800 dark:text-slate-100 leading-none">
+                        Block Schedule
+                    </h1>
+                    <p class="text-[12px] font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest mt-0.5">
+                        Select a department folder to view schedules
+                    </p>
+                </div>
+
+                {{-- Breadcrumb (visible when a major is selected) --}}
+                <div x-show="isScheduleVisible()" x-transition.opacity
+                     class="ml-auto flex items-center gap-2 text-[13px] font-bold">
+                    <button @click="openCollege = null; openMajor = null"
+                            class="flex items-center gap-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+                        </svg>
+                        All Colleges
+                    </button>
+                    <svg class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                    </svg>
+                    <template x-for="(college, code) in colleges" :key="code">
+                        <template x-if="code === openCollege">
+                            <button @click="openMajor = null"
+                                    class="flex items-center gap-1 transition-colors"
+                                    :class="colors[code].text">
+                                <span x-text="icons[code]"></span>
+                                <span x-text="code"></span>
+                            </button>
+                        </template>
+                    </template>
+                    <template x-if="openMajor">
+                        <span class="flex items-center gap-2">
+                            <svg class="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                            </svg>
+                            <span class="text-slate-700 dark:text-slate-200" x-text="openMajor"></span>
+                        </span>
+                    </template>
+                </div>
+            </div>
+
+            {{-- ── COLLEGE FOLDER GRID ── --}}
+            <div x-show="openCollege === null" x-transition.opacity
+                 x-data="{
+                     clockTime: '',
+                     updateClock() {
+                         const now = new Date();
+                         let h = now.getHours(), m = now.getMinutes(), s = now.getSeconds();
+                         const ampm = h >= 12 ? 'PM' : 'AM';
+                         h = h % 12 || 12;
+                         this.clockTime = String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0') + ':' + String(s).padStart(2,'0') + ' ' + ampm;
+                     },
+                     init() { this.updateClock(); setInterval(() => this.updateClock(), 1000); }
+                 }">
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-5">
+                    <template x-for="(college, code) in colleges" :key="code">
+                        <button @click="openCollege = code"
+                                class="group relative rounded-2xl overflow-visible text-left cursor-pointer transition-all duration-300 hover:-translate-y-2 hover:scale-[1.02] active:scale-[0.98]"
+                                :class="colors[code].shadow + ' shadow-lg hover:shadow-xl'">
+
+                            {{-- Folder tab (top-left protruding tab) --}}
+                            <div class="absolute -top-3.5 left-5 h-4 w-24 rounded-t-lg z-10 flex items-center px-2"
+                                 :style="`background-color: ${colors[code].folder}; opacity: 0.85;`">
+                                <span class="text-white text-[9px] font-black uppercase tracking-widest truncate" x-text="code"></span>
+                            </div>
+
+                            {{-- Folder body --}}
+                            <div class="relative rounded-2xl overflow-hidden border-2 pt-3 pb-5 px-5 bg-white dark:bg-slate-800 transition-colors"
+                                 :class="colors[code].border">
+
+                                {{-- Colored top stripe --}}
+                                <div class="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r rounded-t-xl"
+                                     :class="colors[code].bg"></div>
+
+                                {{-- Icon + name --}}
+                                <div class="mt-3 flex flex-col items-center text-center gap-2">
+                                    {{-- Big folder SVG icon with department color --}}
+                                    <div class="relative">
+                                        <svg class="w-16 h-16 transition-transform duration-300 group-hover:scale-110 drop-shadow-md"
+                                             viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                            {{-- Folder back --}}
+                                            <rect x="4" y="18" width="56" height="38" rx="5"
+                                                  :fill="colors[code].folder" fill-opacity="0.25"/>
+                                            {{-- Folder tab --}}
+                                            <path d="M4 22 Q4 18 8 18 H26 L30 23 H4 Z"
+                                                  :fill="colors[code].folder" fill-opacity="0.5"/>
+                                            {{-- Folder front --}}
+                                            <rect x="4" y="23" width="56" height="33" rx="4"
+                                                  :fill="colors[code].folder" fill-opacity="0.85"/>
+                                            {{-- Paper/document inside --}}
+                                            <rect x="18" y="28" width="28" height="22" rx="2" fill="white" fill-opacity="0.9"/>
+                                            <rect x="22" y="33" width="18" height="1.5" rx="1" fill="currentColor" class="text-slate-400" fill-opacity="0.5"/>
+                                            <rect x="22" y="37" width="14" height="1.5" rx="1" fill="currentColor" fill-opacity="0.4"/>
+                                            <rect x="22" y="41" width="16" height="1.5" rx="1" fill="currentColor" fill-opacity="0.3"/>
+                                        </svg>
+                                        <span class="absolute -bottom-1 -right-1 text-xl" x-text="icons[code]"></span>
+                                    </div>
+
+                                    {{-- College code badge --}}
+                                    <span class="text-[20px] font-black tracking-tight"
+                                          :class="colors[code].text" x-text="code"></span>
+                                    <span class="text-[11px] font-bold text-slate-500 dark:text-slate-400 leading-tight px-2"
+                                          x-text="college.label"></span>
+
+                                    {{-- Major count badge --}}
+                                    <span class="mt-1 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
+                                          :class="colors[code].badge"
+                                          x-text="Object.keys(college.majors).length + ' major(s)'"></span>
+                                </div>
+
+                                {{-- Open arrow --}}
+                                <div class="mt-3 flex justify-center">
+                                    <span class="flex items-center gap-1 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 group-hover:gap-2 transition-all">
+                                        Open folder
+                                        <svg class="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/>
+                                        </svg>
+                                    </span>
+                                </div>
+                            </div>
+                        </button>
+                    </template>
+                </div>
+
+                {{-- ════════════════════════════════════════════════════
+                     LIVE CLOCK RIBBON
+                ════════════════════════════════════════════════════ --}}
+                <div class="mt-7 mb-1 flex items-center gap-3">
+                    <div class="flex items-center gap-2 px-4 py-2 rounded-2xl bg-white/70 dark:bg-slate-800/60 border border-slate-200/70 dark:border-slate-700/60 shadow-sm backdrop-blur-md">
+                        <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shadow shadow-emerald-300"></span>
+                        <span class="text-[11px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">Live System Clock</span>
+                        <span class="font-black text-[14px] text-slate-700 dark:text-slate-200 tabular-nums tracking-tight" x-text="clockTime"></span>
+                    </div>
+                    <div class="flex-1 h-px bg-gradient-to-r from-slate-200 to-transparent dark:from-slate-700"></div>
+                    <span class="text-[10px] font-bold uppercase tracking-widest text-slate-300 dark:text-slate-600">Institutional Snapshot</span>
+                    <div class="flex-1 h-px bg-gradient-to-l from-slate-200 to-transparent dark:from-slate-700"></div>
+                </div>
+
+                {{-- ════════════════════════════════════════════════════
+                     INSTITUTIONAL SNAPSHOT ROW — 4 Metric Blocks
+                     wire:poll keeps these numbers live without a page reload
+                ════════════════════════════════════════════════════ --}}
+                <div wire:poll.15s="$refresh" class="bg-white/50 dark:bg-slate-900/40 backdrop-blur-md rounded-2xl border border-slate-200/60 dark:border-slate-700/50 p-4 shadow-sm grid grid-cols-2 lg:grid-cols-4 gap-4 mt-3">
+
+                    {{-- Metric 1: Total Active Schedules --}}
+                    <div class="flex items-center gap-3 p-3 rounded-xl bg-white/70 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
+                        <div class="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-blue-600 flex items-center justify-center shadow-md shadow-indigo-200/40 dark:shadow-none">
+                            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                            </svg>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 leading-none mb-0.5">Total Active Schedules</p>
+                            <p class="text-[15px] font-black text-slate-800 dark:text-slate-100 leading-tight truncate">{{ $dashboardStats['scheduledCount'] }} / {{ $dashboardStats['totalBlocks'] }} Blocks</p>
+                            <p class="text-[10px] font-semibold text-indigo-500 dark:text-indigo-400 mt-0.5">Generated</p>
+                        </div>
+                    </div>
+
+                    {{-- Metric 2: Conflicts Detected --}}
+                    <div class="flex items-center gap-3 p-3 rounded-xl bg-white/70 dark:bg-slate-800/50 border border-red-100 dark:border-red-900/40 shadow-sm hover:shadow-md transition-shadow">
+                        <div class="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-red-400 to-rose-500 flex items-center justify-center shadow-md shadow-red-200/40 dark:shadow-none">
+                            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                            </svg>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 leading-none mb-0.5">Conflicts Detected</p>
+                            <p class="text-[15px] font-black text-red-600 dark:text-red-400 leading-tight truncate">{{ $dashboardStats['conflictsCount'] }} {{ Str::plural('Overlap', $dashboardStats['conflictsCount']) }}</p>
+                            <p class="text-[10px] font-semibold text-amber-500 dark:text-amber-400 mt-0.5">{{ $dashboardStats['conflictsCount'] > 0 ? 'Pending Resolution' : 'All Clear' }}</p>
+                        </div>
+                    </div>
+
+                    {{-- Metric 3: Rooms Occupied --}}
+                    <div class="flex items-center gap-3 p-3 rounded-xl bg-white/70 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
+                        <div class="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 flex items-center justify-center shadow-md shadow-emerald-200/40 dark:shadow-none">
+                            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                            </svg>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 leading-none mb-0.5">Rooms Occupied</p>
+                            <p class="text-[15px] font-black text-slate-800 dark:text-slate-100 leading-tight truncate">{{ $dashboardStats['roomsOccupied'] }} / {{ $dashboardStats['totalRooms'] }} Rooms</p>
+                            <p class="text-[10px] font-semibold text-emerald-500 dark:text-emerald-400 mt-0.5">In Use This Term</p>
+                        </div>
+                    </div>
+
+                    {{-- Metric 4: Last Sync --}}
+                    <div class="flex items-center gap-3 p-3 rounded-xl bg-white/70 dark:bg-slate-800/50 border border-slate-100 dark:border-slate-700/60 shadow-sm hover:shadow-md transition-shadow">
+                        <div class="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center shadow-md shadow-violet-200/40 dark:shadow-none">
+                            <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                        </div>
+                        <div class="min-w-0">
+                            <p class="text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 leading-none mb-0.5">Last Sync</p>
+                            <p class="text-[15px] font-black text-slate-800 dark:text-slate-100 leading-tight tabular-nums">{{ $dashboardStats['lastSync']->format('h:i:s A') }}</p>
+                            <p class="text-[10px] font-semibold text-violet-500 dark:text-violet-400 mt-0.5">Live Auto-Refresh (15s)</p>
+                        </div>
+                    </div>
+
+                </div>
+
+                {{-- ════════════════════════════════════════════════════
+                     RECENT SCHEDULING ACTIVITY — full width, live data
+                     wire:poll keeps this feed current without a manual refresh
+                ════════════════════════════════════════════════════ --}}
+                <div class="mt-5">
+
+                    <div wire:poll.15s="$refresh" class="bg-white/50 dark:bg-slate-900/40 backdrop-blur-md rounded-2xl border border-slate-200/60 dark:border-slate-700/50 shadow-sm overflow-hidden">
+
+                        {{-- Card Header --}}
+                        <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100 dark:border-slate-800">
+                            <div class="flex items-center gap-2.5">
+                                <div class="w-7 h-7 rounded-lg bg-gradient-to-br from-slate-700 to-slate-900 flex items-center justify-center shadow-sm">
+                                    <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-[13px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">Recent Scheduling Activity</h3>
+                                    <p class="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">System operation log</p>
+                                </div>
+                            </div>
+                            <span class="px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 text-[9px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400">Live</span>
+                        </div>
+
+                        {{-- Activity List --}}
+                        <div class="divide-y divide-slate-50 dark:divide-slate-800/80">
+
+                            @forelse ($recentActivity as $entry)
+                                <div class="flex items-start gap-3 px-5 py-3.5 hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition-colors">
+                                    <div class="flex-shrink-0 mt-0.5 w-6 h-6 rounded-full bg-{{ $entry->badge_color }}-100 dark:bg-{{ $entry->badge_color }}-900/30 flex items-center justify-center text-[11px]">{{ $entry->icon }}</div>
+                                    <div class="min-w-0 flex-1">
+                                        <p class="text-[12px] font-semibold text-slate-700 dark:text-slate-300 leading-snug">
+                                            <span class="font-black text-indigo-500 dark:text-indigo-400 tabular-nums">[{{ $entry->time }}]</span>
+                                            {{ $entry->title }}
+                                        </p>
+                                        <p class="text-[10px] text-slate-400 dark:text-slate-500 mt-0.5">{{ $entry->subtitle }}</p>
+                                    </div>
+                                    <span class="flex-shrink-0 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-{{ $entry->badge_color }}-50 dark:bg-{{ $entry->badge_color }}-900/20 text-{{ $entry->badge_color }}-600 dark:text-{{ $entry->badge_color }}-400 border border-{{ $entry->badge_color }}-200 dark:border-{{ $entry->badge_color }}-800">{{ $entry->badge }}</span>
+                                </div>
+                            @empty
+                                <div class="px-5 py-8 text-center">
+                                    <p class="text-[12px] font-semibold text-slate-400 dark:text-slate-500">No scheduling activity recorded yet for this term.</p>
+                                </div>
+                            @endforelse
+
+                        </div>
+
+                        {{-- Footer --}}
+                        <div class="px-5 py-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-between">
+                            <p class="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Showing last {{ $recentActivity->count() }} operations</p>
+                            <button class="text-[10px] font-black uppercase tracking-widest text-indigo-500 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors flex items-center gap-1">
+                                View All Logs
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+
+                </div>{{-- end activity panel --}}
+
+
+            </div>
+
+            {{-- ── MAJOR SELECTION (open folder view) — 2-column workspace layout ── --}}
+            <template x-for="(college, code) in colleges" :key="code">
+                <div x-show="openCollege === code && openMajor === null" x-transition.opacity
+                     class="flex flex-col lg:flex-row gap-6 p-6 min-h-[calc(100vh-8rem)] w-full text-slate-700 dark:text-slate-300">
+
+                    {{-- ══════════════════════════════════════════════════════════
+                         LEFT COLUMN — Department Context Panel (30%)
+                    ══════════════════════════════════════════════════════════ --}}
+                    <aside class="w-full lg:w-[30%] lg:sticky lg:top-6 lg:self-start bg-white/60 dark:bg-slate-900/40 backdrop-blur-md rounded-2xl border border-slate-200/60 dark:border-slate-700/50 p-5 shadow-sm flex flex-col space-y-6">
+
+                        {{-- Back navigation --}}
+                        <button @click="openCollege = null"
+                                class="self-start flex items-center gap-1.5 text-[11px] font-black uppercase tracking-widest text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 transition-colors">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M10 19l-7-7m0 0l7-7m-7 7h18"/>
+                            </svg>
+                            All Colleges
+                        </button>
+
+                        {{-- Workspace header --}}
+                        <div class="flex items-start gap-3">
+                            <div class="relative flex-shrink-0">
+                                <svg class="w-12 h-12 drop-shadow-md" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <rect x="4" y="16" width="56" height="40" rx="5" :fill="colors[code].folder" fill-opacity="0.2"/>
+                                    <path d="M4 20 Q4 16 8 16 H26 L30 21 H4 Z" :fill="colors[code].folder" fill-opacity="0.4"/>
+                                    <path d="M4 20 H60 Q60 14 56 14 H30 L26 20 Z" :fill="colors[code].folder" fill-opacity="0.7"/>
+                                    <rect x="4" y="20" width="56" height="36" rx="4" :fill="colors[code].folder" fill-opacity="0.8"/>
+                                </svg>
+                                <span class="absolute -bottom-1 -right-1 text-lg" x-text="icons[code]"></span>
+                            </div>
+                            <div class="min-w-0">
+                                <span class="text-[10px] font-black uppercase tracking-widest text-slate-400">College Workspace</span>
+                                <h2 class="text-[20px] font-black uppercase tracking-tight leading-tight" :class="colors[code].text" x-text="code + ' WORKSPACE'"></h2>
+                                <p class="text-[12px] font-bold text-slate-500 dark:text-slate-400 leading-snug mt-0.5" x-text="college.label"></p>
+                            </div>
+                        </div>
+
+                        <div class="h-px bg-slate-200/70 dark:bg-slate-700/60"></div>
+
+                        {{-- Administrative metadata --}}
+                        <div class="space-y-4">
+
+                            {{-- Dean --}}
+                            <div class="flex items-center gap-3">
+                                <div class="flex-shrink-0 w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                                    <svg class="w-4 h-4" :class="colors[code].icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l9-5-9-5-9 5 9 5z"/>
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z"/>
+                                    </svg>
+                                </div>
+                                <div class="min-w-0">
+                                    <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 leading-none mb-1">Dean</p>
+                                    <p class="text-[12px] font-bold text-slate-700 dark:text-slate-200 leading-snug truncate" x-text="college.dean"></p>
+                                </div>
+                            </div>
+
+                            {{-- Faculty Assigned --}}
+                            <div class="flex items-center gap-3">
+                                <div class="flex-shrink-0 w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                                    <svg class="w-4 h-4" :class="colors[code].icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+                                    </svg>
+                                </div>
+                                <div class="min-w-0">
+                                    <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 leading-none mb-1">Faculty Assigned</p>
+                                    <p class="text-[12px] font-bold text-slate-700 dark:text-slate-200 leading-snug" x-text="college.facultyCount + ' Active Instructors'"></p>
+                                </div>
+                            </div>
+
+                            {{-- Total Blocks Scheduled --}}
+                            <div class="flex items-center gap-3">
+                                <div class="flex-shrink-0 w-9 h-9 rounded-lg bg-slate-100 dark:bg-slate-800 flex items-center justify-center">
+                                    <svg class="w-4 h-4" :class="colors[code].icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+                                    </svg>
+                                </div>
+                                <div class="min-w-0">
+                                    <p class="text-[9px] font-black uppercase tracking-widest text-slate-400 leading-none mb-1">Total Blocks Scheduled</p>
+                                    <p class="text-[12px] font-bold text-slate-700 dark:text-slate-200 leading-snug" x-text="college.blocksComplete + ' out of ' + college.blocksTotal + ' Complete'"></p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="h-px bg-slate-200/70 dark:bg-slate-700/60"></div>
+
+                        {{-- Completion progress --}}
+                        <div>
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-[10px] font-black uppercase tracking-widest text-slate-400" x-text="code + ' Completion Progress'"></span>
+                                <span class="text-[13px] font-black" :class="colors[code].text" x-text="completionPercent(college) + '%'"></span>
+                            </div>
+                            <div class="bg-slate-100 dark:bg-slate-800 rounded-full h-2.5 overflow-hidden">
+                                <div class="h-full rounded-full bg-gradient-to-r transition-all duration-700 ease-out"
+                                     :class="colors[code].bg"
+                                     :style="`width: ${completionPercent(college)}%`"></div>
+                            </div>
+                        </div>
+                    </aside>
+
+                    {{-- ══════════════════════════════════════════════════════════
+                         RIGHT COLUMN — Major Navigation & Active Load Grid (70%)
+                    ══════════════════════════════════════════════════════════ --}}
+                    <div class="flex-1 flex flex-col space-y-6">
+
+                        {{-- Top layer: Bond paper cards with major options --}}
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <template x-for="(major, majorCode) in college.majors" :key="majorCode">
+                                <button @click="selectMajor(code, majorCode);
+                                                $wire.set('selectedDepartment', majorCode)"
+                                        class="group relative rounded-xl overflow-hidden border-2 bg-white dark:bg-slate-800 text-left cursor-pointer transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl active:scale-[0.98] p-0"
+                                        :class="colors[code].border + ' ' + colors[code].shadow + ' shadow-md'">
+
+                                    {{-- Bond-paper top margin line --}}
+                                    <div class="h-1 w-full bg-gradient-to-r" :class="colors[code].bg"></div>
+
+                                    {{-- Red margin line (bond paper aesthetic) --}}
+                                    <div class="flex">
+                                        <div class="w-1 self-stretch" :style="`background-color: ${colors[code].folder}; opacity: 0.5;`"></div>
+                                        <div class="flex-1 px-5 py-5">
+                                            {{-- Hole punch dots --}}
+                                            <div class="flex gap-2 mb-4">
+                                                <div class="w-2.5 h-2.5 rounded-full bg-slate-200 dark:bg-slate-600 border border-slate-300 dark:border-slate-500"></div>
+                                                <div class="w-2.5 h-2.5 rounded-full bg-slate-200 dark:bg-slate-600 border border-slate-300 dark:border-slate-500"></div>
+                                                <div class="w-2.5 h-2.5 rounded-full bg-slate-200 dark:bg-slate-600 border border-slate-300 dark:border-slate-500"></div>
+                                            </div>
+
+                                            {{-- Major code & label --}}
+                                            <div class="flex items-start gap-3">
+                                                <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0 bg-gradient-to-br" :class="colors[code].bg">
+                                                    <span class="text-white text-[15px] font-black" x-text="majorCode.substring(0,2)"></span>
+                                                </div>
+                                                <div>
+                                                    <span class="text-[15px] font-black text-slate-800 dark:text-slate-100 uppercase tracking-tight" x-text="majorCode"></span>
+                                                    <p class="text-[11px] font-semibold text-slate-500 dark:text-slate-400 leading-snug mt-0.5" x-text="major.label"></p>
+                                                </div>
+                                            </div>
+
+                                            {{-- Lined paper effect --}}
+                                            <div class="mt-4 space-y-2">
+                                                <div class="h-px bg-slate-100 dark:bg-slate-700"></div>
+                                                <div class="h-px bg-slate-100 dark:bg-slate-700"></div>
+                                                <div class="h-px bg-slate-100 dark:bg-slate-700"></div>
+                                            </div>
+
+                                            {{-- Open CTA --}}
+                                            <div class="mt-4 flex items-center justify-between">
+                                                <span class="text-[10px] font-black uppercase tracking-widest text-slate-400">View Schedule</span>
+                                                <span class="flex items-center justify-center w-7 h-7 rounded-full text-white bg-gradient-to-br group-hover:scale-110 transition-transform"
+                                                      :class="colors[code].bg">
+                                                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/>
+                                                    </svg>
+                                                </span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </button>
+                            </template>
+                        </div>
+
+                        {{-- Bottom layer: Active Section Monitor Grid --}}
+                        <div class="flex-1 bg-white/50 dark:bg-slate-900/40 backdrop-blur-md rounded-2xl border border-slate-200/60 dark:border-slate-700/50 p-5 shadow-sm flex flex-col">
+
+                            {{-- Card header --}}
+                            <div class="flex items-center justify-between mb-4">
+                                <div class="flex items-center gap-2.5">
+                                    <div class="w-7 h-7 rounded-lg bg-gradient-to-br flex items-center justify-center shadow-sm" :class="colors[code].bg">
+                                        <svg class="w-3.5 h-3.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2M9 12h6M9 16h6"/>
+                                        </svg>
+                                    </div>
+                                    <div>
+                                        <h3 class="text-[13px] font-black uppercase tracking-widest text-slate-700 dark:text-slate-200">Active Section Monitor</h3>
+                                        <p class="text-[10px] font-semibold text-slate-400 dark:text-slate-500 uppercase tracking-wider" x-text="code + ' Year-Level Blocks'"></p>
+                                    </div>
+                                </div>
+                                <span class="px-2.5 py-1 rounded-full bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 text-[9px] font-black uppercase tracking-widest text-emerald-600 dark:text-emerald-400">Live</span>
+                            </div>
+
+                            {{-- Tracking table --}}
+                            <div x-show="collegeSections(college).length > 0" class="rounded-xl border border-slate-100 dark:border-slate-800 overflow-hidden">
+                                <table class="w-full text-left border-collapse">
+                                    <thead>
+                                        <tr class="bg-slate-50/80 dark:bg-slate-800/60">
+                                            <th class="px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">Section</th>
+                                            <th class="px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500">Load Units</th>
+                                            <th class="px-4 py-2.5 text-[10px] font-black uppercase tracking-widest text-slate-400 dark:text-slate-500 text-right">Last Activity</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-50 dark:divide-slate-800/80">
+                                        <template x-for="section in collegeSections(college)" :key="section.code">
+                                            <tr class="hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition-colors">
+                                                <td class="px-4 py-3">
+                                                    <span class="text-[13px] font-black text-slate-800 dark:text-slate-100" x-text="section.code"></span>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <div class="flex items-center gap-2">
+                                                        <span class="text-[12px] font-bold text-slate-600 dark:text-slate-300 tabular-nums" x-text="section.units + ' / ' + section.maxUnits + ' Units Loaded'"></span>
+                                                        <span class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border"
+                                                              :class="section.units >= section.maxUnits
+                                                                        ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
+                                                                        : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800'"
+                                                              x-text="section.units >= section.maxUnits ? 'Full' : 'Partial'"></span>
+                                                    </div>
+                                                </td>
+                                                <td class="px-4 py-3 text-right">
+                                                    <span class="text-[11px] font-semibold text-slate-400 dark:text-slate-500" x-text="'Updated at ' + section.updated"></span>
+                                                </td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            {{-- Empty state --}}
+                            <template x-if="collegeSections(college).length === 0">
+                                <div class="flex-1 flex items-center justify-center py-10">
+                                    <p class="text-[12px] font-semibold text-slate-400 dark:text-slate-500">No active sections recorded yet for this college.</p>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+        </div>
+    </div>
+
+    {{-- ════════════════════════════════════════════════════════════════════
+         SCHEDULE CONTENT (shown only when a major is selected)
+    ════════════════════════════════════════════════════════════════════ --}}
+    <div x-show="isScheduleVisible()" x-transition.opacity class="px-5 pb-6">
+        {{-- College color accent bar at top --}}
+        <template x-for="(college, code) in colleges" :key="code">
+            <div x-show="openCollege === code"
+                 class="max-w-[1500px] mx-auto mb-3 h-1 rounded-full bg-gradient-to-r"
+                 :class="colors[code].bg"></div>
+        </template>
+        <div class="max-w-[1500px] mx-auto space-y-4">
 
         {{-- ── Flash Message ─────────────────────────────────────────────── --}}
         @if($flashMessage)
@@ -64,6 +677,13 @@
              ════════════════════════════════════════════════════════════════ --}}
         <div class="bg-white dark:bg-slate-900 rounded-2xl shadow-lg overflow-hidden transition-colors duration-500"
              id="study-load-container">
+
+            {{-- College color top bar --}}
+            <template x-for="(college, code) in colleges" :key="code">
+                <div x-show="openCollege === code"
+                     class="h-1.5 w-full bg-gradient-to-r"
+                     :class="colors[code].bg"></div>
+            </template>
 
             {{-- ──────────────────────────────────────────────────────────────
                  HEADER  (visible in print — do NOT add print:hidden here)
@@ -356,8 +976,8 @@
                         bg-slate-50/90 dark:bg-slate-800/40 px-8 py-4">
                 <div class="flex flex-wrap gap-5 items-end">
 
-                    {{-- ── Left: Department / Year / Section ──── --}}
-                    <div class="flex flex-col gap-1.5">
+                    {{-- ── Left: Year / Section (Department handled by folder nav) ──── --}}
+                    <div class="flex flex-col gap-1.5" style="display:none !important;">
                         <label class="text-[12px] font-black text-slate-400 dark:text-slate-500
                                       uppercase tracking-widest">Department / Major</label>
                         <select wire:model.live="selectedDepartment"
@@ -1677,7 +2297,10 @@
         </div>
     @endif
 
-</div>
+        </div>{{-- /space-y-4 schedule content --}}
+    </div>{{-- /schedule section px-5 --}}
+
+</div>{{-- /root alpine x-data --}}
 <style>
     @page {
         size: A4 landscape;

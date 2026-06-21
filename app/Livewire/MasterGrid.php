@@ -2017,23 +2017,47 @@ class MasterGrid extends Component
         ];
     }
 
-    public function selectRoom($id)
+    public function selectRoom($roomId): void
     {
-        $room = Room::find($id);
-        if ($room) {
-            $this->selectedRoomId = $id;
-            $this->selectedRoomName = $room->room_name;
-            $this->selectedRoomType = $room->type;
-            
-            $this->dispatch('room-selected', roomId: $id); 
-            $this->dispatch('refreshGrid');
+        $roomId = (int) $roomId;
+
+        $this->selectedRoomId = $roomId;
+        $this->selectedRoomName = null;
+        $this->selectedRoomType = null;
+        $this->recommendations = [];
+        $this->conflictData = [];
+        $this->conflictContext = [];
+        $this->showConflictModal = false;
+        $this->applyingSuggestionIndex = null;
+        $this->applyingSuggestionId = null;
+
+        $room = Room::query()
+            ->select('id', 'room_name', 'type')
+            ->find($roomId);
+
+        if (!$room) {
+            $this->selectedRoomId = null;
 
             $this->dispatch('toast', [
-                'type' => 'success',
-                'message' => '✅ Room Selected',
-                'detail' => "Room {$room->room_name} is now active"
+                'type' => 'warning',
+                'message' => 'Room Not Found',
+                'detail' => 'The selected room could not be found.'
             ]);
+
+            return;
         }
+
+        $this->selectedRoomName = $room->room_name;
+        $this->selectedRoomType = $room->type;
+
+        $this->dispatch('roomChanged', roomId: $roomId);
+        $this->dispatch('room-selected', roomId: $roomId);
+
+        $this->dispatch('toast', [
+            'type' => 'success',
+            'message' => '✅ Room Selected',
+            'detail' => "Room {$room->room_name} is now active"
+        ]);
     }
 
     public function validateRoomSelection(): bool

@@ -293,10 +293,25 @@
                             : "bg-slate-700/40 dark:bg-slate-800/40 border-slate-600/50 hover:bg-slate-700/60");
                 @endphp
 
-                <div wire:click="selectRoom({{ $room->id }})"
-                     class="relative p-3 border-2 rounded-xl cursor-pointer transition-all duration-300 backdrop-blur-md group {{ $cardClasses }}"
+                <div wire:key="room-option-{{ $room->id }}"
+                     wire:click="selectRoom({{ $room->id }})"
+                     wire:loading.class="pointer-events-none opacity-80"
+                     wire:target="selectRoom({{ $room->id }})"
+                     @click="$dispatch('room-selected', { roomId: {{ $room->id }} })"
+                     class="relative p-3 pr-8 border-2 rounded-xl cursor-pointer transition-all duration-300 backdrop-blur-md group {{ $cardClasses }}"
                      :class="{ 'animate-pulse ring-2 ring-blue-400/50': noRoomSelected }">
                     
+                    <svg wire:loading
+                         wire:target="selectRoom({{ $room->id }})"
+                         class="absolute right-2 top-2 z-20 h-4 w-4 animate-spin text-blue-600 dark:text-blue-400"
+                         xmlns="http://www.w3.org/2000/svg"
+                         fill="none"
+                         viewBox="0 0 24 24"
+                         aria-hidden="true">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                    </svg>
+
                     {{-- Status Badge for Selected Room --}}
                     @if($isSelected)
                         <div class="absolute -top-2 -right-2 bg-blue-600 text-white text-[8px] font-black px-2 py-0.5 rounded-full shadow-lg border border-white animate-bounce">

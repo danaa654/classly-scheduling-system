@@ -279,6 +279,156 @@
             pointer-events:none; filter:blur(80px);
         }
 
+        /* ════════════════════════════════════════
+           MESH GRID (dark only)
+        ════════════════════════════════════════ */
+        .mesh-grid {
+            position: fixed; inset: 0; pointer-events: none; z-index: 2;
+            opacity: 0.022;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px);
+            background-size: 72px 72px;
+        }
+
+        /* ════════════════════════════════════════
+           FIREFLIES
+        ════════════════════════════════════════ */
+        .fireflies { position:fixed; inset:0; pointer-events:none; z-index:3; overflow:visible; }
+        .firefly {
+            position:absolute; border-radius:999px; filter:blur(3px); opacity:0;
+            animation-name: firefly-float, firefly-flicker;
+            animation-timing-function: ease-in-out, linear;
+            animation-iteration-count: infinite, infinite;
+            will-change: transform, opacity;
+        }
+        @keyframes firefly-float {
+            0%   { transform: translate(0,0) scale(0.6); }
+            25%  { transform: translate(24px,-18px) scale(1.05); }
+            50%  { transform: translate(-18px,-36px) scale(0.9); }
+            75%  { transform: translate(12px,-12px) scale(1.08); }
+            100% { transform: translate(0,0) scale(0.6); }
+        }
+        @keyframes firefly-flicker {
+            0%   { opacity:0; }  6% { opacity:1; }  22% { opacity:0.35; }
+            40%  { opacity:0.9; } 60% { opacity:0.55; } 80% { opacity:0.95; } 100% { opacity:0; }
+        }
+        .firefly-light {
+            background: radial-gradient(circle at 30% 30%, rgba(255,255,230,1) 0%, rgba(255,220,120,0.9) 25%, rgba(255,180,60,0.6) 50%, rgba(255,180,60,0) 70%);
+            box-shadow: 0 0 20px rgba(255,210,120,0.85), 0 0 40px rgba(255,150,50,0.18);
+        }
+        .firefly-dark {
+            background: radial-gradient(circle at 30% 30%, rgba(180,230,255,1) 0%, rgba(110,200,255,0.9) 30%, rgba(60,150,255,0.6) 55%, rgba(50,120,255,0) 75%);
+            box-shadow: 0 0 26px rgba(110,200,255,0.95), 0 0 48px rgba(40,120,255,0.18);
+            filter: blur(2px);
+        }
+
+        /* ════════════════════════════════════════
+           LIGHT MODE BUBBLES
+        ════════════════════════════════════════ */
+        .bubble { position:absolute; border-radius:50%; pointer-events:none; }
+        .bubble-large-pink {
+            background: radial-gradient(circle at 50% 50%,
+                rgba(255,255,255,0.04) 0%, rgba(253,232,244,0.08) 50%,
+                rgba(251,182,206,0.18) 80%, rgba(244,114,182,0.22) 100%);
+            border: 1.5px solid rgba(244,114,182,0.20);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.28), inset 0 2px 16px rgba(255,255,255,0.14),
+                        0 12px 60px rgba(244,114,182,0.10), 0 0 0 0.5px rgba(251,113,133,0.08);
+        }
+        .bubble-large-blue {
+            background: radial-gradient(circle at 50% 50%,
+                rgba(255,255,255,0.04) 0%, rgba(219,234,254,0.08) 50%,
+                rgba(147,197,253,0.18) 80%, rgba(96,165,250,0.22) 100%);
+            border: 1.5px solid rgba(96,165,250,0.22);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.28), inset 0 2px 16px rgba(255,255,255,0.14),
+                        0 12px 60px rgba(96,165,250,0.12), 0 0 0 0.5px rgba(96,165,250,0.08);
+        }
+        .bubble-sm-pink {
+            background: radial-gradient(circle at 50% 50%,
+                rgba(255,255,255,0.06) 0%, rgba(253,164,175,0.10) 55%,
+                rgba(251,113,133,0.22) 85%, rgba(244,63,94,0.26) 100%);
+            border: 1.5px solid rgba(251,113,133,0.28);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35), inset 0 1px 10px rgba(255,255,255,0.20),
+                        0 6px 28px rgba(251,113,133,0.14);
+        }
+        .bubble-sm-blue {
+            background: radial-gradient(circle at 50% 50%,
+                rgba(255,255,255,0.06) 0%, rgba(147,197,253,0.10) 55%,
+                rgba(96,165,250,0.22) 85%, rgba(59,130,246,0.26) 100%);
+            border: 1.5px solid rgba(96,165,250,0.28);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35), inset 0 1px 10px rgba(255,255,255,0.20),
+                        0 6px 28px rgba(96,165,250,0.14);
+        }
+        .bubble-sm-red {
+            background: radial-gradient(circle at 50% 50%,
+                rgba(255,255,255,0.06) 0%, rgba(252,165,165,0.10) 55%,
+                rgba(239,68,68,0.20) 85%, rgba(220,38,38,0.24) 100%);
+            border: 1.5px solid rgba(239,68,68,0.26);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35), inset 0 1px 10px rgba(255,255,255,0.20),
+                        0 6px 26px rgba(239,68,68,0.12);
+        }
+        .bubble-sm-indigo {
+            background: radial-gradient(circle at 50% 50%,
+                rgba(255,255,255,0.06) 0%, rgba(196,181,253,0.10) 55%,
+                rgba(139,92,246,0.20) 85%, rgba(109,40,217,0.24) 100%);
+            border: 1.5px solid rgba(139,92,246,0.26);
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35), inset 0 1px 10px rgba(255,255,255,0.20),
+                        0 6px 26px rgba(139,92,246,0.12);
+        }
+
+        /* Bubble drift animations */
+        @keyframes bubble-drift-a { 0%,100% { transform:translate(0,0) scale(1); } 33% { transform:translate(10px,-14px) scale(1.03); } 66% { transform:translate(-8px,8px) scale(0.97); } }
+        @keyframes bubble-drift-b { 0%,100% { transform:translate(0,0) scale(1); } 40% { transform:translate(-12px,-10px) scale(1.04); } 70% { transform:translate(8px,12px) scale(0.98); } }
+        @keyframes bubble-drift-c { 0%,100% { transform:translate(0,0) scale(1); } 30% { transform:translate(14px,10px) scale(1.05); } 65% { transform:translate(-10px,-8px) scale(0.96); } }
+        .light-circle-pulse  { animation: bubble-drift-a 9s  ease-in-out infinite; }
+        .light-circle-pulse2 { animation: bubble-drift-b 12s ease-in-out infinite; animation-delay:-4s; }
+        .bubble-drift-c      { animation: bubble-drift-c 15s ease-in-out infinite; animation-delay:-7s; }
+        .bubble-drift-d      { animation: bubble-drift-a 11s ease-in-out infinite; animation-delay:-3s; }
+
+        /* Light dot grid */
+        .light-dot-grid {
+            position:absolute; pointer-events:none;
+            background-image: radial-gradient(circle, rgba(100,116,139,0.22) 1.2px, transparent 1.2px);
+            background-size: 22px 22px;
+        }
+        /* Plus marks */
+        .light-plus { position:absolute; pointer-events:none; font-weight:900; line-height:1; user-select:none; font-family:'Sora',sans-serif; }
+
+        /* ════════════════════════════════════════
+           DARK MODE GLOW BUBBLES
+        ════════════════════════════════════════ */
+        .dark-bubble { position:absolute; border-radius:50%; pointer-events:none; }
+        .dark-bubble-large-blue {
+            background: radial-gradient(circle at 40% 35%, rgba(96,165,250,0.04) 0%, rgba(59,130,246,0.06) 45%, rgba(29,78,216,0.08) 75%, rgba(29,78,216,0.04) 100%);
+            border: 1px solid rgba(96,165,250,0.10);
+            box-shadow: inset 0 0 60px rgba(59,130,246,0.06), 0 0 80px rgba(59,130,246,0.12), 0 0 140px rgba(59,130,246,0.07);
+        }
+        .dark-bubble-large-red {
+            background: radial-gradient(circle at 40% 35%, rgba(239,68,68,0.03) 0%, rgba(220,38,38,0.06) 45%, rgba(185,28,28,0.07) 75%, rgba(185,28,28,0.03) 100%);
+            border: 1px solid rgba(239,68,68,0.09);
+            box-shadow: inset 0 0 60px rgba(239,68,68,0.05), 0 0 80px rgba(239,68,68,0.10), 0 0 140px rgba(239,68,68,0.06);
+        }
+        .dark-bubble-sm-blue {
+            background: radial-gradient(circle at 40% 35%, rgba(147,197,253,0.05) 0%, rgba(96,165,250,0.08) 55%, rgba(59,130,246,0.06) 85%, transparent 100%);
+            border: 1px solid rgba(96,165,250,0.12);
+            box-shadow: 0 0 30px rgba(59,130,246,0.14), 0 0 60px rgba(59,130,246,0.07);
+        }
+        .dark-bubble-sm-indigo {
+            background: radial-gradient(circle at 40% 35%, rgba(196,181,253,0.05) 0%, rgba(139,92,246,0.08) 55%, rgba(109,40,217,0.06) 85%, transparent 100%);
+            border: 1px solid rgba(139,92,246,0.12);
+            box-shadow: 0 0 30px rgba(139,92,246,0.14), 0 0 60px rgba(139,92,246,0.07);
+        }
+        .dark-bubble-sm-cyan {
+            background: radial-gradient(circle at 40% 35%, rgba(103,232,249,0.04) 0%, rgba(34,211,238,0.07) 55%, rgba(6,182,212,0.05) 85%, transparent 100%);
+            border: 1px solid rgba(34,211,238,0.10);
+            box-shadow: 0 0 26px rgba(34,211,238,0.13), 0 0 50px rgba(34,211,238,0.06);
+        }
+        .dark-bubble-sm-red {
+            background: radial-gradient(circle at 40% 35%, rgba(252,165,165,0.04) 0%, rgba(239,68,68,0.07) 55%, rgba(220,38,38,0.05) 85%, transparent 100%);
+            border: 1px solid rgba(239,68,68,0.10);
+            box-shadow: 0 0 24px rgba(239,68,68,0.12), 0 0 48px rgba(239,68,68,0.06);
+        }
+
         /* ════════════════════════════════════════════════════════════
            ★ HOVER EXPAND — LEFT PANEL  (desktop only, md+)
            ─────────────────────────────────────────────────────────
@@ -394,73 +544,192 @@
 </head>
 
 <body class="antialiased min-h-screen transition-all duration-700 overflow-hidden flex items-center justify-center"
-      :class="darkMode ? 'bg-[#020617] text-white' : 'bg-[#E6E6E6] text-slate-900'">
+      :class="darkMode ? 'bg-[#020617] text-white' : 'bg-[#f0f5ff] text-slate-900'">
 
     <!-- ════════════════════════════════════════
-         PAGE BACKGROUND
+         LAYER 0 : PURE BASE COLOUR
+    ════════════════════════════════════════ -->
+    <div class="fixed inset-0 transition-all duration-700" style="z-index:0;"
+         :style="darkMode
+            ? 'background: radial-gradient(circle at 0% 100%, rgba(239,68,68,.12), transparent 35%), radial-gradient(circle at 100% 100%, rgba(59,130,246,.15), transparent 35%), linear-gradient(135deg,#020617 0%,#081225 50%,#0f172a 100%);'
+            : 'background: linear-gradient(145deg, #f0f5ff 0%, #fdf0f3 35%, #eef4ff 65%, #fdf5f8 100%);'">
+    </div>
+
+    <!-- ════════════════════════════════════════
+         LAYER 1 : ANIMATED BACKGROUND
     ════════════════════════════════════════ -->
     <div x-show="darkMode" x-transition.opacity.duration.700ms
-         class="bg-animated-dark fixed inset-0 z-0"></div>
+         class="fixed inset-0 bg-animated-dark" style="z-index:1; opacity:0.95;"></div>
 
     <div x-show="!darkMode" x-transition.opacity.duration.700ms
-         class="fixed inset-0 z-0"
-         style="background:linear-gradient(233deg,rgba(238,174,202,1) 0%,rgba(185,182,220,1) 17%,rgba(168,184,226,1) 46%,rgba(157,186,230,1) 78%,rgba(148,187,233,1) 90%);
-                background-size:300% 300%; animation:grad-shift 18s ease infinite;">
+         class="fixed inset-0" style="z-index:1; opacity:1;
+                background: linear-gradient(145deg, #f0f5ff 0%, #fdf0f3 35%, #eef4ff 65%, #fdf5f8 100%);"></div>
+
+    <!-- ════════════════════════════════════════
+         LAYER 2 : GRADIENT MESH BLOBS
+    ════════════════════════════════════════ -->
+
+    <!-- Dark mesh blobs -->
+    <div x-show="darkMode" x-transition.opacity.duration.600ms
+         class="fixed inset-0 overflow-hidden pointer-events-none" style="z-index:2;">
+        <div class="blob absolute rounded-full"
+             style="top:-12%; left:-8%; width:55%; height:55%;
+                    background: radial-gradient(circle, rgba(29,78,216,0.40) 0%, rgba(29,78,216,0) 68%);
+                    filter: blur(90px);"></div>
+        <div class="blob-d2 absolute rounded-full"
+             style="bottom:-10%; right:-6%; width:48%; height:48%;
+                    background: radial-gradient(circle, rgba(185,28,28,0.28) 0%, rgba(185,28,28,0) 68%);
+                    filter: blur(90px);"></div>
+        <div class="blob-d3 absolute rounded-full"
+             style="top:32%; left:38%; width:38%; height:38%;
+                    background: radial-gradient(circle, rgba(79,46,209,0.16) 0%, rgba(79,46,209,0) 68%);
+                    filter: blur(110px);"></div>
+        <div class="absolute bottom-0 left-0 right-0 pointer-events-none"
+             style="height:35%; background: linear-gradient(to top, rgba(5,12,28,0.90), transparent);"></div>
     </div>
 
-    <!-- Dark blobs -->
-    <div x-show="darkMode" x-transition.opacity.duration.500ms
-         class="fixed inset-0 z-0 overflow-hidden pointer-events-none">
-        <div class="blob    absolute top-[-12%] left-[-8%]    w-[48%] h-[48%] bg-blue-600/12  blur-[150px] rounded-full"></div>
-        <div class="blob-d2 absolute bottom-[-12%] right-[-8%] w-[48%] h-[48%] bg-indigo-700/12 blur-[150px] rounded-full"></div>
-        <div class="blob-d3 absolute top-[38%] left-[42%]    w-[28%] h-[28%] bg-blue-700/7   blur-[110px] rounded-full"></div>
-        <div class="blob    absolute top-[55%] left-[8%]     w-[22%] h-[22%] bg-violet-600/7 blur-[90px]  rounded-full"></div>
+    <!-- Dark mode glow bubbles -->
+    <div x-show="darkMode" x-transition.opacity.duration.700ms
+         class="fixed inset-0 overflow-hidden pointer-events-none" style="z-index:3;">
+        <div class="dark-bubble dark-bubble-large-blue light-circle-pulse2"
+             style="width:640px; height:640px; right:-200px; top:10%;"></div>
+        <div class="dark-bubble dark-bubble-large-red light-circle-pulse"
+             style="width:700px; height:700px; bottom:-260px; left:-200px;"></div>
+        <div class="dark-bubble dark-bubble-sm-blue light-circle-pulse"
+             style="width:130px; height:130px; top:7%; left:5%;"></div>
+        <div class="dark-bubble dark-bubble-sm-indigo light-circle-pulse2"
+             style="width:150px; height:150px; top:5%; right:12%;"></div>
+        <div class="dark-bubble dark-bubble-sm-cyan bubble-drift-c"
+             style="width:88px; height:88px; top:42%; left:8%;"></div>
+        <div class="dark-bubble dark-bubble-sm-red bubble-drift-d"
+             style="width:64px; height:64px; top:10%; left:44%;"></div>
+        <div class="dark-bubble dark-bubble-sm-blue light-circle-pulse"
+             style="width:76px; height:76px; bottom:22%; right:26%; animation-delay:-5s;"></div>
+        <div class="dark-bubble dark-bubble-sm-indigo bubble-drift-c"
+             style="width:46px; height:46px; top:55%; right:18%; animation-delay:-2s;"></div>
+        <div class="dark-bubble dark-bubble-sm-cyan bubble-drift-d"
+             style="width:38px; height:38px; bottom:18%; left:38%; animation-delay:-8s;"></div>
+        <div class="dark-bubble dark-bubble-sm-red light-circle-pulse2"
+             style="width:50px; height:50px; top:33%; right:7%; animation-delay:-1s;"></div>
     </div>
 
-    <!-- Light blobs -->
-    <div x-show="!darkMode" x-transition.opacity.duration.500ms
-         class="fixed inset-0 z-0 overflow-hidden pointer-events-none">
-        <div class="blob    absolute top-[-10%] right-[5%] w-[40%] h-[40%] bg-blue-300/25  blur-[120px] rounded-full"></div>
-        <div class="blob-d2 absolute bottom-[-5%] left-[5%] w-[35%] h-[35%] bg-pink-300/20  blur-[100px] rounded-full"></div>
-        <div class="blob-d3 absolute top-[40%] left-[40%]  w-[25%] h-[25%] bg-purple-300/18 blur-[85px]  rounded-full"></div>
+    <!-- Light mode bubbles + accents -->
+    <div x-show="!darkMode" x-transition.opacity.duration.600ms
+         class="fixed inset-0 overflow-hidden pointer-events-none" style="z-index:2;">
+        <div class="bubble bubble-large-pink"
+             style="width:700px; height:700px; bottom:-260px; left:-200px;"></div>
+        <div class="bubble bubble-large-blue"
+             style="width:640px; height:640px; right:-200px; top:10%;"></div>
+        <div class="bubble bubble-sm-pink light-circle-pulse"
+             style="width:130px; height:130px; top:7%; left:5%;"></div>
+        <div class="bubble bubble-sm-blue light-circle-pulse2"
+             style="width:150px; height:150px; top:5%; right:12%;"></div>
+        <div class="bubble bubble-sm-indigo bubble-drift-c"
+             style="width:88px; height:88px; top:42%; left:8%;"></div>
+        <div class="bubble bubble-sm-red bubble-drift-d"
+             style="width:64px; height:64px; top:10%; left:44%;"></div>
+        <div class="bubble bubble-sm-blue light-circle-pulse"
+             style="width:76px; height:76px; bottom:22%; right:26%; animation-delay:-5s;"></div>
+        <div class="bubble bubble-sm-pink bubble-drift-c"
+             style="width:46px; height:46px; top:55%; right:18%; animation-delay:-2s;"></div>
+        <div class="bubble bubble-sm-indigo bubble-drift-d"
+             style="width:38px; height:38px; bottom:18%; left:38%; animation-delay:-8s;"></div>
+        <div class="bubble bubble-sm-red light-circle-pulse2"
+             style="width:50px; height:50px; top:33%; right:7%; animation-delay:-1s;"></div>
     </div>
 
-    <!-- Particles (dark) -->
-    <div x-show="darkMode" class="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+    <!-- Light mode dot grids -->
+    <div x-show="!darkMode" x-transition.opacity.duration.700ms
+         class="fixed inset-0 overflow-hidden pointer-events-none" style="z-index:2;">
+        <div class="light-dot-grid" style="width:250px; height:230px; left:8%; bottom:14%;"></div>
+        <div class="light-dot-grid" style="width:220px; height:200px; right:14%; top:24%;"></div>
+    </div>
+
+    <!-- Light mode plus marks -->
+    <div x-show="!darkMode" x-transition.opacity.duration.700ms
+         class="fixed inset-0 overflow-hidden pointer-events-none" style="z-index:3;">
+        <div class="light-plus" style="left:20%; top:27%; font-size:22px; color:rgba(239,68,68,0.38);">+</div>
+        <div class="light-plus" style="left:7%; top:58%; font-size:15px; color:rgba(251,113,133,0.32);">+</div>
+        <div class="light-plus" style="left:27%; bottom:26%; font-size:13px; color:rgba(96,165,250,0.30);">+</div>
+        <div class="light-plus" style="right:31%; top:13%; font-size:18px; color:rgba(96,165,250,0.38);">+</div>
+        <div class="light-plus" style="right:10%; top:65%; font-size:20px; color:rgba(96,165,250,0.34);">+</div>
+        <div class="light-plus" style="right:23%; bottom:21%; font-size:16px; color:rgba(248,113,113,0.32);">+</div>
+        <div class="light-plus" style="left:55%; top:7%; font-size:14px; color:rgba(147,197,253,0.40);">+</div>
+        <div class="light-plus" style="right:46%; top:5%; font-size:13px; color:rgba(239,68,68,0.30);">+</div>
+    </div>
+
+    <!-- Mesh grid (dark only) -->
+    <div x-show="darkMode" class="mesh-grid"></div>
+
+    <!-- Floating particles (dark) -->
+    <div x-show="darkMode" class="fixed inset-0 overflow-hidden pointer-events-none" style="z-index:3;">
         <div class="particle w-1   h-1   bg-blue-400/50"   style="left:10%;animation-duration:9s;animation-delay:0s;"></div>
-        <div class="particle w-1.5 h-1.5 bg-indigo-400/40" style="left:26%;animation-duration:12s;animation-delay:-3s;"></div>
-        <div class="particle w-1   h-1   bg-blue-300/45"   style="left:50%;animation-duration:8s;animation-delay:-5s;"></div>
-        <div class="particle w-2   h-2   bg-violet-400/30" style="left:68%;animation-duration:14s;animation-delay:-1s;"></div>
-        <div class="particle w-1   h-1   bg-blue-400/30"   style="left:82%;animation-duration:10s;animation-delay:-7s;"></div>
-        <div class="particle w-1.5 h-1.5 bg-blue-500/35"  style="left:93%;animation-duration:11s;animation-delay:-4s;"></div>
+        <div class="particle w-1.5 h-1.5 bg-indigo-400/38" style="left:25%;animation-duration:13s;animation-delay:-3s;"></div>
+        <div class="particle w-1   h-1   bg-blue-300/45"   style="left:42%;animation-duration:8s;animation-delay:-6s;"></div>
+        <div class="particle w-2   h-2   bg-violet-400/28" style="left:61%;animation-duration:15s;animation-delay:-1s;"></div>
+        <div class="particle w-1   h-1   bg-red-400/33"    style="left:77%;animation-duration:11s;animation-delay:-4s;"></div>
+        <div class="particle w-1.5 h-1.5 bg-blue-500/38"  style="left:90%;animation-duration:10s;animation-delay:-7s;"></div>
+    </div>
+
+    <!-- Fireflies (dark) -->
+    <div x-show="darkMode" class="fireflies" aria-hidden="true">
+        <div class="firefly firefly-dark" style="left:8%;  top:18%; width:6px; height:6px; animation-duration:9s; animation-delay:-1s;"></div>
+        <div class="firefly firefly-dark" style="left:22%; top:38%; width:8px; height:8px; animation-duration:13s; animation-delay:-3s;"></div>
+        <div class="firefly firefly-dark" style="left:34%; top:12%; width:5px; height:5px; animation-duration:11s; animation-delay:-4s;"></div>
+        <div class="firefly firefly-dark" style="left:48%; top:46%; width:7px; height:7px; animation-duration:10s; animation-delay:-2s;"></div>
+        <div class="firefly firefly-dark" style="left:62%; top:28%; width:6px; height:6px; animation-duration:14s; animation-delay:-6s;"></div>
+        <div class="firefly firefly-dark" style="left:76%; top:55%; width:9px; height:9px; animation-duration:12s; animation-delay:-5s;"></div>
+        <div class="firefly firefly-dark" style="left:88%; top:22%; width:5px; height:5px; animation-duration:8s; animation-delay:-7s;"></div>
+        <div class="firefly firefly-dark" style="left:52%; top:72%; width:6px; height:6px; animation-duration:16s; animation-delay:-9s;"></div>
+    </div>
+
+    <!-- Fireflies (light) -->
+    <div x-show="!darkMode" class="fireflies" aria-hidden="true">
+        <div class="firefly firefly-light" style="left:6%;  top:26%; width:7px; height:7px; animation-duration:10s; animation-delay:-2s;"></div>
+        <div class="firefly firefly-light" style="left:18%; top:44%; width:6px; height:6px; animation-duration:13s; animation-delay:-4s;"></div>
+        <div class="firefly firefly-light" style="left:30%; top:14%; width:5px; height:5px; animation-duration:9s; animation-delay:-1s;"></div>
+        <div class="firefly firefly-light" style="left:46%; top:52%; width:8px; height:8px; animation-duration:12s; animation-delay:-3s;"></div>
+        <div class="firefly firefly-light" style="left:60%; top:30%; width:6px; height:6px; animation-duration:14s; animation-delay:-6s;"></div>
+        <div class="firefly firefly-light" style="left:74%; top:60%; width:9px; height:9px; animation-duration:11s; animation-delay:-5s;"></div>
+        <div class="firefly firefly-light" style="left:86%; top:20%; width:5px; height:5px; animation-duration:8s; animation-delay:-7s;"></div>
+        <div class="firefly firefly-light" style="left:50%; top:78%; width:6px; height:6px; animation-duration:16s; animation-delay:-9s;"></div>
     </div>
 
     <!-- ════════════════════════════════════════
-         THEME TOGGLE
+         THEME PILL TOGGLE (matches welcome page)
     ════════════════════════════════════════ -->
-    <button class="theme-toggle absolute top-6 right-8 z-50 cursor-pointer"
-            @click="toggleTheme()" aria-label="Toggle theme">
-        <div class="relative">
-            <div x-show="darkMode" class="absolute inset-0 bg-yellow-400/25 blur-xl rounded-full scale-150"></div>
-            <svg x-show="darkMode"
-                 class="w-9 h-9 text-yellow-400 drop-shadow-[0_0_12px_rgba(250,204,21,0.9)]"
-                 fill="currentColor" viewBox="0 0 20 20">
-                <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1a1 1 0 112 0v1a2 2 0 11-4 0 1 1 0 112 0zM13 10a3 3 0 11-6 0 3 3 0 016 0z"/>
-            </svg>
-            <svg x-show="!darkMode"
-                 class="w-9 h-9 text-slate-700 drop-shadow-md"
-                 fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round"
-                      d="M9.663 17h4.674M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
-            </svg>
-        </div>
-    </button>
-
-    <!-- ════════════════════════════════════════
-         AMBIENT GLOW BLOBS (behind card)
-    ════════════════════════════════════════ -->
-    <div class="glow-indigo w-[480px] h-[360px] bg-indigo-500/18 top-1/2 left-1/2 -translate-x-3/4 -translate-y-1/2 z-[1]"></div>
-    <div class="glow-indigo w-[360px] h-[300px] bg-blue-400/14 top-1/2 left-1/2 -translate-x-1/4 -translate-y-1/2 z-[1]"></div>
+    <style>
+        .theme-pill {
+            position: relative; width: 130px; height: 46px; border-radius: 100px;
+            overflow: hidden; cursor: pointer; border: none; padding: 0; flex-shrink: 0; background: transparent;
+        }
+        .theme-pill:focus-visible { outline: 2px solid rgba(99,102,241,0.6); outline-offset: 2px; }
+        .theme-pill-img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transition:opacity 0.45s ease; }
+        .theme-pill-ring { position:absolute; inset:0; border-radius:100px; pointer-events:none; z-index:2; transition:box-shadow 0.45s ease; }
+        .theme-pill-knob { position:absolute; top:50%; transform:translateY(-50%); width:38px; height:38px; border-radius:50%; overflow:hidden; z-index:3; transition:left 0.5s cubic-bezier(0.68,-0.55,0.27,1.55); }
+        .theme-pill-knob img { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; transition:opacity 0.35s ease; border-radius:50%; }
+        .theme-pill-glow { position:absolute; inset:-3px; border-radius:50%; z-index:4; pointer-events:none; transition:box-shadow 0.45s ease; }
+    </style>
+    <div class="fixed top-4 right-6 z-50">
+        <button @click="toggleTheme()" class="theme-pill" :aria-label="darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
+            <img src="{{ asset('images/toggle/bg%20dark.jpg') }}"  alt="" class="theme-pill-img" :style="darkMode ? 'opacity:1' : 'opacity:0'">
+            <img src="{{ asset('images/toggle/bg%20light.jpg') }}" alt="" class="theme-pill-img" :style="darkMode ? 'opacity:0' : 'opacity:1'">
+            <div class="theme-pill-ring"
+                 :style="darkMode
+                    ? 'box-shadow: inset 0 0 0 1.5px rgba(80,40,200,0.55), 0 0 18px rgba(80,40,200,0.30)'
+                    : 'box-shadow: inset 0 0 0 1.5px rgba(100,190,255,0.55), 0 0 18px rgba(100,190,255,0.25)'">
+            </div>
+            <div class="theme-pill-knob" :style="darkMode ? 'left:4px' : 'left:88px'">
+                <img src="{{ asset('images/toggle/circle%20dark.jpg') }}"  alt="Dark"  :style="darkMode ? 'opacity:1' : 'opacity:0'">
+                <img src="{{ asset('images/toggle/circle%20light.jpg') }}" alt="Light" :style="darkMode ? 'opacity:0' : 'opacity:1'">
+                <div class="theme-pill-glow"
+                     :style="darkMode
+                        ? 'box-shadow: 0 0 0 2px rgba(60,40,150,0.9), 0 0 16px rgba(80,40,200,0.5)'
+                        : 'box-shadow: 0 0 0 2px rgba(180,220,255,0.9), 0 0 16px rgba(100,190,255,0.6)'">
+                </div>
+            </div>
+        </button>
+    </div>
 
     <!-- ════════════════════════════════════════════════════
          MAIN WRAPPER

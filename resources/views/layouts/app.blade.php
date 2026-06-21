@@ -292,6 +292,73 @@
             z-index: 0;
         }
         #app-sidebar > * { position: relative; z-index: 1; }
+
+        /* ─── Theme Toggle Pill ──────────────────────────────────── */
+        .theme-pill {
+            position: relative;
+            width: 130px;
+            height: 46px;
+            border-radius: 100px;
+            overflow: hidden;
+            cursor: pointer;
+            border: none;
+            padding: 0;
+            flex-shrink: 0;
+            background: transparent;
+        }
+        .theme-pill:focus-visible {
+            outline: 2px solid rgba(99, 102, 241, 0.6);
+            outline-offset: 2px;
+        }
+        .theme-pill-bg {
+            position: absolute;
+            inset: 0;
+            border-radius: 100px;
+        }
+        .theme-pill-img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: opacity 0.45s ease;
+        }
+        .theme-pill-ring {
+            position: absolute;
+            inset: 0;
+            border-radius: 100px;
+            pointer-events: none;
+            z-index: 2;
+            transition: box-shadow 0.45s ease;
+        }
+        .theme-pill-knob {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 38px;
+            height: 38px;
+            border-radius: 50%;
+            overflow: hidden;
+            z-index: 3;
+            transition: left 0.5s cubic-bezier(0.68, -0.55, 0.27, 1.55);
+        }
+        .theme-pill-knob img {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: opacity 0.35s ease;
+            border-radius: 50%;
+        }
+        .theme-pill-glow {
+            position: absolute;
+            inset: -3px;
+            border-radius: 50%;
+            z-index: 4;
+            pointer-events: none;
+            transition: box-shadow 0.45s ease;
+        }
     </style>
 
     <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
@@ -663,15 +730,42 @@
             {{-- Right controls --}}
             <div class="flex items-center gap-3">
 
-                {{-- Theme toggle --}}
-                <button @click="toggleTheme()"
-                        class="p-2 rounded-xl transition-all duration-150 text-slate-500 hover:text-slate-200 hover:bg-white/5 border border-slate-800 hover:border-slate-700">
-                    <svg x-show="darkMode" x-cloak class="w-4 h-4 text-yellow-400" fill="currentColor" viewBox="0 0 20 20">
-                        <path d="M11 3a1 1 0 10-2 0v1a1 1 0 102 0V3zM15.657 5.757a1 1 0 00-1.414-1.414l-.707.707a1 1 0 001.414 1.414l.707-.707zM18 10a1 1 0 01-1 1h-1a1 1 0 110-2h1a1 1 0 011 1zM5.05 6.464A1 1 0 106.464 5.05l-.707-.707a1 1 0 00-1.414 1.414l.707.707zM5 10a1 1 0 01-1 1H3a1 1 0 110-2h1a1 1 0 011 1zM8 16v-1a1 1 0 112 0v1a2 2 0 11-4 0 1 1 0 112 0zM13 10a3 3 0 11-6 0 3 3 0 016 0z"/>
-                    </svg>
-                    <svg x-show="!darkMode" x-cloak class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"/>
-                    </svg>
+                {{-- Theme toggle pill --}}
+                <button
+                    @click="toggleTheme()"
+                    class="theme-pill"
+                    :aria-label="darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'">
+
+                    {{-- Background images --}}
+                    <div class="theme-pill-bg">
+                        <img class="theme-pill-img"
+                             src="{{ asset('images/toggle/bg%20dark.jpg') }}" alt=""
+                             :style="darkMode ? 'opacity:1' : 'opacity:0'">
+                        <img class="theme-pill-img"
+                             src="{{ asset('images/toggle/bg%20light.jpg') }}" alt=""
+                             :style="darkMode ? 'opacity:0' : 'opacity:1'">
+                    </div>
+
+                    {{-- Inset ring --}}
+                    <div class="theme-pill-ring"
+                         :style="darkMode
+                            ? 'box-shadow: inset 0 0 0 2.5px rgba(80,60,180,0.85), inset 0 0 0 5px rgba(40,20,100,0.5)'
+                            : 'box-shadow: inset 0 0 0 2.5px rgba(100,180,255,0.85), inset 0 0 0 5px rgba(180,220,255,0.4)'">
+                    </div>
+
+                    {{-- Sliding knob --}}
+                    <div class="theme-pill-knob"
+                         :style="darkMode ? 'left:4px' : 'left:88px'">
+                        <img src="{{ asset('images/toggle/circle%20dark.jpg') }}"  alt="Dark"
+                             :style="darkMode ? 'opacity:1' : 'opacity:0'">
+                        <img src="{{ asset('images/toggle/circle%20light.jpg') }}" alt="Light"
+                             :style="darkMode ? 'opacity:0' : 'opacity:1'">
+                        <div class="theme-pill-glow"
+                             :style="darkMode
+                                ? 'box-shadow: 0 0 0 2px rgba(60,40,150,0.9), 0 0 16px rgba(80,40,200,0.5)'
+                                : 'box-shadow: 0 0 0 2px rgba(180,220,255,0.9), 0 0 16px rgba(100,190,255,0.6)'">
+                        </div>
+                    </div>
                 </button>
 
                 {{-- Notifications --}}

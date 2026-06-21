@@ -111,6 +111,110 @@ class BlockSchedule extends Component
         $this->semesterName = Setting::getValue('semester_name', 'First Semester 2026-2027');
     }
 
+    // ── Dashboard Snapshot (Institution-wide, real data) ───────────────────────
+
+    /**
+     * Build the 4 metric blocks shown in the "Institutional Snapshot" row.
+     * Pulls live counts straight from the schedules/subjects/rooms tables for
+     * the active term — no hard-coded numbers.
+     */
+    public function getDashboardSnapshot(): array
+    {
+        $term = [$this->semester, $this->schoolYear];
+
+        $allSchedules = Schedule::activeTerm(...$term)
+            ->active()
+            ->get(['id', 'room_id', 'day', 'start_time', 'end_time', 'status']);
+
+        $scheduledCount = $allSchedules
+            ->filter(fn ($s) => filled($s->day) && filled($s->start_time) && filled($s->end_time))
+            ->count();
+
+        $totalBlocks = Subject::activeTerm($this->semester, $this->schoolYear)->count();
+
+        $roomsOccupied = $allSchedules->pluck('room_id')->filter()->unique()->count();
+        $totalRooms    = Room::count();
+
+        return [
+            'scheduledCount' => $scheduledCount,
+            'totalBlocks'    => max($totalBlocks, $scheduledCount),
+            'conflictsCount' => $this->countInstitutionWideConflicts($allSchedules),
+            'roomsOccupied'  => $roomsOccupied,
+            'totalRooms'     => $totalRooms,
+            'lastSync'       => now(),
+        ];
+    }
+
+    /**
+     * Detect real room double-booking conflicts across the whole institution
+     * by grouping live schedule rows per room/day and checking for time
+     * overlaps. Pure PHP pass over an already-fetched collection — no N+1.
+     */
+    private function countInstitutionWideConflicts(Collection $schedules): int
+    {
+        $conflicts = 0;
+
+        $schedules
+            ->filter(fn ($s) => $s->room_id && $s->day && $s->start_time && $s->end_time)
+            ->groupBy(fn ($s) => $s->room_id . '|' . $s->day)
+            ->each(function (Collection $group) use (&$conflicts) {
+                $rows = $group->values();
+
+                for ($i = 0; $i < $rows->count(); $i++) {
+                    for ($j = $i + 1; $j < $rows->count(); $j++) {
+                        $a = $rows[$i];
+                        $b = $rows[$j];
+
+                        if ($a->start_time < $b->end_time && $a->end_time > $b->start_time) {
+                            $conflicts++;
+                        }
+                    }
+                }
+            });
+
+        return $conflicts;
+    }
+
+    /**
+     * Real "Recent Scheduling Activity" feed, built from the latest schedule
+     * rows that have actually changed (created or updated), newest first.
+     */
+    public function getRecentActivityFeed(int $limit = 6): Collection
+    {
+        return Schedule::activeTerm($this->semester, $this->schoolYear)
+            ->active()
+            ->with(['subject:id,subject_code,description,major,department,year_level', 'faculty:id,full_name', 'room:id,room_name', 'user:id,name'])
+            ->orderByDesc('updated_at')
+            ->take($limit)
+            ->get()
+            ->map(function (Schedule $schedule) {
+                $subject   = $schedule->subject;
+                $deptLabel = $subject?->department ?: $subject?->major ?: '—';
+                $actor     = $schedule->user?->name ?: 'System';
+                $isNew     = $schedule->created_at?->equalTo($schedule->updated_at) ?? false;
+
+                [$icon, $badge, $badgeClass, $verb] = match (true) {
+                    $schedule->status === Schedule::STATUS_FINALIZED => ['✅', 'Finalized', 'emerald', 'finalized'],
+                    $schedule->status === Schedule::STATUS_FACULTY_LOCKED => ['🔒', 'Locked', 'indigo', 'locked faculty for'],
+                    $schedule->status === Schedule::STATUS_FACULTY_ASSIGNED => ['🧑‍🏫', 'Assigned', 'blue', 'assigned faculty to'],
+                    $schedule->status === Schedule::STATUS_PENDING_GENERATION => ['🔄', 'Pending', 'violet', 'queued auto-generation for'],
+                    $isNew => ['🆕', 'Created', 'blue', 'created'],
+                    default => ['✏️', 'Modified', 'amber', 'modified'],
+                };
+
+                return (object) [
+                    'icon'        => $icon,
+                    'badge'       => $badge,
+                    'badge_color' => $badgeClass,
+                    'time'        => $schedule->updated_at?->format('h:i A'),
+                    'timestamp'   => $schedule->updated_at,
+                    'title'       => "{$actor} {$verb} " . ($subject?->subject_code ?? 'a subject') . " – {$deptLabel} Yr {$subject?->year_level} Sec {$schedule->section}",
+                    'subtitle'    => $subject?->description
+                        ?? ($schedule->room ? "Room: {$schedule->room->room_name}" : 'No room assigned yet'),
+                ];
+            });
+    }
+
     // ── Role / Permission Helpers ─────────────────────────────────────────────
 
     public function getAvailableDepartments(): array
@@ -1907,6 +2011,8 @@ class BlockSchedule extends Component
             : collect();
 
         return view('livewire.block-schedule', [
+            'dashboardStats'          => $this->getDashboardSnapshot(),
+            'recentActivity'          => $this->getRecentActivityFeed(),
             'schedules'               => $schedules,
             'scheduleRows'            => $scheduleRows,
             'departmentName'          => $departmentName,
