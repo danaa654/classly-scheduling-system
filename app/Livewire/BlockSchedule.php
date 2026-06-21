@@ -60,6 +60,11 @@ class BlockSchedule extends Component
     public array  $workspaceRecommendations = [];
     public bool   $showWorkspaceConflictModal = false;
 
+    // ── College Workspace Stats ──────────────────────────────────────────────
+    // Declared as a public property (not just a render variable) so Alpine.js
+    // can reactively read it via $wire.collegeWorkspaceStats after each poll.
+    public array  $collegeWorkspaceStats = [];
+
     // ── Revision Modal ──────────────────────────────────────────────────────
     public bool $showRevisionModal = false;
     public array $revisionScheduleIds = [];
@@ -73,10 +78,17 @@ class BlockSchedule extends Component
     // ── Department Constants ──────────────────────────────────────────────────
 
     protected const COLLEGE_DEPARTMENTS = [
-        'CCS' => ['IT', 'ACT'],
-        'COC' => ['FB', 'LD', 'QD'],
-        'CED' => ['ED'],
-        'CHM' => ['HM', 'TM'],
+        'CCS'  => ['IT', 'ACT'],
+        'COC'  => ['FB', 'LD', 'QD'],
+        'CTE'  => ['ED'],
+        'SHTM' => ['HM', 'TM'],
+    ];
+
+    protected const COLLEGE_LABELS = [
+        'CCS'  => 'College of Computer Studies',
+        'COC'  => 'College of Criminology',
+        'CTE'  => 'College of Teacher Education',
+        'SHTM' => 'School of Hospitality & Tourism Management',
     ];
 
     protected const ALL_DEPARTMENTS = [
@@ -109,6 +121,18 @@ class BlockSchedule extends Component
         $this->schoolYear   = Setting::getValue('school_year', '2026-2027');
         $this->semester     = Setting::getValue('semester', '1st');
         $this->semesterName = Setting::getValue('semester_name', 'First Semester 2026-2027');
+
+        // Re-compute every time settings change (term switch refreshes the stats)
+        $this->collegeWorkspaceStats = $this->getCollegeWorkspaceStats();
+    }
+
+    /**
+     * Called by wire:poll in the blade to keep the College Workspace panel
+     * and Active Section Monitor table current without a full page reload.
+     */
+    public function refreshCollegeStats(): void
+    {
+        $this->collegeWorkspaceStats = $this->getCollegeWorkspaceStats();
     }
 
     // ── Dashboard Snapshot (Institution-wide, real data) ───────────────────────
@@ -213,6 +237,128 @@ class BlockSchedule extends Component
                         ?? ($schedule->room ? "Room: {$schedule->room->room_name}" : 'No room assigned yet'),
                 ];
             });
+    }
+
+    // ── College Workspace Stats (real data for left panel + section monitor) ─
+
+    /**
+     * Build per-college real data for:
+     *  • College Workspace left panel  (dean name, faculty count, blocks progress)
+     *  • Active Section Monitor table  (per-section units loaded vs total, last activity)
+     *
+     * All numbers are pulled live from the DB using the active semester/year so
+     * the blade never shows hard-coded placeholder values.
+     *
+     * Returns an array keyed by college code (CCS, COC, CTE, SHTM) whose shape
+     * exactly matches what Alpine.js `colleges` object expects in the blade.
+     */
+    public function getCollegeWorkspaceStats(): array
+    {
+        $stats = [];
+
+        // ── 1. Bulk-load subjects and schedule rows once — no N+1 ──────────
+        $allSubjects = Subject::activeTerm($this->semester, $this->schoolYear)->get();
+
+        // Only rows that are actually placed (have a day + start_time)
+        $scheduledRows = Schedule::activeTerm($this->semester, $this->schoolYear)
+            ->whereNotNull('day')
+            ->whereNotNull('start_time')
+            ->get(['subject_id', 'updated_at']);
+
+        // subject_id → max(updated_at) for "last activity" display
+        $latestBySubject = $scheduledRows
+            ->groupBy('subject_id')
+            ->map(fn ($rows) => $rows->max('updated_at'));
+
+        $scheduledSubjectIds = $scheduledRows->pluck('subject_id')->unique();
+
+        // ── 2. Per-college aggregation ──────────────────────────────────────
+        foreach (self::COLLEGE_DEPARTMENTS as $collegeCode => $deptCodes) {
+
+            // Dean or OIC for this college
+            $dean = User::whereIn('role', ['dean', 'oic'])
+                ->where('is_active', true)
+                ->where(function ($q) use ($deptCodes, $collegeCode) {
+                    $q->whereIn('department', array_merge([$collegeCode], $deptCodes));
+                })
+                ->orderByRaw("FIELD(role, 'dean', 'oic')")  // prefer dean over oic
+                ->first();
+
+            // Approved faculty whose department matches the college code OR any
+            // of its sub-department codes (faculty records may store either form)
+            $allCollegeCodes = array_merge([$collegeCode], $deptCodes);
+            $facultyCount = Faculty::approved()
+                ->whereIn('department', $allCollegeCodes)
+                ->count();
+
+            // Subjects belonging to this college (matched by department OR major field)
+            $collegeSubjects = $allSubjects->filter(fn ($s) =>
+                in_array($s->department, $deptCodes, true) ||
+                in_array($s->major,      $deptCodes, true)
+            );
+
+            $blocksTotal    = $collegeSubjects->count();
+            $blocksComplete = $collegeSubjects
+                ->filter(fn ($s) => $scheduledSubjectIds->contains($s->id))
+                ->count();
+
+            // ── 3. Per-major → per-section breakdown ───────────────────────
+            $majorsData = [];
+
+            foreach ($deptCodes as $deptCode) {
+                $deptSubjects = $collegeSubjects->filter(fn ($s) =>
+                    $s->department === $deptCode || $s->major === $deptCode
+                );
+
+                // Group by year_level + section to build one row per block
+                $sectionRows = $deptSubjects
+                    ->groupBy(fn ($s) => $s->year_level . '|' . ($s->section ?? 'A'))
+                    ->map(function ($group, $key) use ($deptCode, $scheduledSubjectIds, $latestBySubject) {
+                        [$yearLevel, $section] = explode('|', $key, 2);
+
+                        $totalUnits = (int) $group->sum('units');
+
+                        // Units that have been placed on a day/time slot
+                        $scheduledUnits = (int) $group
+                            ->filter(fn ($s) => $scheduledSubjectIds->contains($s->id))
+                            ->sum('units');
+
+                        // Last schedule change for any subject in this section
+                        $lastActivity = $group->pluck('id')
+                            ->map(fn ($id) => $latestBySubject->get($id))
+                            ->filter()
+                            ->max();
+
+                        return [
+                            'code'     => strtoupper($deptCode) . ' ' . $yearLevel . '-' . $section,
+                            'units'    => $scheduledUnits,
+                            'maxUnits' => $totalUnits,
+                            'updated'  => $lastActivity
+                                ? Carbon::parse($lastActivity)->format('h:i A')
+                                : '—',
+                        ];
+                    })
+                    ->sortKeys()
+                    ->values()
+                    ->toArray();
+
+                $majorsData[$deptCode] = [
+                    'label'    => self::ALL_DEPARTMENTS[$deptCode] ?? $deptCode,
+                    'sections' => $sectionRows,
+                ];
+            }
+
+            $stats[$collegeCode] = [
+                'label'          => self::COLLEGE_LABELS[$collegeCode] ?? $collegeCode,
+                'dean'           => $dean?->name ?? 'Not Assigned',
+                'facultyCount'   => $facultyCount,
+                'blocksComplete' => $blocksComplete,
+                'blocksTotal'    => $blocksTotal,
+                'majors'         => $majorsData,
+            ];
+        }
+
+        return $stats;
     }
 
     // ── Role / Permission Helpers ─────────────────────────────────────────────
@@ -2013,6 +2159,7 @@ class BlockSchedule extends Component
         return view('livewire.block-schedule', [
             'dashboardStats'          => $this->getDashboardSnapshot(),
             'recentActivity'          => $this->getRecentActivityFeed(),
+            'collegeWorkspaceStats'   => $this->collegeWorkspaceStats,
             'schedules'               => $schedules,
             'scheduleRows'            => $scheduleRows,
             'departmentName'          => $departmentName,

@@ -2,79 +2,7 @@
      x-data="{
          openCollege: null,
          openMajor: null,
-         colleges: {
-             // NOTE: dean / facultyCount / blocksComplete / blocksTotal / section rows below are
-             // placeholder values for layout purposes — wire these to real Livewire data
-             // (e.g. a getCollegeWorkspaceStats() method similar to getDashboardSnapshot()) when ready.
-             CCS: {
-                 label: 'College of Computer Studies',
-                 dean: 'Dr. Information Technology Lead',
-                 facultyCount: 14,
-                 blocksComplete: 8,
-                 blocksTotal: 12,
-                 majors: {
-                     IT:  { label: 'IT - Information Technology', sections: [
-                         { code: 'BSIT 1-A', units: 21, maxUnits: 21, updated: '08:02 AM' },
-                         { code: 'BSIT 2-A', units: 18, maxUnits: 21, updated: '09:45 AM' },
-                         { code: 'BSIT 3-A', units: 21, maxUnits: 21, updated: '11:20 AM' },
-                         { code: 'BSIT 4-A', units: 15, maxUnits: 21, updated: '03:14 PM' }
-                     ] },
-                     ACT: { label: 'ACT - Associate in Computer Technology', sections: [
-                         { code: 'ACT 1-A', units: 21, maxUnits: 21, updated: '10:05 AM' },
-                         { code: 'ACT 2-A', units: 12, maxUnits: 21, updated: '01:30 PM' }
-                     ] }
-                 }
-             },
-             CTE: {
-                 label: 'College of Teacher Education',
-                 dean: 'Dr. Teacher Education Lead',
-                 facultyCount: 9,
-                 blocksComplete: 5,
-                 blocksTotal: 8,
-                 majors: {
-                     ED: { label: 'ED - Education', sections: [
-                         { code: 'BSED 1-A', units: 21, maxUnits: 21, updated: '08:30 AM' },
-                         { code: 'BSED 2-A', units: 19, maxUnits: 21, updated: '10:15 AM' },
-                         { code: 'BSED 3-A', units: 21, maxUnits: 21, updated: '01:05 PM' }
-                     ] }
-                 }
-             },
-             COC: {
-                 label: 'College of Criminology',
-                 dean: 'Dr. Criminology Lead',
-                 facultyCount: 11,
-                 blocksComplete: 6,
-                 blocksTotal: 10,
-                 majors: {
-                     FB: { label: 'FB - Forensic Biology', sections: [
-                         { code: 'FB 1-A', units: 21, maxUnits: 21, updated: '09:00 AM' },
-                         { code: 'FB 2-A', units: 15, maxUnits: 21, updated: '11:40 AM' }
-                     ] },
-                     LD: { label: 'LD - Lie Detection', sections: [
-                         { code: 'LD 1-A', units: 18, maxUnits: 21, updated: '02:25 PM' }
-                     ] },
-                     QD: { label: 'QD - Questioned Document', sections: [
-                         { code: 'QD 1-A', units: 21, maxUnits: 21, updated: '04:10 PM' }
-                     ] }
-                 }
-             },
-             SHTM: {
-                 label: 'School of Hospitality & Tourism Management',
-                 dean: 'Dr. Hospitality & Tourism Lead',
-                 facultyCount: 7,
-                 blocksComplete: 4,
-                 blocksTotal: 6,
-                 majors: {
-                     HM: { label: 'HM - Hospitality Management', sections: [
-                         { code: 'HM 1-A', units: 21, maxUnits: 21, updated: '07:55 AM' },
-                         { code: 'HM 2-A', units: 12, maxUnits: 21, updated: '12:30 PM' }
-                     ] },
-                     TM: { label: 'TM - Tourism Management', sections: [
-                         { code: 'TM 1-A', units: 21, maxUnits: 21, updated: '03:48 PM' }
-                     ] }
-                 }
-             }
-         },
+         colleges: $wire.entangle('collegeWorkspaceStats'),
          colors: {
              CCS:  { bg: 'from-yellow-400 to-amber-500',   border: 'border-yellow-400',   ring: 'ring-yellow-400',   text: 'text-yellow-700 dark:text-yellow-300',   icon: 'text-yellow-500',   tab: 'bg-yellow-400',   light: 'bg-yellow-50 dark:bg-yellow-900/20',   badge: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',   folder: '#f59e0b', shadow: 'shadow-yellow-200 dark:shadow-yellow-900/30' },
              CTE:  { bg: 'from-blue-500 to-indigo-600',    border: 'border-blue-500',     ring: 'ring-blue-500',     text: 'text-blue-700 dark:text-blue-300',       icon: 'text-blue-500',     tab: 'bg-blue-500',     light: 'bg-blue-50 dark:bg-blue-900/20',       badge: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',       folder: '#3b82f6', shadow: 'shadow-blue-200 dark:shadow-blue-900/30' },
@@ -382,7 +310,8 @@
                     {{-- ══════════════════════════════════════════════════════════
                          LEFT COLUMN — Department Context Panel (30%)
                     ══════════════════════════════════════════════════════════ --}}
-                    <aside class="w-full lg:w-[30%] lg:sticky lg:top-6 lg:self-start bg-white/60 dark:bg-slate-900/40 backdrop-blur-md rounded-2xl border border-slate-200/60 dark:border-slate-700/50 p-5 shadow-sm flex flex-col space-y-6">
+                    <aside wire:poll.30s="refreshCollegeStats"
+                           class="w-full lg:w-[30%] lg:sticky lg:top-6 lg:self-start bg-white/60 dark:bg-slate-900/40 backdrop-blur-md rounded-2xl border border-slate-200/60 dark:border-slate-700/50 p-5 shadow-sm flex flex-col space-y-6">
 
                         {{-- Back navigation --}}
                         <button @click="openCollege = null"
