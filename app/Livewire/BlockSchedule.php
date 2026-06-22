@@ -363,28 +363,77 @@ class BlockSchedule extends Component
 
     // ── Role / Permission Helpers ─────────────────────────────────────────────
 
+    /**
+     * UPDATED: Dean/OIC can now browse every college's schedule, not just
+     * their own. Their *own* college remains fully editable; every other
+     * college is exposed as read-only (see isReadOnlyDepartment()/
+     * isReadOnlyContext()). Admin, Registrar, and Associate Dean keep
+     * unrestricted edit access everywhere, as before.
+     */
     public function getAvailableDepartments(): array
+    {
+        return self::ALL_DEPARTMENTS;
+    }
+
+    /**
+     * Returns the sub-department codes (e.g. ['IT','ACT']) that belong to the
+     * signed-in Dean/OIC's own college. Returns null for roles that aren't
+     * scoped to a single college (admin, registrar, associate_dean) — meaning
+     * "no read-only restriction applies".
+     */
+    protected function getOwnCollegeDepartmentCodes(): ?array
     {
         $user = Auth::user();
 
-        if (! $user) {
-            return self::ALL_DEPARTMENTS;
+        if (! $user || ! in_array($user->role, ['dean', 'oic'], true)) {
+            return null;
         }
 
-        if (in_array($user->role, ['admin', 'registrar', 'associate_dean'], true)) {
-            return self::ALL_DEPARTMENTS;
+        $college = strtoupper(trim((string) ($user->department ?? '')));
+
+        return self::COLLEGE_DEPARTMENTS[$college] ?? [];
+    }
+
+    /**
+     * True when the given department/major code falls outside the signed-in
+     * Dean/OIC's own college. Always false for admin/registrar/associate_dean.
+     */
+    public function isReadOnlyDepartment(string $deptCode): bool
+    {
+        $ownCodes = $this->getOwnCollegeDepartmentCodes();
+
+        if ($ownCodes === null) {
+            return false;
         }
 
-        if (in_array($user->role, ['dean', 'oic'], true)) {
-            $college  = strtoupper(trim((string) ($user->department ?? '')));
-            $allowed  = self::COLLEGE_DEPARTMENTS[$college] ?? null;
+        return ! in_array(strtoupper(trim($deptCode)), $ownCodes, true);
+    }
 
-            if ($allowed) {
-                return array_intersect_key(self::ALL_DEPARTMENTS, array_flip($allowed));
+    /**
+     * True when the schedule currently being viewed (selectedDepartment)
+     * belongs to another college than the signed-in Dean/OIC's own — i.e.
+     * the workspace is in "read-only / view other college" mode.
+     */
+    public function isReadOnlyContext(): bool
+    {
+        return $this->isReadOnlyDepartment($this->selectedDepartment);
+    }
+
+    /**
+     * The college code (e.g. "CTE") that owns the currently-selected
+     * department/major, used for the read-only banner copy.
+     */
+    public function getCollegeCodeForDepartment(string $deptCode): ?string
+    {
+        $deptCode = strtoupper(trim($deptCode));
+
+        foreach (self::COLLEGE_DEPARTMENTS as $collegeCode => $deptCodes) {
+            if ($deptCode === $collegeCode || in_array($deptCode, $deptCodes, true)) {
+                return $collegeCode;
             }
         }
 
-        return self::ALL_DEPARTMENTS;
+        return null;
     }
 
     public function canFinalizeSchedule(): bool
@@ -436,7 +485,17 @@ class BlockSchedule extends Component
             return false;
         }
 
-        return in_array($user->role, ['admin', 'registrar', 'dean', 'oic', 'associate_dean'], true);
+        if (! in_array($user->role, ['admin', 'registrar', 'dean', 'oic', 'associate_dean'], true)) {
+            return false;
+        }
+
+        // Dean/OIC may only assign faculty within their own college; viewing
+        // another college's schedule is read-only.
+        if (in_array($user->role, ['dean', 'oic'], true) && $this->isReadOnlyContext()) {
+            return false;
+        }
+
+        return true;
     }
 
     /**
@@ -446,16 +505,37 @@ class BlockSchedule extends Component
      */
     public function canEditWorkspace(): bool
     {
-        $role = Auth::user()?->role;
+        $user = Auth::user();
+        $role = $user?->role;
 
-        return in_array($role, ['admin', 'registrar', 'dean', 'oic', 'associate_dean'], true);
+        if (! in_array($role, ['admin', 'registrar', 'dean', 'oic', 'associate_dean'], true)) {
+            return false;
+        }
+
+        // Dean/OIC may only edit the workspace for their own college; another
+        // college's schedule is read-only when browsed.
+        if (in_array($role, ['dean', 'oic'], true) && $this->isReadOnlyContext()) {
+            return false;
+        }
+
+        return true;
     }
 
     public function canRequestRevision(): bool
     {
-        $role = Auth::user()?->role;
+        $user = Auth::user();
+        $role = $user?->role;
 
-        return in_array($role, ['dean', 'oic', 'associate_dean'], true);
+        if (! in_array($role, ['dean', 'oic', 'associate_dean'], true)) {
+            return false;
+        }
+
+        // Dean/OIC may only request revisions within their own college.
+        if (in_array($role, ['dean', 'oic'], true) && $this->isReadOnlyContext()) {
+            return false;
+        }
+
+        return true;
     }
 
     public function canReviewRevisionRequests(): bool
@@ -2156,6 +2236,15 @@ class BlockSchedule extends Component
                 ->get()
             : collect();
 
+        // ── Official Print Letterhead Data ──────────────────────────────────
+        // Resolves the college (e.g. "CCS") that owns the selected department
+        // so the printable "Official Block Schedule" can show both the
+        // college name and the program on its letterhead, mirroring the
+        // registrar's official document format. Computed once and reused
+        // below for readOnlyCollegeCode as well.
+        $printCollegeCode  = $this->getCollegeCodeForDepartment($this->selectedDepartment);
+        $printCollegeLabel = self::COLLEGE_LABELS[$printCollegeCode ?? ''] ?? ($printCollegeCode ?? '');
+
         return view('livewire.block-schedule', [
             'dashboardStats'          => $this->getDashboardSnapshot(),
             'recentActivity'          => $this->getRecentActivityFeed(),
@@ -2170,6 +2259,10 @@ class BlockSchedule extends Component
             'canRequestRevision'      => $this->canRequestRevision(),
             'canReviewRevision'       => $this->canReviewRevisionRequests(),
             'canManagePermission'     => $this->canManageRegistrarPermission(),
+            'isReadOnlyView'          => $this->isReadOnlyContext(),
+            'readOnlyCollegeCode'     => $printCollegeCode,
+            'printCollegeCode'        => $printCollegeCode,
+            'printCollegeLabel'       => $printCollegeLabel,
             'allFinalized'            => $allFinalized,
             'unassignedCount'         => $unassignedCount,
             'conflictCount'           => $conflictCount,

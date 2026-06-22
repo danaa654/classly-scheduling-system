@@ -534,95 +534,277 @@
                         </div>
                     @endif
                     @if($activeTab === 'schedule')
+                        @php
+                            $lunchStart = '12:00';
+                            $lunchEnd   = '13:00';
+
+                            // Build a lookup: scheduleMap[day][slotValue] = [schedule objects]
+                            $scheduleMap = [];
+                            foreach ($assignedSchedules as $sch) {
+                                if (blank($sch->day) || blank($sch->start_time) || blank($sch->end_time)) {
+                                    continue;
+                                }
+                                $schStart = \Carbon\Carbon::parse($sch->start_time);
+                                $schEnd   = \Carbon\Carbon::parse($sch->end_time);
+                                foreach ($timeSlots as $slot) {
+                                    $slotStart = \Carbon\Carbon::parse($slot['value']);
+                                    // A slot belongs to a schedule if the slot start falls within [schStart, schEnd)
+                                    if ($slotStart >= $schStart && $slotStart < $schEnd) {
+                                        $scheduleMap[$sch->day][$slot['value']][] = $sch;
+                                    }
+                                }
+                            }
+
+                            // Unscheduled (faculty assigned but no spacetime)
+                            $unscheduled = $assignedSchedules->filter(fn($s) => blank($s->day) || blank($s->start_time) || blank($s->end_time));
+
+                            // Total scheduled classes
+                            $scheduledCount = $assignedSchedules->filter(fn($s) => filled($s->day) && filled($s->start_time))->count();
+                        @endphp
+
                         <div class="rounded-xl border border-slate-200 bg-white shadow-sm backdrop-blur-xl dark:border-white/10 dark:bg-white/[0.045] dark:shadow-2xl dark:shadow-black/20">
-                            <div class="border-b border-slate-200 px-6 py-4 dark:border-white/10">
-                                <div class="flex items-center justify-between">
+                            {{-- Header --}}
+                            <div class="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-white/10">
+                                <div>
                                     <h3 class="text-sm font-black uppercase tracking-[0.18em] text-slate-900 dark:text-white">Schedule Overview</h3>
-                                    <div class="flex items-center gap-2">
-                                        <span class="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-[10px] font-black uppercase text-slate-600 dark:border-white/10 dark:bg-white/8 dark:text-slate-300">
-                                            {{ $scheduleGroups->count() }} day(s)
+                                    <p class="mt-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                                        {{ \App\Models\Setting::getDayBounds()['start'] }} – {{ \App\Models\Setting::getDayBounds()['end'] }} &bull; {{ \App\Models\Setting::getSlotDurationMinutes() }}-min slots &bull; Lunch 12:00–1:00 PM
+                                    </p>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    @if($scheduledCount > 0)
+                                        <span class="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-[10px] font-black uppercase text-emerald-700 dark:border-emerald-300/30 dark:bg-emerald-400/10 dark:text-emerald-200">
+                                            {{ $scheduledCount }} scheduled
+                                        </span>
+                                    @endif
+                                    @if($unscheduled->count() > 0)
+                                        <span class="rounded-full border border-amber-200 bg-amber-50 px-3 py-1 text-[10px] font-black uppercase text-amber-700 dark:border-amber-300/30 dark:bg-amber-400/10 dark:text-amber-200">
+                                            {{ $unscheduled->count() }} unscheduled
+                                        </span>
+                                    @endif
+                                </div>
+                            </div>
+
+                            @if(count($timeSlots) > 0 && count($activeDays) > 0)
+                                {{-- Time-Grid Table --}}
+                                <div class="custom-scrollbar overflow-x-auto">
+                                    <table class="w-full text-xs" style="min-width: {{ 88 + count($activeDays) * 140 }}px; border-collapse: collapse;">
+                                        <thead>
+                                            <tr style="background:#1e293b;">
+                                                <th style="position:sticky;left:0;z-index:10;width:88px;background:#1e293b;padding:10px 12px;text-align:left;font-size:9px;font-weight:900;letter-spacing:.18em;text-transform:uppercase;color:#94a3b8;border-right:2px solid #334155;border-bottom:2px solid #334155;">
+                                                    TIME
+                                                </th>
+                                                @foreach($activeDays as $day)
+                                                    @php $dayCount = collect($scheduleMap[$day] ?? [])->flatten(1)->unique('id')->count(); @endphp
+                                                    <th style="padding:10px 8px;text-align:center;font-size:10px;font-weight:900;letter-spacing:.18em;text-transform:uppercase;color:#f1f5f9;border-right:2px solid #334155;border-bottom:2px solid #334155;">
+                                                        {{ strtoupper(substr($day, 0, 3)) }}
+                                                        @if($dayCount > 0)
+                                                            <span style="margin-left:4px;display:inline-flex;height:18px;width:18px;align-items:center;justify-content:center;border-radius:9999px;background:#38bdf8;font-size:8px;font-weight:900;color:#0f172a;">{{ $dayCount }}</span>
+                                                        @endif
+                                                    </th>
+                                                @endforeach
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            @php
+                                                $renderedCells = [];
+                                                $slotMinutes = \App\Models\Setting::getSlotDurationMinutes();
+                                            @endphp
+                                            @foreach($timeSlots as $slotIndex => $slot)
+                                                @php
+                                                    $slotTime   = \Carbon\Carbon::parse($slot['value']);
+                                                    $isLunch    = $slotTime >= \Carbon\Carbon::parse($lunchStart) && $slotTime < \Carbon\Carbon::parse($lunchEnd);
+                                                    $isHourMark = $slotTime->minute === 0;   // on-the-hour = stronger border
+                                                    $isHalfHour = $slotTime->minute === 30;
+
+                                                    // Row border: stronger on the hour, dashed at :30
+                                                    $rowBorderStyle = $isHourMark
+                                                        ? 'border-top:2px solid #cbd5e1;'          // light: slate-300
+                                                        : 'border-top:1px dashed #e2e8f0;';        // light: slate-200 dashed
+
+                                                    $rowBorderStyleDark = $isHourMark
+                                                        ? 'border-top:2px solid rgba(148,163,184,.35);'   // dark
+                                                        : 'border-top:1px dashed rgba(148,163,184,.12);'; // dark
+
+                                                    // Row background
+                                                    if ($isLunch) {
+                                                        $rowBg     = 'background:#f1f5f9;';
+                                                        $rowBgDark = 'background:rgba(30,41,59,.6);';
+                                                    } elseif ($isHourMark) {
+                                                        $rowBg     = 'background:#ffffff;';
+                                                        $rowBgDark = 'background:rgba(255,255,255,.035);';
+                                                    } else {
+                                                        $rowBg     = 'background:#f8fafc;';
+                                                        $rowBgDark = 'background:rgba(255,255,255,.018);';
+                                                    }
+                                                @endphp
+                                                <tr class="schedule-row dark-row" style="{{ $rowBorderStyle }}{{ $rowBg }}">
+                                                    {{-- Time Label --}}
+                                                    <td class="time-cell" style="position:sticky;left:0;z-index:9;width:88px;padding:0 10px;height:34px;vertical-align:middle;border-right:2px solid #cbd5e1;{{ $rowBorderStyle }}{{ $rowBg }}">
+                                                        @if($isHourMark)
+                                                            <span style="display:block;font-size:10px;font-weight:900;text-transform:uppercase;letter-spacing:.06em;color:#475569;">{{ $slot['label'] }}</span>
+                                                        @else
+                                                            <span style="display:block;font-size:9px;font-weight:500;color:#94a3b8;">{{ $slot['label'] }}</span>
+                                                        @endif
+                                                    </td>
+
+                                                    @if($isLunch)
+                                                        <td colspan="{{ count($activeDays) }}" style="padding:0 16px;vertical-align:middle;text-align:center;">
+                                                            <span style="font-size:9px;font-weight:900;text-transform:uppercase;letter-spacing:.22em;color:#94a3b8;">— Lunch Break 12:00 – 1:00 PM —</span>
+                                                        </td>
+                                                    @else
+                                                        @foreach($activeDays as $dayIdx => $day)
+                                                            @php
+                                                                $cellKey = $day . '|' . $slot['value'];
+                                                                if (!empty($renderedCells[$cellKey])) { continue; }
+
+                                                                $cellSchedules = $scheduleMap[$day][$slot['value']] ?? [];
+                                                                $firstSch = $cellSchedules[0] ?? null;
+                                                                $rowspan  = 1;
+
+                                                                if ($firstSch) {
+                                                                    $schStart     = \Carbon\Carbon::parse($firstSch->start_time);
+                                                                    $schEnd       = \Carbon\Carbon::parse($firstSch->end_time);
+                                                                    $durationMins = $schStart->diffInMinutes($schEnd);
+                                                                    $rowspan      = max(1, (int) ceil($durationMins / $slotMinutes));
+
+                                                                    $cursor = $schStart->copy();
+                                                                    for ($r = 0; $r < $rowspan; $r++) {
+                                                                        $renderedCells[$day . '|' . $cursor->format('H:i')][] = true;
+                                                                        $cursor->addMinutes($slotMinutes);
+                                                                    }
+
+                                                                    $subjectType = strtolower(trim((string)($firstSch->subject?->type ?? 'major')));
+                                                                    $isMinor  = $subjectType !== 'major';
+                                                                    $roomName = $firstSch->room?->room_name ?? 'TBA';
+                                                                    $section  = $firstSch->section ?? 'A';
+                                                                    $cellH    = $rowspan * 34 - 6;
+
+                                                                    // Card colours
+                                                                    $cardBg        = $isMinor ? '#f5f3ff'  : '#eff6ff';
+                                                                    $cardBorder    = $isMinor ? '#c4b5fd'  : '#93c5fd';
+                                                                    $cardBgDark    = $isMinor ? 'rgba(139,92,246,.15)' : 'rgba(56,189,248,.13)';
+                                                                    $cardBorderDark= $isMinor ? 'rgba(167,139,250,.4)' : 'rgba(56,189,248,.35)';
+                                                                    $codeColor     = $isMinor ? '#7c3aed'  : '#0369a1';
+                                                                    $codeColorDark = $isMinor ? '#c4b5fd'  : '#7dd3fc';
+                                                                    $accentLine    = $isMinor ? '#7c3aed'  : '#0ea5e9';
+                                                                }
+
+                                                                // Column right border — stronger between days
+                                                                $isLastDay = $dayIdx === count($activeDays) - 1;
+                                                                $colBorder = $isLastDay ? '' : 'border-right:1px solid #e2e8f0;';
+                                                            @endphp
+
+                                                            @if($firstSch)
+                                                                <td rowspan="{{ $rowspan }}"
+                                                                    style="vertical-align:top;padding:3px 4px;{{ $colBorder }}{{ $rowBorderStyle }}"
+                                                                >
+                                                                    <div style="
+                                                                        height:{{ $cellH }}px;
+                                                                        min-height:{{ $cellH }}px;
+                                                                        border-radius:8px;
+                                                                        border:1.5px solid {{ $cardBorder }};
+                                                                        background:{{ $cardBg }};
+                                                                        border-left:4px solid {{ $accentLine }};
+                                                                        padding:5px 7px;
+                                                                        overflow:hidden;
+                                                                        box-shadow:0 1px 3px rgba(0,0,0,.06);
+                                                                    ">
+                                                                        <p style="font-size:10px;font-weight:900;text-transform:uppercase;color:{{ $codeColor }};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;">
+                                                                            {{ $firstSch->subject?->subject_code ?? 'N/A' }}
+                                                                        </p>
+                                                                        @if($rowspan >= 2)
+                                                                            <p style="font-size:9px;font-weight:500;color:#475569;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                                                                                {{ \Illuminate\Support\Str::limit($firstSch->subject?->description ?? '', 28) }}
+                                                                            </p>
+                                                                        @endif
+                                                                        @if($rowspan >= 3)
+                                                                            <p style="font-size:9px;font-weight:600;color:#64748b;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                                                                                🏛 {{ $roomName }}
+                                                                            </p>
+                                                                            <p style="font-size:9px;font-weight:600;color:#94a3b8;margin-top:1px;">
+                                                                                Sec: {{ $section }}
+                                                                            </p>
+                                                                        @endif
+                                                                        @if($rowspan >= 5)
+                                                                            <p style="font-size:8px;font-weight:500;color:#94a3b8;margin-top:2px;">
+                                                                                {{ \Carbon\Carbon::parse($firstSch->start_time)->format('g:i A') }}
+                                                                                – {{ \Carbon\Carbon::parse($firstSch->end_time)->format('g:i A') }}
+                                                                            </p>
+                                                                        @endif
+                                                                    </div>
+                                                                </td>
+                                                            @else
+                                                                <td style="vertical-align:top;padding:0;{{ $colBorder }}{{ $rowBorderStyle }}">
+                                                                    {{-- empty slot --}}
+                                                                </td>
+                                                            @endif
+                                                        @endforeach
+                                                    @endif
+                                                </tr>
+                                            @endforeach
+                                        </tbody>
+                                    </table>
+
+                                    {{-- Dark-mode overrides via inline <style> — Tailwind can't target inline styles --}}
+                                    <style>
+                                        .dark .schedule-row          { background: rgba(255,255,255,.018) !important; }
+                                        .dark .schedule-row.hour-row { background: rgba(255,255,255,.035) !important; }
+                                        .dark .schedule-row.lunch-row{ background: rgba(30,41,59,.6)      !important; }
+                                        .dark .time-cell             { border-right-color: rgba(148,163,184,.3) !important; background: inherit !important; }
+                                        .dark table thead tr         { background: #0f172a !important; }
+                                        .dark table thead th         { border-color: rgba(51,65,85,.8) !important; }
+                                        .dark .schedule-row          { border-top-color: rgba(148,163,184,.12) !important; }
+                                    </style>
+                                </div>
+
+                                {{-- Legend + Unscheduled subjects below grid --}}
+                                <div class="border-t border-slate-200 bg-slate-50/60 px-5 py-3 dark:border-white/10 dark:bg-white/[0.02]">
+                                    <div class="flex flex-wrap items-center gap-4">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="h-3 w-3 rounded border border-sky-200 bg-sky-50 dark:border-sky-300/25 dark:bg-sky-400/10"></span>
+                                            <span class="text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Major</span>
+                                        </div>
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="h-3 w-3 rounded border border-violet-200 bg-violet-50 dark:border-violet-300/25 dark:bg-violet-400/10"></span>
+                                            <span class="text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Minor / GenEd</span>
+                                        </div>
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="h-3 w-3 rounded border border-slate-300 bg-slate-100 dark:border-white/10 dark:bg-white/5"></span>
+                                            <span class="text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Lunch Break</span>
+                                        </div>
+                                        <span class="ml-auto text-[9px] font-medium text-slate-400 dark:text-slate-500">
+                                            {{ count($activeDays) }} active day(s) &bull; {{ count($timeSlots) }} time slots
                                         </span>
                                     </div>
                                 </div>
-                            </div>
-                            @if($scheduleGroups->count() > 0)
-                                <div class="grid gap-4 p-6 xl:grid-cols-2">
-                                    @forelse($scheduleGroups as $day => $daySchedules)
-                                        <div class="rounded-xl border border-sky-100 bg-sky-50/60 p-4 dark:border-sky-300/15 dark:bg-sky-400/8">
-                                            <div class="mb-4 flex items-center justify-between">
-                                                <h3 class="text-sm font-black uppercase tracking-[0.18em] text-slate-900 dark:text-white">{{ $day }}</h3>
-                                                <span class="rounded-full border border-slate-200 bg-white px-2 py-1 text-[10px] font-black uppercase text-slate-600 dark:border-white/10 dark:bg-white/8 dark:text-slate-300">
-                                                    {{ $daySchedules->count() }} class(es)
-                                                </span>
-                                            </div>
-                                            <div class="space-y-2">
-                                                @foreach($daySchedules as $schedule)
-                                                    @php
-                                                        $hasValidSchedule = filled($schedule->day)
-                                                            && filled($schedule->start_time)
-                                                            && filled($schedule->end_time);
-                                                    @endphp
-                                                    <div class="rounded-lg border {{ $hasValidSchedule ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-300/20 dark:bg-emerald-400/8' : 'border-amber-200 bg-amber-50/70 dark:border-amber-300/20 dark:bg-amber-400/8' }} p-3">
-                                                        <div class="flex items-start justify-between gap-3">
-                                                            <div class="min-w-0">
-                                                                <p class="truncate text-sm font-black uppercase {{ $hasValidSchedule ? 'text-emerald-700 dark:text-emerald-100' : 'text-amber-700 dark:text-amber-100' }}">
-                                                                    {{ $schedule->subject?->subject_code ?? 'N/A' }}
-                                                                </p>
-                                                                <p class="mt-1 line-clamp-2 text-xs font-medium text-slate-600 dark:text-slate-300">
-                                                                    {{ $schedule->subject?->description ?? 'Untitled subject' }}
-                                                                </p>
-                                                            </div>
-                                                            <span class="shrink-0 rounded-md bg-white px-2 py-1 text-[10px] font-black text-slate-700 shadow-sm dark:bg-white/10 dark:text-white">
-                                                                {{ $schedule->subject?->units ?? 0 }}u
-                                                            </span>
-                                                        </div>
-                                                        @if($hasValidSchedule)
-                                                            <p class="mt-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">
-                                                                {{ \Carbon\Carbon::parse($schedule->start_time)->format('h:i A') }}
-                                                                <span class="text-slate-400 dark:text-slate-600">-</span>
-                                                                {{ \Carbon\Carbon::parse($schedule->end_time)->format('h:i A') }}
-                                                                @if($schedule->room)
-                                                                    <span class="text-slate-400 dark:text-slate-500">/</span>
-                                                                    🏛️ {{ $schedule->room?->room_name ?? 'Unknown' }}
-                                                                @else
-                                                                    <span class="ml-2 italic text-amber-600 dark:text-amber-500">(TBA)</span>
-                                                                @endif
-                                                            </p>
-                                                        @else
-                                                            <div class="mt-2 flex items-center gap-2">
-                                                                <div class="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400"></div>
-                                                                <p class="text-[11px] font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400">
-                                                                    ⏳ Awaiting Auto-Scheduler
-                                                                </p>
-                                                            </div>
-                                                        @endif
+
+                                @if($unscheduled->count() > 0)
+                                    <div class="border-t border-amber-200 bg-amber-50/60 px-5 py-4 dark:border-amber-300/20 dark:bg-amber-400/[0.06]">
+                                        <p class="mb-3 text-[10px] font-black uppercase tracking-[0.2em] text-amber-700 dark:text-amber-300">
+                                            ⏳ Awaiting Auto-Scheduler ({{ $unscheduled->count() }})
+                                        </p>
+                                        <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                                            @foreach($unscheduled->unique(fn($s) => $s->subject_id . $s->section) as $sch)
+                                                <div class="flex items-center justify-between rounded-lg border border-amber-200 bg-white px-3 py-2 shadow-sm dark:border-amber-300/20 dark:bg-white/[0.04]">
+                                                    <div class="min-w-0">
+                                                        <p class="truncate text-[10px] font-black uppercase text-amber-700 dark:text-amber-200">{{ $sch->subject?->subject_code ?? 'N/A' }}</p>
+                                                        <p class="truncate text-[9px] font-medium text-slate-500 dark:text-slate-400">Sec {{ $sch->section ?? 'A' }} &bull; {{ $sch->subject?->units ?? 0 }}u</p>
                                                     </div>
-                                                @endforeach
-                                            </div>
+                                                    <div class="ml-2 h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400 shrink-0"></div>
+                                                </div>
+                                            @endforeach
                                         </div>
-                                    @empty
-                                        <div class="rounded-xl border border-dashed border-slate-300 bg-slate-50/70 p-10 text-center xl:col-span-2 dark:border-white/10 dark:bg-white/[0.035]">
-                                            <div class="flex flex-col items-center opacity-60">
-                                                <svg xmlns="[w3.org](http://www.w3.org/2000/svg)" class="mb-3 h-8 w-8 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
-                                                </svg>
-                                                <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400">
-                                                    No schedules generated yet
-                                                </p>
-                                                <p class="mt-2 text-[10px] font-medium text-slate-500">
-                                                    Assignments are awaiting auto-generation
-                                                </p>
-                                            </div>
-                                        </div>
-                                    @endforelse
-                                </div>
+                                    </div>
+                                @endif
+
                             @else
                                 <div class="flex h-64 flex-col items-center justify-center p-10 text-center">
-                                    <svg xmlns="[w3.org](http://www.w3.org/2000/svg)" class="mb-3 h-12 w-12 text-slate-400 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <svg xmlns="http://www.w3.org/2000/svg" class="mb-3 h-12 w-12 text-slate-400 opacity-50" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z" />
                                     </svg>
                                     <p class="text-xs font-black uppercase tracking-[0.22em] text-slate-500">No schedule to display</p>
-                                    <p class="mt-2 text-[10px] font-medium text-slate-500">Select a faculty member to view their assigned schedule</p>
+                                    <p class="mt-2 text-[10px] font-medium text-slate-500">Select a faculty member or configure schedule settings</p>
                                 </div>
                             @endif
                         </div>
@@ -1416,106 +1598,418 @@
         }
         .load-card:nth-child(1) { animation-delay: 0.06s; }
         .load-card:nth-child(2) { animation-delay: 0.14s; }
+        /* ============================================================
+           PRINT STYLES — Official Instructor Load Assignment Document
+           ============================================================ */
+
+        /* Hidden on screen at all times */
+        .faculty-print-document {
+            display: none !important;
+        }
+
         @media print {
-            .no-print, aside, [role='dialog'] { display: none !important; }
-            .print-area {
-                display: block !important;
-                height: auto !important;
-                min-height: auto !important;
-                overflow: visible !important;
-                background: white !important;
-                color: #0f172a !important;
-            }
-            /* Print stylesheet - Show only schedule table */
-            body {
-                background: white !important;
-                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-                padding: 0;
-                margin: 0;
-            }
-            .faculty-loading-shell {
-                display: flex;
-                flex-direction: column;
-                height: auto !important;
-                background: white !important;
-                color: #0f172a !important;
-                padding: 40px;
-            }
-            /* Hide everything except header and subjects table */
-            .faculty-loading-shell > div > section:not(:has(table)) {
-                display: none !important;
-            }
-            .faculty-loading-shell > div > section:nth-of-type(1) {
-                display: block !important;
-                page-break-inside: avoid;
-                border: none !important;
-                background: transparent !important;
+            html, body {
+                background: #fff !important;
+                margin: 0 !important;
                 padding: 0 !important;
             }
-            /* Hide tabs and other UI elements */
-            [role='tablist'], .no-print, [x-on\:click] { display: none !important; }
-            /* Format table for print */
-            table {
-                width: 100%;
-                border-collapse: collapse;
-                margin-top: 30px;
-                page-break-inside: avoid;
+
+            /* Hide every element on the page first */
+            body * {
+                visibility: hidden !important;
             }
-            thead {
-                background: #f3f4f6 !important;
-                color: #1f2937 !important;
-                font-weight: 600 !important;
-                border-top: 2px solid #1f2937 !important;
-                border-bottom: 2px solid #1f2937 !important;
+
+            /* Then reveal ONLY the print document and all its descendants */
+            .faculty-print-document,
+            .faculty-print-document * {
+                visibility: visible !important;
             }
-            th {
-                padding: 12px 8px !important;
-                text-align: left !important;
-                font-size: 11px !important;
-                font-weight: 700 !important;
-            }
-            td {
-                padding: 10px 8px !important;
-                border-bottom: 1px solid #d1d5db !important;
-                font-size: 10px !important;
-            }
-            tbody tr {
-                page-break-inside: avoid;
-            }
-            /* Hide action buttons in print */
-            td:last-child { display: none !important; }
-            th:last-child { display: none !important; }
-            /* Print header styling */
-            h1, h2 {
-                color: #1f2937 !important;
-                margin: 0 0 5px 0 !important;
-                font-size: 28px !important;
-                font-weight: 700 !important;
-            }
-            .rounded-full, .shadow-sm, .shadow-md, [class*='shadow'] {
-                box-shadow: none !important;
-            }
-            /* Keep only essential columns */
-            .custom-scrollbar {
-                overflow: visible !important;
-            }
-            /* Print-friendly colors */
-            .bg-blue-50, .bg-amber-50, .bg-indigo-50 {
-                background: white !important;
+
+            /* Pull the print document to the top-left corner of the sheet */
+            .faculty-print-document {
+                display: block !important;
+                position: absolute !important;
+                top: 0 !important;
+                left: 0 !important;
+                width: 100% !important;
+                background: #fff !important;
                 color: #000 !important;
-            }
-            .text-sky-700, .text-amber-700, .text-indigo-700, .text-emerald-700 {
-                color: #1f2937 !important;
-            }
-            /* Prevent page breaks in middle of content */
-            .rounded-xl, .border {
-                page-break-inside: avoid;
-                border-color: #d1d5db !important;
+                padding: 0 !important;
+                margin: 0 !important;
             }
         }
+
         @page {
-            margin: 1cm;
+            margin: 1.2cm 1.5cm;
             size: A4 portrait;
         }
+
+        /* ── Print document internal styles (scoped, applied always so @media print inherits) ── */
+        .fpd-wrap {
+            font-family: 'Courier New', Courier, monospace;
+            font-size: 10pt;
+            color: #000;
+            background: #fff;
+            padding: 20px 24px;
+            max-width: 100%;
+        }
+        .fpd-header {
+            text-align: center;
+            margin-bottom: 16px;
+        }
+        .fpd-header p {
+            margin: 1px 0;
+            font-size: 11pt;
+            font-weight: bold;
+            letter-spacing: 0.02em;
+        }
+        .fpd-header .fpd-subtitle {
+            font-size: 10pt;
+            font-weight: normal;
+        }
+        .fpd-divider {
+            border: none;
+            border-top: 1px solid #000;
+            margin: 6px 0;
+        }
+        .fpd-divider-dbl {
+            border: none;
+            border-top: 2px solid #000;
+            margin: 6px 0;
+        }
+        .fpd-section-title {
+            font-size: 9pt;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            margin: 8px 0 4px 0;
+        }
+        .fpd-row {
+            display: flex;
+            gap: 32px;
+            margin: 2px 0;
+        }
+        .fpd-field {
+            font-size: 9.5pt;
+        }
+        .fpd-field-label {
+            font-weight: bold;
+        }
+        .fpd-bullet-list {
+            list-style: none;
+            padding: 0;
+            margin: 2px 0;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 32px;
+        }
+        .fpd-bullet-list li {
+            font-size: 9pt;
+        }
+        .fpd-bullet-list li::before {
+            content: "• ";
+        }
+        /* Schedule table */
+        .fpd-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 8px 0;
+            font-size: 9pt;
+        }
+        .fpd-table thead tr {
+            background-color: #1e3a5f;
+            color: #ffffff;
+        }
+        .fpd-table th {
+            border: 1px solid #1e3a5f;
+            padding: 5px 7px;
+            text-align: left;
+            font-weight: bold;
+            font-size: 8.5pt;
+            color: #ffffff;
+            letter-spacing: 0.04em;
+        }
+        .fpd-table td {
+            border: 1px solid #c8d3e0;
+            padding: 5px 7px;
+            font-size: 9pt;
+            vertical-align: middle;
+        }
+        .fpd-table tbody tr:nth-child(odd) {
+            background-color: #f0f4f9;
+        }
+        .fpd-table tbody tr:nth-child(even) {
+            background-color: #ffffff;
+        }
+        .fpd-td-code {
+            font-weight: bold;
+            color: #1e3a5f;
+            white-space: nowrap;
+        }
+        .fpd-td-desc {
+            font-weight: bold;
+            color: #1a2a40;
+        }
+        .fpd-td-group {
+            color: #374151;
+            font-size: 8pt;
+            white-space: nowrap;
+        }
+        .fpd-td-day {
+            font-weight: 600;
+            color: #1e3a5f;
+        }
+        .fpd-td-room {
+            color: #0f5132;
+            font-weight: 600;
+        }
+        .fpd-td-units {
+            text-align: center;
+            font-weight: bold;
+            color: #374151;
+        }
+        .fpd-badge-major {
+            display: inline-block;
+            background: #d97706;
+            color: #fff;
+            font-size: 7.5pt;
+            font-weight: bold;
+            padding: 1px 5px;
+            border-radius: 3px;
+            letter-spacing: 0.04em;
+        }
+        .fpd-badge-minor {
+            display: inline-block;
+            background: #5b21b6;
+            color: #fff;
+            font-size: 7.5pt;
+            font-weight: bold;
+            padding: 1px 5px;
+            border-radius: 3px;
+            letter-spacing: 0.04em;
+        }
+        /* Signature block */
+        .fpd-sig-block {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 24px;
+        }
+        .fpd-sig {
+            width: 44%;
+            text-align: center;
+            font-size: 9pt;
+        }
+        .fpd-sig-line {
+            border-top: 1px solid #000;
+            margin-bottom: 4px;
+        }
+        .fpd-sig-name {
+            font-weight: bold;
+            font-size: 9.5pt;
+        }
+        .fpd-sig-role {
+            font-size: 8.5pt;
+        }
+        .fpd-footer-note {
+            font-size: 8pt;
+            margin: 4px 0 0 0;
+            text-align: left;
+        }
     </style>
+
+    {{-- ============================================================
+         PRINT-ONLY: Official Instructor Load Assignment Document
+         Hidden on screen via CSS. Revealed exclusively by @media print.
+         ============================================================ --}}
+    <div class="faculty-print-document" aria-hidden="true">
+        @if($currentFaculty)
+        @php
+            /* ── Academic period ── */
+            $period   = \App\Models\Setting::getAcademicPeriod();
+            $sy       = $period['school_year']  ?? '----';
+            $sem      = $period['semester']      ?? '----';
+            $semLabel = match(strtolower((string) $sem)) {
+                '1', 'first'  => 'FIRST SEMESTER ACADEMIC YEAR',
+                '2', 'second' => 'SECOND SEMESTER ACADEMIC YEAR',
+                '3', 'third', 'summer' => 'SUMMER TERM',
+                default => strtoupper($sem) . ' SEMESTER ACADEMIC YEAR',
+            };
+
+            /* ── Faculty basics ── */
+            $fname      = strtoupper($currentFaculty->full_name);
+            $fid        = $currentFaculty->employee_id ?? '—';
+            $dept       = $currentFaculty->displayDepartment();
+            $empType    = ucwords(str_replace('_', ' ', $currentFaculty->employment_type ?? 'Faculty'));
+            $maxUnits   = $summary['maxUnits']          ?? 30;
+            $totalUnits = $summary['totalUnits']        ?? 0;
+            $majorCount = $summary['majorCount']        ?? 0;
+            $minorCount = $summary['minorCount']        ?? 0;
+            $utilRate   = $summary['utilizationPercent'] ?? 0;
+
+            /* ── Build schedule rows for print ─────────────────────────────
+               We re-use $groupedAssignedSubjects which is already computed.
+               For print we need: code, description, units, day(s), time slot, room.
+               Each grouped row may have multiple schedule lines (multi-day).
+               We expand them so each day gets its own table row.
+            ── */
+            $printRows = [];
+            foreach ($groupedAssignedSubjects as $item) {
+                $code        = $item['subject_code']  ?? 'N/A';
+                $desc        = $item['description']   ?? '—';
+                $units       = $item['units']         ?? 0;
+                $roomDisplay = $item['room']          ?? 'TBA';
+                $group       = $item['group']         ?? '—';
+                $type        = strtoupper($item['type'] ?? '');
+
+                // Strip HTML from schedule string and split into lines
+                $rawSched = strip_tags($item['schedule'] ?? '');
+                // Each line format: "DAY / HH:MM AM - HH:MM AM"
+                $lines = array_filter(array_map('trim', preg_split('/\r?\n|<br\s*\/?>/', $item['schedule'] ?? '')));
+                $lines = array_values(array_filter(array_map('strip_tags', $lines), fn($l) => trim($l) !== ''));
+
+                if (empty($lines) || str_contains(strtolower($rawSched), 'unscheduled') || str_contains(strtolower($rawSched), 'not assigned')) {
+                    // One row, TBA everything
+                    $printRows[] = [
+                        'code'  => $code,
+                        'desc'  => $desc,
+                        'group' => $group,
+                        'units' => $units . 'u',
+                        'day'   => 'TBA',
+                        'time'  => 'TBA',
+                        'room'  => $roomDisplay,
+                        'type'  => $type,
+                    ];
+                } else {
+                    foreach ($lines as $line) {
+                        // Expected: "MON / 07:00 AM - 10:00 AM"
+                        $parts = array_map('trim', explode('/', $line, 2));
+                        $day   = $parts[0] ?? 'TBA';
+                        $time  = $parts[1] ?? 'TBA';
+                        $printRows[] = [
+                            'code'  => $code,
+                            'desc'  => $desc,
+                            'group' => $group,
+                            'units' => $units . 'u',
+                            'day'   => ucfirst(strtolower($day)),
+                            'time'  => $time,
+                            'room'  => $roomDisplay,
+                            'type'  => $type,
+                        ];
+                    }
+                }
+            }
+        @endphp
+
+        <div class="fpd-wrap">
+
+            {{-- ── HEADER ── --}}
+            <div class="fpd-header">
+                <p>PROFESSIONAL ACADEMY OF THE PHILIPPINES</p>
+                <p class="fpd-subtitle">Naga City, Cebu, Philippines</p>
+                <p style="margin-top:8px;">OFFICIAL INSTRUCTOR LOAD ASSIGNMENT</p>
+                <p class="fpd-subtitle">S.Y. {{ $sy }}&nbsp;&nbsp;|&nbsp;&nbsp;{{ $semLabel }}</p>
+            </div>
+            <hr class="fpd-divider-dbl">
+
+            {{-- ── INSTRUCTOR PROFILE ── --}}
+            <p class="fpd-section-title">Instructor Profile</p>
+            <div class="fpd-row">
+                <span class="fpd-field"><span class="fpd-field-label">Faculty Name:&nbsp;&nbsp;</span>{{ $fname }}</span>
+                <span class="fpd-field"><span class="fpd-field-label">Employment Status:&nbsp;&nbsp;</span>{{ $empType }}</span>
+            </div>
+            <div class="fpd-row">
+                <span class="fpd-field"><span class="fpd-field-label">Faculty ID:&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</span>{{ $fid }}</span>
+                <span class="fpd-field"><span class="fpd-field-label">College/Department:&nbsp;</span>{{ $dept }}</span>
+            </div>
+            <hr class="fpd-divider">
+
+            {{-- ── WORKLOAD DISTRIBUTION SUMMARY ── --}}
+            <p class="fpd-section-title">Workload Distribution Summary</p>
+            <ul class="fpd-bullet-list">
+                <li>Major Load Subjects: {{ $majorCount }} Assigned Block{{ $majorCount != 1 ? 's' : '' }}</li>
+                <li>Total Assigned Units: {{ $totalUnits }} / {{ $maxUnits }} Units Max</li>
+                <li>Minor Load Subjects: {{ $minorCount }} Assigned Block{{ $minorCount != 1 ? 's' : '' }}</li>
+                <li>Total Load Utilization Rate: {{ $utilRate }}%</li>
+            </ul>
+            <hr class="fpd-divider">
+
+            {{-- ── SUBJECT / SCHEDULE TABLE ── --}}
+            <table class="fpd-table">
+                <thead>
+                    <tr>
+                        <th style="width:9%">CODE</th>
+                        <th style="width:26%">SUBJECT DESCRIPTION</th>
+                        <th style="width:16%">GROUP</th>
+                        <th style="width:5%">UNITS</th>
+                        <th style="width:9%">DAY(S)</th>
+                        <th style="width:20%">TIME SLOT</th>
+                        <th style="width:11%">ROOM</th>
+                        <th style="width:4%">TYPE</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @forelse($printRows as $row)
+                        <tr>
+                            <td class="fpd-td-code">{{ $row['code'] }}</td>
+                            <td class="fpd-td-desc">{{ $row['desc'] }}</td>
+                            <td class="fpd-td-group">{{ $row['group'] }}</td>
+                            <td class="fpd-td-units">{{ $row['units'] }}</td>
+                            <td class="fpd-td-day">{{ $row['day'] }}</td>
+                            <td>{{ $row['time'] }}</td>
+                            <td class="fpd-td-room">{{ $row['room'] }}</td>
+                            <td style="text-align:center;white-space:nowrap;">
+                                @if($row['type'] === 'MAJOR')
+                                    <span class="fpd-badge-major">MAJOR</span>
+                                @elseif($row['type'] === 'MINOR')
+                                    <span class="fpd-badge-minor">MINOR</span>
+                                @else
+                                    {{ $row['type'] }}
+                                @endif
+                            </td>
+                        </tr>
+                    @empty
+                        <tr>
+                            <td colspan="8" style="text-align:center;padding:10px 6px;font-style:italic;">
+                                No subjects assigned for this term.
+                            </td>
+                        </tr>
+                    @endforelse
+                </tbody>
+            </table>
+            <hr class="fpd-divider">
+
+            {{-- ── ISSUED BY ── --}}
+            <p class="fpd-footer-note" style="margin-top:8px;">
+                <strong>Issued By:</strong>&nbsp;&nbsp;Office of the College Registrar<br>
+                <strong>System:</strong>&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;Classly Scheduling Management System
+            </p>
+            <hr class="fpd-divider">
+
+            {{-- ── CONFORME & APPROVALS ── --}}
+            <p class="fpd-section-title" style="margin-top:8px;">Conforme &amp; Approvals</p>
+            <p style="font-size:9pt;margin:4px 0 20px 0;">
+                I hereby accept the course scheduling and unit load assignments designated above for this academic term.
+            </p>
+
+            <div class="fpd-sig-block">
+                <div class="fpd-sig">
+                    <div style="height:32px;"></div>
+                    <div class="fpd-sig-line"></div>
+                    <p class="fpd-sig-name">{{ $fname }}</p>
+                    <p class="fpd-sig-role">Instructor Signature</p>
+                </div>
+                <div class="fpd-sig">
+                    <div style="height:32px;"></div>
+                    <div class="fpd-sig-line"></div>
+                    <p class="fpd-sig-name">DEAN / OIC SIGNATURE</p>
+                    <p class="fpd-sig-role">College Administrator</p>
+                </div>
+            </div>
+
+            <hr class="fpd-divider-dbl" style="margin-top:24px;">
+
+        </div>{{-- /fpd-wrap --}}
+        @endif
+    </div>{{-- /faculty-print-document --}}
+
 </div>

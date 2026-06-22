@@ -24,9 +24,11 @@
      }">
 
     {{-- ════════════════════════════════════════════════════════════════════
-         FOLDER NAVIGATION
+         FOLDER NAVIGATION (screen only — the printable schedule lives in its
+         own #official-print-block further down, so this whole block is
+         excluded from print to avoid a duplicated/garbled title block)
     ════════════════════════════════════════════════════════════════════ --}}
-    <div class="pt-6 pb-2 px-5">
+    <div class="pt-6 pb-2 px-5 print:hidden">
         <div class="max-w-[1500px] mx-auto">
 
             {{-- Page title --}}
@@ -615,7 +617,9 @@
             </template>
 
             {{-- ──────────────────────────────────────────────────────────────
-                 HEADER  (visible in print — do NOT add print:hidden here)
+                 HEADER (screen only — lives inside #study-load-container,
+                 which is hidden in print; the printed copy uses its own
+                 letterhead in #official-print-block instead)
                  ────────────────────────────────────────────────────────────── --}}
             <div class="border-b border-blue-600/20 px-8 py-6
                         bg-gradient-to-r from-blue-50/70 to-indigo-50/40
@@ -637,9 +641,30 @@
                             Blocked Schedule
                         </h1>
                         <h2 class="text-[17px] font-bold text-blue-600 dark:text-blue-400
-                                   uppercase tracking-tight mt-1">
+                                   uppercase tracking-tight mt-1 flex items-center gap-2.5 flex-wrap">
                             {{ $departmentName }}
+
+                            @if($isReadOnlyView)
+                                <span class="inline-flex items-center gap-1.5 bg-amber-100 dark:bg-amber-900/30
+                                             border border-amber-300 dark:border-amber-700
+                                             text-amber-700 dark:text-amber-400
+                                             px-2.5 py-1 rounded-full text-[11px] font-black
+                                             uppercase tracking-wider normal-case">
+                                    <svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                                              d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                                    </svg>
+                                    Read-only
+                                </span>
+                            @endif
                         </h2>
+
+                        @if($isReadOnlyView)
+                            <p class="text-[12px] font-semibold text-amber-600 dark:text-amber-400 mt-1 print:hidden">
+                                You're viewing {{ $readOnlyCollegeCode ?? 'another college' }}'s schedule.
+                                Only {{ $readOnlyCollegeCode }} officials can assign faculty, edit, or finalize it.
+                            </p>
+                        @endif
                     </div>
 
                     {{-- Period badges --}}
@@ -1540,6 +1565,110 @@
             </div>{{-- /table wrapper --}}
 
         </div>{{-- /main container --}}
+
+        {{-- ════════════════════════════════════════════════════════════════
+             OFFICIAL PRINT OUTPUT (print-only)
+             ────────────────────────────────────────────────────────────────
+             Built as its own static block instead of reusing the interactive
+             workspace table above. The workspace table holds edit-mode
+             dropdowns, checkboxes, and action buttons that don't translate
+             cleanly to a printed page — that mismatch was the source of the
+             garbled/leaky print output. This block is plain, self-contained,
+             and renders ONLY in print (see #official-print-block in the
+             <style> tag below), with exactly the columns requested:
+             Time | Code | Subject Title | Units | Day(s) | Room — no
+             Faculty, no EDP/Status noise, no buttons.
+             ════════════════════════════════════════════════════════════════ --}}
+        <div id="official-print-block" class="hidden">
+
+            {{-- Letterhead --}}
+            <div class="print-letterhead">
+                <h1>Professional Academy of the Philippines</h1>
+                <p>Naga City, Cebu, Philippines</p>
+            </div>
+
+            <div class="print-title-block">
+                <h2>Official Block Schedule</h2>
+                <p>S.Y. {{ $schoolYear }} &nbsp;|&nbsp; {{ strtoupper($semester) }} SEMESTER BLOCK SCHEDULE</p>
+            </div>
+
+            <div class="print-meta">
+                <p><span>Department:</span> {{ strtoupper($printCollegeLabel ?? '') }} ({{ $printCollegeCode ?? '—' }})</p>
+                <p><span>Program:</span> {{ strtoupper($departmentName) }}</p>
+                <p><span>Year/Sec:</span> Year {{ $selectedYear }} &middot; Section {{ $selectedSection }}</p>
+            </div>
+
+            <table class="print-table">
+                <colgroup>
+                    <col style="width: 17%">{{-- Time --}}
+                    <col style="width: 12%">{{-- Code --}}
+                    <col style="width: 35%">{{-- Subject Title --}}
+                    <col style="width: 7%">{{-- Units --}}
+                    <col style="width: 12%">{{-- Day(s) --}}
+                    <col style="width: 17%">{{-- Room --}}
+                </colgroup>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>Code</th>
+                        <th>Subject Title</th>
+                        <th>Units</th>
+                        <th>Day(s)</th>
+                        <th>Room</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @forelse($scheduleRows as $printRow)
+                        <tr>
+                            {{-- Time --}}
+                            <td class="print-center">
+                                @if($printRow->status === 'not_scheduled')
+                                    NOT SCHEDULED
+                                @else
+                                    {{ \Carbon\Carbon::parse($printRow->start_time)->format('h:i A') }}&ndash;{{ \Carbon\Carbon::parse($printRow->end_time)->format('h:i A') }}
+                                @endif
+                            </td>
+
+                            {{-- Code: EDP code when assigned, otherwise the subject code --}}
+                            <td class="print-center">
+                                {{ $printRow->subject?->edp_code ?: $printRow->subject?->subject_code ?: '—' }}
+                            </td>
+
+                            {{-- Subject Title --}}
+                            <td class="print-subject">
+                                {{ $printRow->subject?->description ?? '—' }}
+                            </td>
+
+                            {{-- Units --}}
+                            <td class="print-center">{{ $printRow->subject?->units ?? 0 }}u</td>
+
+                            {{-- Day(s) --}}
+                            <td class="print-center">{{ $printRow->day_display }}</td>
+
+                            {{-- Room --}}
+                            <td class="print-center">
+                                @if($printRow->status === 'not_scheduled')
+                                    UNASSIGNED
+                                @else
+                                    {{ $printRow->room?->room_name ?? 'No Room' }}
+                                @endif
+                            </td>
+                        </tr>
+                    @empty
+                        <tr>
+                            <td colspan="6" class="print-center">No subjects scheduled for this section yet.</td>
+                        </tr>
+                    @endforelse
+                </tbody>
+            </table>
+
+            <div class="print-footer">
+                <p>Generated By: Classly Scheduling System</p>
+                <p>Date Printed: {{ now()->format('F j, Y') }}</p>
+            </div>
+
+        </div>{{-- /official print block --}}
+
     </div>{{-- /max-w --}}
 
 
@@ -2232,16 +2361,29 @@
 </div>{{-- /root alpine x-data --}}
 <style>
     @page {
-        size: A4 landscape;
-        margin: 8mm 10mm 12mm 10mm;
+        size: A4 portrait;
+        margin: 14mm 16mm;
     }
 
     @media print {
+        /* ── Hide every interactive / chrome element ──────────────────── */
         aside, nav, header, footer,
         .sidebar, .navbar,
         [class*="sidebar"], [class*="navbar"],
         [class*="nav-bar"], [class*="top-bar"], [class*="topbar"],
         .screen-only, button, [wire\:confirm] {
+            display: none !important;
+        }
+
+        /* The entire interactive workspace card (color bar, gradient header,
+           filters, action buttons, and the editable schedule table) is
+           replaced on the printed page by #official-print-block below.
+           Hiding it here — rather than trying to selectively hide its
+           columns with :nth-child rules — is what fixes the old leaky,
+           garbled print output (it was printing form controls and the
+           Faculty column because the column-hiding hacks didn't keep up
+           with the table's structure). */
+        #study-load-container {
             display: none !important;
         }
 
@@ -2271,54 +2413,62 @@
             margin: 0 !important;
         }
 
-        #study-load-container {
-            box-shadow: none !important;
-            border-radius: 0 !important;
-            border: none !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            width: 100% !important;
+        /* ── Official Print Block ─────────────────────────────────────── */
+        #official-print-block {
+            display: block !important;
+            color: #1e293b;
         }
 
-        .print-header {
-            background: white !important;
-            border-bottom: 3px solid #1e3a5f !important;
-            padding: 3mm 5mm 3mm !important;
-            display: flex !important;
-            align-items: flex-start !important;
-            flex-wrap: wrap !important;
-            gap: 4mm !important;
+        .print-letterhead {
+            text-align: center;
+            margin-bottom: 2mm;
+        }
+        .print-letterhead h1 {
+            font-size: 15pt;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.02em;
+            margin: 0;
+        }
+        .print-letterhead p {
+            font-size: 10pt;
+            margin: 1mm 0 0;
         }
 
-        .print-header h1 {
-            font-size: 15pt !important;
-            color: #1e293b !important;
-            font-weight: 900 !important;
-            margin: 0 !important;
-            letter-spacing: -0.02em !important;
-            line-height: 1 !important;
+        .print-title-block {
+            text-align: center;
+            border-top: 2px solid #1e293b;
+            border-bottom: 2px solid #1e293b;
+            padding: 2mm 0;
+            margin: 3mm 0 4mm;
+        }
+        .print-title-block h2 {
+            font-size: 12pt;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            margin: 0;
+        }
+        .print-title-block p {
+            font-size: 9.5pt;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin: 1mm 0 0;
         }
 
-        .print-header h2 {
-            font-size: 11pt !important;
-            color: #1d4ed8 !important;
-            font-weight: 700 !important;
-            margin: 2px 0 0 !important;
-            line-height: 1.2 !important;
+        .print-meta {
+            margin-bottom: 4mm;
+            font-size: 9.5pt;
+        }
+        .print-meta p { margin: 0.5mm 0; }
+        .print-meta span {
+            display: inline-block;
+            width: 26mm;
+            font-weight: 900;
+            text-transform: uppercase;
         }
 
-        .print-header span {
-            font-size: 8.5pt !important;
-            background: transparent !important;
-            border: 1px solid #94a3b8 !important;
-            color: #475569 !important;
-            padding: 1px 5px !important;
-            border-radius: 3px !important;
-        }
-
-        #schedule-table-wrapper { overflow: visible !important; }
-
-        table {
+        table.print-table {
             width: 100% !important;
             table-layout: fixed !important;
             border-collapse: collapse !important;
@@ -2326,27 +2476,28 @@
             page-break-inside: auto;
         }
 
-        thead { display: table-header-group; }
+        table.print-table thead { display: table-header-group; }
 
-        thead tr {
+        table.print-table thead tr {
             background-color: #1e293b !important;
             color: white !important;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
         }
 
-        th {
+        table.print-table th {
             border: 1px solid #334155 !important;
             padding: 4px 6px !important;
             font-size: 8.5pt !important;
             font-weight: 900 !important;
             text-align: center !important;
+            text-transform: uppercase;
             letter-spacing: 0.05em !important;
             color: white !important;
         }
 
-        td {
-            border: 1px solid #e2e8f0 !important;
+        table.print-table td {
+            border: 1px solid #cbd5e1 !important;
             padding: 4px 6px !important;
             font-size: 9pt !important;
             color: #1e293b !important;
@@ -2355,39 +2506,25 @@
             overflow-wrap: break-word !important;
         }
 
-        td:nth-child(3) { font-size: 10pt !important; font-weight: 900 !important; }
+        table.print-table td.print-center { text-align: center !important; }
+        table.print-table td.print-subject { font-weight: 700; }
 
-        tbody tr:nth-child(even) td {
+        table.print-table tbody tr:nth-child(even) td {
             background-color: #f8fafc !important;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
         }
-        tbody tr:nth-child(odd) td { background-color: #ffffff !important; }
+        table.print-table tbody tr:nth-child(odd) td { background-color: #ffffff !important; }
 
-        tr { page-break-inside: avoid; }
+        table.print-table tr { page-break-inside: avoid; }
 
-        td span, td div, td button {
-            background: transparent !important;
-            border: none !important;
-            color: inherit !important;
-            padding: 0 !important;
-            border-radius: 0 !important;
-            font-size: inherit !important;
-            font-weight: inherit !important;
-            display: inline !important;
-            box-shadow: none !important;
+        .print-footer {
+            margin-top: 5mm;
+            padding-top: 2mm;
+            border-top: 1px solid #cbd5e1;
+            font-size: 8pt;
+            color: #475569;
         }
-
-        td:nth-child(1) span { color: #1d4ed8 !important; font-weight: 900 !important; }
-        td:nth-child(7) span { color: #1d4ed8 !important; font-weight: 700 !important; }
-
-        td:nth-child(8) button, td:nth-child(8) span {
-            display: inline !important;
-            color: #1e293b !important;
-            font-size: 9pt !important;
-            font-weight: 600 !important;
-        }
-
-        th:last-child, td:last-child { display: none !important; }
+        .print-footer p { margin: 0.5mm 0; }
     }
 </style>

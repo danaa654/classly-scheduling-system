@@ -2959,6 +2959,7 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
     private function getScheduleGroups(Collection $assignedSchedules): Collection
     {
         $activeDays = Setting::getActiveDays();
+        $timeSlots = Setting::getTimeSlots();
         $otherDays  = $assignedSchedules
             ->pluck('day')
             ->filter()
@@ -3281,6 +3282,7 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
         $facultyConflicts = $this->getFacultyConflicts($assignedSchedules);
         $scheduleGroups = $this->getScheduleGroups($assignedSchedules);
         $activeDays = Setting::getActiveDays();
+        $timeSlots = Setting::getTimeSlots();
  
         return view('livewire.faculty-loading', [
             'faculties' => $faculties,
@@ -3303,6 +3305,7 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
             'facultyConflicts' => $facultyConflicts,
             'scheduleGroups' => $scheduleGroups,
             'activeDays' => $activeDays,
+            'timeSlots' => $timeSlots,
             'canOverrideWarnings' => $this->canOverrideAssignmentWarnings($user),
             // NEW: Pre-assignment data for display
             'preAssignmentCount' => $preAssignmentCount,
