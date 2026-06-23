@@ -1,11 +1,3 @@
-{{--
-╔══════════════════════════════════════════════════════════════════════════╗
-║  ASSOCIATE DEAN DASHBOARD — Classly Academic Personnel Management System ║
-║  Professional Academy of the Philippines                                 ║
-║  Unified with Admin & Registrar design language                          ║
-╚══════════════════════════════════════════════════════════════════════════╝
---}}
-
 <style>
     /* ── Scrollbars ─────────────────────────────────── */
     .dash-scroll { scroll-behavior: smooth; }
@@ -92,8 +84,8 @@
 ════════════════════════════════════════════════════════════════════════ --}}
 <div
     x-data="{
-        clock: '{{ date('H:i:s') }}',
-        init() { setInterval(() => { this.clock = new Date().toLocaleTimeString('en-GB'); }, 1000); }
+        clock: '{{ date('h:i:s A') }}',
+        init() { setInterval(() => { this.clock = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }); }, 1000); }
     }"
     class="min-h-screen w-full font-mono antialiased overflow-x-hidden transition-colors duration-500
            bg-slate-100 dark:bg-[#080d1a]
@@ -145,25 +137,24 @@
     {{-- KPI Vitals Row ————————————————————————————————————————————————— --}}
     @php
         $vitals = [
-            ['label' => 'Faculty',    'value' => $globalStats['total_faculty'],       'color' => 'orange'],
-            ['label' => 'Minor Subj', 'value' => $globalStats['minor_subjects'],      'color' => 'amber'],
-            ['label' => 'Pending',    'value' => count($scheduleReview),              'color' => 'yellow'],
-            ['label' => 'Finalized',  'value' => $globalStats['finalized_schedules'], 'color' => 'emerald'],
-            ['label' => 'Completion', 'value' => $globalStats['completion_pct'] . '%','color' => 'blue'],
+            ['label' => 'Faculty',   'value' => $globalStats['total_faculty'],       'color' => 'orange', 'icon' => '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>'],
+            ['label' => 'Subjects',  'value' => $globalStats['total_subjects'],      'color' => 'amber',  'icon' => '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"/></svg>'],
+            ['label' => 'Minor Subs', 'value' => $globalStats['minor_subjects'],      'color' => 'yellow', 'icon' => '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>'],
+            ['label' => 'Rooms',      'value' => $globalStats['total_rooms'],          'color' => 'emerald','icon' => '<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-2 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>'],
         ];
         $vColors = [
             'orange'  => 'border-orange-200 dark:border-orange-500/30 text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-500/5',
             'amber'   => 'border-amber-200 dark:border-amber-500/30 text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-500/5',
             'yellow'  => 'border-yellow-200 dark:border-yellow-500/30 text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-500/5',
             'emerald' => 'border-emerald-200 dark:border-emerald-500/30 text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/5',
-            'blue'    => 'border-blue-200 dark:border-blue-500/30 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/5',
         ];
     @endphp
-    <div class="col-span-12 lg:col-span-7 grid grid-cols-5 gap-3">
+    <div class="col-span-12 lg:col-span-7 grid grid-cols-4 gap-3">
         @foreach($vitals as $v)
-        <div class="card-lift border {{ $vColors[$v['color']] }} rounded-2xl p-4 flex flex-col gap-2 cursor-default">
-            <span class="text-[32px] font-bold text-slate-900 dark:text-white tabular-nums leading-none">{{ $v['value'] }}</span>
-            <span class="text-[12px] uppercase tracking-widest text-slate-500">{{ $v['label'] }}</span>
+        <div class="card-lift border {{ $vColors[$v['color']] }} rounded-2xl p-3.5 flex flex-col gap-2 cursor-default">
+            <span class="{{ $vColors[$v['color']] }} w-7 h-7 rounded-lg flex items-center justify-center">{!! $v['icon'] !!}</span>
+            <span class="text-[28px] font-bold text-slate-900 dark:text-white tabular-nums leading-none">{{ $v['value'] }}</span>
+            <span class="text-[11px] uppercase tracking-widest text-slate-500">{{ $v['label'] }}</span>
         </div>
         @endforeach
     </div>
@@ -251,31 +242,31 @@
     ];
 @endphp
 
-<div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 px-5 pt-4">
-    @foreach($wfCards as $card)
-    <div class="card-lift {{ $card['glow'] }}
-                bg-white dark:bg-white/[0.03]
-                border {{ $card['border'] }}
-                rounded-2xl p-5 flex flex-col gap-3 cursor-default relative overflow-hidden">
-
-        {{-- Active pulse indicator --}}
-        @if($card['count'] > 0 && in_array($card['color'], ['yellow','blue','orange','rose','emerald']))
-        <span class="absolute top-3 right-3 w-2 h-2">
-            <span class="stage-ping absolute inset-0 rounded-full {{ $card['dot'] }} opacity-75"></span>
-            <span class="relative block w-2 h-2 rounded-full {{ $card['dot'] }}"></span>
-        </span>
-        @endif
-
-        <span class="w-2.5 h-2.5 rounded-full {{ $card['dot'] }} flex-shrink-0"></span>
-        <span class="text-[38px] font-bold tabular-nums text-slate-900 dark:text-white leading-none">
-            {{ number_format($card['count']) }}
-        </span>
-        <div>
-            <p class="text-[13px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">{{ $card['label'] }}</p>
-            <p class="text-[11px] text-slate-400 mt-1 leading-snug">{{ $card['desc'] }}</p>
+<div class="px-5 pt-4">
+    <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl shadow-sm dark:shadow-none overflow-hidden">
+        <div class="flex items-stretch divide-x divide-slate-100 dark:divide-white/[0.06]">
+            @foreach($wfCards as $card)
+            <div class="flex-1 flex items-center gap-3 px-4 py-4 cursor-default relative
+                        {{ ($card['count'] > 0 && in_array($card['color'], ['orange','rose'])) ? 'bg-orange-50/50 dark:bg-orange-500/[0.03]' : '' }}">
+                @if($card['count'] > 0 && $card['color'] !== 'slate')
+                <span class="absolute top-2 right-2 w-1.5 h-1.5">
+                    <span class="stage-ping absolute inset-0 rounded-full {{ $card['dot'] }} opacity-60"></span>
+                    <span class="relative block w-1.5 h-1.5 rounded-full {{ $card['dot'] }}"></span>
+                </span>
+                @endif
+                <span class="w-2 h-2 rounded-full {{ $card['dot'] }} flex-shrink-0"></span>
+                <div class="min-w-0">
+                    <div class="text-[24px] font-bold tabular-nums text-slate-900 dark:text-white leading-none
+                                {{ ($card['count'] > 0 && $card['color'] === 'orange') ? 'text-orange-600 dark:text-orange-400' : '' }}
+                                {{ ($card['count'] > 0 && $card['color'] === 'rose') ? 'text-rose-600 dark:text-rose-400' : '' }}">
+                        {{ number_format($card['count']) }}
+                    </div>
+                    <div class="text-[10px] uppercase tracking-wider text-slate-500 mt-0.5 truncate">{{ $card['label'] }}</div>
+                </div>
+            </div>
+            @endforeach
         </div>
     </div>
-    @endforeach
 </div>
 
 
@@ -368,9 +359,9 @@
 @endphp
 
 <div class="px-5 pt-4">
-    <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none">
+    <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-4 shadow-sm dark:shadow-none">
 
-        <div class="flex items-center justify-between mb-5">
+        <div class="flex items-center justify-between mb-4">
             <div class="flex items-center gap-2">
                 <span class="w-1 h-4 bg-orange-400 rounded-full shadow-[0_0_8px_#fb923c]"></span>
                 <h3 class="text-[13px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Scheduling Workflow</h3>
@@ -396,37 +387,34 @@
                         transition-all duration-500">
 
                 {{-- Circle + Ping --}}
-                <div class="relative mb-3">
+                <div class="relative mb-2">
                     @if($stage['active'])
                     <span class="stage-ping absolute inset-0 rounded-full ring-1 {{ $stage['palette']['ring'] }}"></span>
                     @endif
-                    <div class="relative w-11 h-11 rounded-full flex items-center justify-center
+                    <div class="relative w-9 h-9 rounded-full flex items-center justify-center
                                 ring-1 {{ $stage['active'] ? $stage['palette']['ring'] : 'ring-slate-200 dark:ring-white/10' }}
                                 {{ $stage['active'] ? $stage['palette']['bg'] : 'bg-slate-100 dark:bg-white/[0.03]' }}">
                         @if($stage['done'] && $stage['count'] > 0)
-                        <svg class="w-5 h-5 {{ $stage['palette']['label'] }}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg class="w-4 h-4 {{ $stage['palette']['label'] }}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
                         </svg>
                         @else
-                        <span class="text-sm font-bold {{ $stage['active'] ? $stage['palette']['label'] : 'text-slate-400 dark:text-slate-600' }}">
+                        <span class="text-xs font-bold {{ $stage['active'] ? $stage['palette']['label'] : 'text-slate-400 dark:text-slate-600' }}">
                             {{ $stage['step'] }}
                         </span>
                         @endif
                     </div>
                 </div>
-
-                {{-- Label + count --}}
-                <p class="text-[12px] font-bold uppercase tracking-wider {{ $stage['active'] ? $stage['palette']['label'] : 'text-slate-400 dark:text-slate-600' }} mb-1.5 text-center">
+                <p class="text-[11px] font-bold uppercase tracking-wider {{ $stage['active'] ? $stage['palette']['label'] : 'text-slate-400 dark:text-slate-600' }} mb-1 text-center">
                     {{ $stage['title'] }}
                 </p>
-                <p class="text-[10px] text-slate-400 text-center leading-snug px-1 mb-2.5">{{ $stage['sub'] }}</p>
-
+                <p class="text-[10px] text-slate-400 text-center leading-snug px-1 mb-2">{{ $stage['sub'] }}</p>
                 @if($stage['count'] > 0)
-                <span class="px-2.5 py-0.5 rounded-full text-[11px] font-bold {{ $stage['palette']['badge'] }}">
+                <span class="px-2 py-0.5 rounded-full text-[11px] font-bold {{ $stage['palette']['badge'] }}">
                     {{ number_format($stage['count']) }}
                 </span>
                 @else
-                <span class="text-[11px] text-slate-400 dark:text-slate-600">—</span>
+                <span class="text-[10px] text-slate-400 dark:text-slate-600">—</span>
                 @endif
             </div>
 
@@ -715,14 +703,14 @@
         </div>
     </div>
 
-    {{-- ─── RIGHT COLUMN: Subject Distribution + Departments ─────────── --}}
+    {{-- ─── RIGHT COLUMN: Subject Overview + Dept Breakdown ────────────── --}}
     <div class="col-span-12 lg:col-span-3 flex flex-col gap-4">
 
-        {{-- Subject Distribution ────────────────────────────────────── --}}
+        {{-- Subject Distribution (simplified) ──────────────────────────── --}}
         <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none">
-            <div class="flex items-center gap-2 mb-5">
+            <div class="flex items-center gap-2 mb-4">
                 <span class="w-1 h-4 bg-amber-400 rounded-full"></span>
-                <h3 class="text-[13px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Subject Distribution</h3>
+                <h3 class="text-[13px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Subject Overview</h3>
             </div>
 
             @php
@@ -731,52 +719,17 @@
                 $minPct   = $totalSub > 0 ? 100 - $majPct : 0;
             @endphp
 
-            {{-- Donut chart ───────────────────────────────────────────── --}}
-            <div class="flex justify-center mb-5">
-                <div class="relative w-32 h-32">
-                    <svg class="w-full h-full -rotate-90" viewBox="0 0 36 36">
-                        <circle stroke-width="3.5" stroke="currentColor"
-                                class="text-slate-200 dark:text-white/[0.06]"
-                                fill="none" r="15.9155" cx="18" cy="18"
-                                stroke-dasharray="100,100"/>
-                        <circle stroke-width="3.5" fill="none" r="15.9155" cx="18" cy="18"
-                                stroke="url(#majGrad)"
-                                stroke-linecap="round"
-                                stroke-dasharray="{{ $majPct }},100"/>
-                        <circle stroke-width="3.5" fill="none" r="15.9155" cx="18" cy="18"
-                                stroke="url(#minGrad)"
-                                stroke-linecap="round"
-                                stroke-dasharray="{{ $minPct }},100"
-                                stroke-dashoffset="{{ -$majPct }}"/>
-                        <defs>
-                            <linearGradient id="majGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                <stop offset="0%" stop-color="#f43f5e"/>
-                                <stop offset="100%" stop-color="#ec4899"/>
-                            </linearGradient>
-                            <linearGradient id="minGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-                                <stop offset="0%" stop-color="#fb923c"/>
-                                <stop offset="100%" stop-color="#f59e0b"/>
-                            </linearGradient>
-                        </defs>
-                    </svg>
-                    <div class="absolute inset-0 flex flex-col items-center justify-center">
-                        <span class="text-[26px] font-bold text-slate-900 dark:text-white tabular-nums leading-none">{{ number_format($totalSub) }}</span>
-                        <span class="text-[10px] text-slate-500 uppercase tracking-widest mt-0.5">Total</span>
-                    </div>
-                </div>
-            </div>
-
             {{-- Major / Minor tiles ───────────────────────────────────── --}}
-            <div class="grid grid-cols-2 gap-2.5 mb-5">
+            <div class="grid grid-cols-2 gap-2.5 mb-4">
                 <div class="bg-rose-50 dark:bg-rose-500/[0.05] border border-rose-200 dark:border-rose-500/15 rounded-xl p-3 text-center">
-                    <div class="text-[28px] font-bold text-rose-600 dark:text-rose-400 tabular-nums leading-none mb-1">
+                    <div class="text-[26px] font-bold text-rose-600 dark:text-rose-400 tabular-nums leading-none mb-1">
                         {{ number_format($subjectDistribution['total_major'] ?? 0) }}
                     </div>
                     <div class="text-[10px] text-slate-500 uppercase tracking-widest">Major</div>
                     <div class="text-[11px] font-bold text-rose-500 mt-0.5">{{ $majPct }}%</div>
                 </div>
                 <div class="bg-orange-50 dark:bg-orange-500/[0.05] border border-orange-200 dark:border-orange-500/15 rounded-xl p-3 text-center">
-                    <div class="text-[28px] font-bold text-orange-600 dark:text-orange-400 tabular-nums leading-none mb-1">
+                    <div class="text-[26px] font-bold text-orange-600 dark:text-orange-400 tabular-nums leading-none mb-1">
                         {{ number_format($subjectDistribution['total_minor'] ?? 0) }}
                     </div>
                     <div class="text-[10px] text-slate-500 uppercase tracking-widest">Minor</div>
@@ -784,62 +737,16 @@
                 </div>
             </div>
 
-            {{-- Per-dept stacked bars ─────────────────────────────────── --}}
-            <div>
-                <p class="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-3">By Department</p>
-                <div class="dash-scroll overflow-y-auto max-h-44 space-y-3.5">
-                    @foreach($subjectDistribution['by_department'] ?? [] as $dept => $data)
-                    @php
-                        $dt = $data['total'] > 0 ? $data['total'] : 1;
-                        $dMaj = round(($data['major'] / $dt) * 100);
-                    @endphp
-                    <div>
-                        <div class="flex justify-between mb-1.5">
-                            <span class="text-[12px] font-semibold text-slate-700 dark:text-slate-300">{{ $dept }}</span>
-                            <span class="text-[11px] text-slate-500 tabular-nums">{{ $data['major'] }}M / {{ $data['minor'] }}m</span>
-                        </div>
-                        <div class="flex h-1.5 rounded-full overflow-hidden">
-                            <div class="h-full bg-rose-500 transition-all duration-700 rounded-l-full"
-                                 style="width: {{ $dMaj }}%"></div>
-                            <div class="h-full bg-orange-400 transition-all duration-700 rounded-r-full"
-                                 style="width: {{ 100 - $dMaj }}%"></div>
-                        </div>
-                    </div>
-                    @endforeach
-                </div>
-            </div>
-        </div>
-
-        {{-- Department Cards ─────────────────────────────────────────── --}}
-        <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none">
-            <div class="flex items-center gap-2 mb-4">
-                <span class="w-1 h-4 bg-violet-400 rounded-full shadow-[0_0_8px_#a78bfa]"></span>
-                <h3 class="text-[13px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Departments</h3>
-            </div>
-            @php
-                $deptMeta = [
-                    'CCS'  => ['icon'=>'💻','bg'=>'bg-blue-50 dark:bg-blue-500/5','border'=>'border-blue-200 dark:border-blue-500/20','text'=>'text-blue-600 dark:text-blue-400','hover'=>'hover:border-blue-400 dark:hover:border-blue-500/40'],
-                    'CTE'  => ['icon'=>'📚','bg'=>'bg-violet-50 dark:bg-violet-500/5','border'=>'border-violet-200 dark:border-violet-500/20','text'=>'text-violet-600 dark:text-violet-400','hover'=>'hover:border-violet-400 dark:hover:border-violet-500/40'],
-                    'COC'  => ['icon'=>'⚖️','bg'=>'bg-amber-50 dark:bg-amber-500/5','border'=>'border-amber-200 dark:border-amber-500/20','text'=>'text-amber-600 dark:text-amber-400','hover'=>'hover:border-amber-400 dark:hover:border-amber-500/40'],
-                    'SHTM' => ['icon'=>'🏨','bg'=>'bg-emerald-50 dark:bg-emerald-500/5','border'=>'border-emerald-200 dark:border-emerald-500/20','text'=>'text-emerald-600 dark:text-emerald-400','hover'=>'hover:border-emerald-400 dark:hover:border-emerald-500/40'],
-                ];
-            @endphp
-            <div class="grid grid-cols-2 gap-2">
-                @foreach($globalStats['departments'] ?? [] as $dept)
-                @php $dm = $deptMeta[$dept] ?? ['icon'=>'🏫','bg'=>'bg-slate-50 dark:bg-white/[0.03]','border'=>'border-slate-200 dark:border-white/10','text'=>'text-slate-600 dark:text-slate-400','hover'=>'']; @endphp
-                <div class="card-lift {{ $dm['bg'] }} border {{ $dm['border'] }} {{ $dm['hover'] }}
-                            rounded-xl p-3 text-center cursor-default transition-colors">
-                    <div class="text-xl mb-1">{{ $dm['icon'] }}</div>
-                    <p class="text-[14px] font-bold {{ $dm['text'] }}">{{ $dept }}</p>
-                    <p class="text-[10px] text-slate-400 uppercase tracking-widest mt-0.5">Active</p>
-                </div>
-                @endforeach
+            {{-- Stacked ratio bar ────────────────────────────────────── --}}
+            <div class="flex h-2 rounded-full overflow-hidden mb-3">
+                <div class="h-full bg-rose-500 transition-all duration-700" style="width:{{ $majPct }}%"></div>
+                <div class="h-full bg-orange-400 transition-all duration-700" style="width:{{ $minPct }}%"></div>
             </div>
 
-            {{-- Completion strip ──────────────────────────────────────── --}}
-            <div class="mt-4 pt-4 border-t border-slate-100 dark:border-white/[0.05]">
+            {{-- Completion strip ─────────────────────────────────────── --}}
+            <div class="pt-3 border-t border-slate-100 dark:border-white/[0.05]">
                 <div class="flex items-center justify-between mb-2">
-                    <span class="text-[11px] text-slate-500 uppercase tracking-widest">Completion</span>
+                    <span class="text-[11px] text-slate-500 uppercase tracking-widest">Overall Completion</span>
                     <span class="text-[12px] font-bold text-emerald-500 tabular-nums">{{ $globalStats['completion_pct'] }}%</span>
                 </div>
                 <div class="w-full h-1.5 bg-slate-100 dark:bg-white/[0.05] rounded-full overflow-hidden">
@@ -852,86 +759,48 @@
                 </div>
             </div>
         </div>
+
+        {{-- Per-Dept Breakdown ──────────────────────────────────────────── --}}
+        <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none flex-1">
+            <div class="flex items-center gap-2 mb-4">
+                <span class="w-1 h-4 bg-violet-400 rounded-full shadow-[0_0_8px_#a78bfa]"></span>
+                <h3 class="text-[13px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">By Department</h3>
+            </div>
+            <div class="space-y-4">
+                @foreach($subjectDistribution['by_department'] ?? [] as $dept => $data)
+                @php
+                    $dt   = max(1, $data['total']);
+                    $dMaj = round(($data['major'] / $dt) * 100);
+                    $dMin = 100 - $dMaj;
+                @endphp
+                <div>
+                    <div class="flex justify-between mb-1.5">
+                        <span class="text-[12px] font-semibold text-slate-700 dark:text-slate-300">{{ $dept }}</span>
+                        <span class="text-[11px] text-slate-500 tabular-nums">
+                            <span class="text-rose-500">{{ $data['major'] }}M</span> / <span class="text-orange-400">{{ $data['minor'] }}m</span>
+                        </span>
+                    </div>
+                    <div class="flex h-1.5 rounded-full overflow-hidden">
+                        <div class="h-full bg-rose-500 transition-all duration-700 rounded-l-full" style="width:{{ $dMaj }}%"></div>
+                        <div class="h-full bg-orange-400 transition-all duration-700 rounded-r-full" style="width:{{ $dMin }}%"></div>
+                    </div>
+                </div>
+                @endforeach
+            </div>
+
+            {{-- Legend ───────────────────────────────────────────────── --}}
+            <div class="mt-4 pt-3 border-t border-slate-100 dark:border-white/[0.05] flex items-center gap-4">
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
+                    <span class="text-[11px] text-slate-500">Major</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-orange-400"></span>
+                    <span class="text-[11px] text-slate-500">Minor</span>
+                </div>
+            </div>
+        </div>
     </div>
 
 </div>{{-- /main grid --}}
-
-
-{{-- ════════════════════════════════════════════════════════════════════
-     BOTTOM SECTION — Recent Activity Feed (full width)
-════════════════════════════════════════════════════════════════════════ --}}
-<div class="px-5 pb-5">
-    <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none">
-
-        <div class="flex items-center justify-between mb-5">
-            <div class="flex items-center gap-2">
-                <span class="w-1 h-4 bg-cyan-400 rounded-full shadow-[0_0_8px_#22d3ee]"></span>
-                <h3 class="text-[13px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Recent Activity</h3>
-            </div>
-            <span class="flex items-center gap-1.5 text-[12px] text-emerald-500">
-                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                Live feed
-            </span>
-        </div>
-
-        {{-- Activity items — built from curriculumValidation + scheduleReview as proxy ─ --}}
-        <div class="panel-scroll overflow-y-auto max-h-52 pr-1">
-
-            {{-- Schedule review items as activity ───────────────────── --}}
-            @forelse($scheduleReview as $i => $s)
-            @php
-                $actColor = $s['faculty'] === 'Unassigned'
-                    ? 'text-rose-600 dark:text-rose-400 bg-rose-100 dark:bg-rose-500/10 border-rose-200 dark:border-rose-500/20'
-                    : 'text-orange-600 dark:text-orange-400 bg-orange-100 dark:bg-orange-500/10 border-orange-200 dark:border-orange-500/20';
-                $actModule = strtoupper(substr($s['department'] ?? 'SCH', 0, 3));
-            @endphp
-            <div class="flex gap-2.5 group fade-row" style="animation-delay: {{ $i * 40 }}ms">
-                <div class="flex flex-col items-center gap-1 flex-shrink-0">
-                    <div class="w-7 h-7 rounded-lg {{ $actColor }} border flex items-center justify-center text-[11px] font-bold">
-                        {{ $actModule }}
-                    </div>
-                    @if(!$loop->last)
-                    <div class="flex-1 w-px bg-slate-100 dark:bg-white/[0.04] min-h-[16px]"></div>
-                    @endif
-                </div>
-                <div class="pb-3.5 min-w-0 flex-1">
-                    <p class="text-[13px] text-slate-700 dark:text-slate-300 leading-snug line-clamp-2">
-                        Schedule <strong>{{ $s['subject'] }}</strong> flagged as
-                        <span class="font-semibold">{{ $s['flag'] }}</span>
-                        — {{ $s['room'] }} · {{ $s['day'] }} · {{ $s['time'] }}
-                    </p>
-                    <p class="text-[11px] text-slate-400 mt-1">{{ $s['department'] }} · {{ ucfirst($s['status']) }}</p>
-                </div>
-            </div>
-            @empty
-            {{-- Curriculum issues as fallback activity ───────────────── --}}
-            @forelse($curriculumValidation as $i => $issue)
-            <div class="flex gap-2.5 group fade-row" style="animation-delay: {{ $i * 40 }}ms">
-                <div class="flex flex-col items-center gap-1 flex-shrink-0">
-                    <div class="w-7 h-7 rounded-lg
-                                text-rose-600 dark:text-rose-400 bg-rose-100 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20
-                                flex items-center justify-center text-[11px] font-bold">
-                        {{ strtoupper(substr($issue['department'] ?? 'CUR', 0, 3)) }}
-                    </div>
-                    @if(!$loop->last)
-                    <div class="flex-1 w-px bg-slate-100 dark:bg-white/[0.04] min-h-[16px]"></div>
-                    @endif
-                </div>
-                <div class="pb-3.5 min-w-0 flex-1">
-                    <p class="text-[13px] text-slate-700 dark:text-slate-300 leading-snug">
-                        <strong>{{ $issue['subject_code'] ?? '—' }}</strong> — {{ $issue['issue'] }}
-                    </p>
-                    <p class="text-[11px] text-slate-400 mt-1">{{ $issue['department'] ?? '—' }} · Yr. {{ $issue['year_level'] ?? '?' }} · {{ $issue['type'] ?? '—' }}</p>
-                </div>
-            </div>
-            @empty
-            <div class="flex flex-col items-center justify-center py-8 text-slate-400">
-                <p class="text-[13px]">No recent activity to display</p>
-            </div>
-            @endforelse
-            @endforelse
-        </div>
-    </div>
-</div>
-
-</div>
+</div>{{-- /root wrapper --}}

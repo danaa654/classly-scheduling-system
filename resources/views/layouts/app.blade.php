@@ -296,8 +296,8 @@
         /* ─── Theme Toggle Pill ──────────────────────────────────── */
         .theme-pill {
             position: relative;
-            width: 130px;
-            height: 46px;
+            width: 80px;
+            height: 30px;
             border-radius: 100px;
             overflow: hidden;
             cursor: pointer;
@@ -335,8 +335,8 @@
             position: absolute;
             top: 50%;
             transform: translateY(-50%);
-            width: 38px;
-            height: 38px;
+            width: 22px;
+            height: 22px;
             border-radius: 50%;
             overflow: hidden;
             z-index: 3;
@@ -755,7 +755,7 @@
 
                     {{-- Sliding knob --}}
                     <div class="theme-pill-knob"
-                         :style="darkMode ? 'left:4px' : 'left:88px'">
+                         :style="darkMode ? 'left:4px' : 'left:54px'">
                         <img src="{{ asset('images/toggle/circle%20dark.jpg') }}"  alt="Dark"
                              :style="darkMode ? 'opacity:1' : 'opacity:0'">
                         <img src="{{ asset('images/toggle/circle%20light.jpg') }}" alt="Light"

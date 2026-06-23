@@ -15,12 +15,13 @@ use Illuminate\Support\Facades\DB;
 
 class RegistrarDashboard extends Component
 {
-    public $schedulingStats     = [];
-    public $conflicts           = [];
-    public $roomUtilization     = [];
-    public $facultyLoad         = [];
-    public $recentActivities    = [];
-    public $unscheduledSubjects = [];
+    public $schedulingStats      = [];
+    public $conflicts            = [];
+    public $roomUtilization      = [];
+    public $facultyLoad          = [];
+    public $recentActivities     = [];
+    public $unscheduledSubjects  = [];
+    public $pendingFaculty       = [];
 
     public function mount(): void
     {
@@ -30,6 +31,7 @@ class RegistrarDashboard extends Component
         $this->loadFacultyLoad();
         $this->loadRecentActivities();
         $this->loadUnscheduledSubjects();
+        $this->loadPendingFaculty();
     }
 
     private function loadSchedulingStats(): void
@@ -163,6 +165,24 @@ class RegistrarDashboard extends Component
             ->limit(12)
             ->get()
             ->toArray();
+    }
+
+    private function loadPendingFaculty(): void
+    {
+        $this->pendingFaculty = Faculty::with('requestedBy')
+            ->where('status', 'pending')
+            ->orderByDesc('created_at')
+            ->limit(10)
+            ->get()
+            ->map(fn ($f) => [
+                'id'           => $f->id,
+                'name'         => $f->full_name,
+                'employee_id'  => $f->employee_id,
+                'department'   => $f->displayDepartment(),
+                'scope'        => $f->scopeLabel(),
+                'requested_by' => $f->requestedBy?->name ?? '—',
+                'submitted_at' => $f->created_at?->diffForHumans() ?? '—',
+            ])->toArray();
     }
 
     public function resolveConflict(int $scheduleId): void

@@ -2,11 +2,8 @@
 
 namespace App\Models;
 
-// use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Concerns\HasTeams;
 use Database\Factories\UserFactory;
-use Illuminate\Database\Eloquent\Attributes\Fillable;
-use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -17,43 +14,45 @@ use Laravel\Fortify\TwoFactorAuthenticatable;
  * Enhanced User model to support Role-Based Access Control (RBAC).
  * 'role' tracks user permissions (registrar, dean, oic).
  * 'department' restricts Deans/OICs to specific academic data.
- *
- * FIXED: Added 'can_finalize_schedule' to Fillable so that
- *        $user->update(['can_finalize_schedule' => true/false])
- *        actually persists to the database.
  */
-#[Fillable([
-    'name',
-    'email',
-    'password',
-    'current_team_id',
-    'role',
-    'department',
-    'can_finalize_schedule',   // ← CRITICAL FIX: was missing; caused Grant/Revoke to silently fail
-])]
-#[Hidden([
-    'password',
-    'two_factor_secret',
-    'two_factor_recovery_codes',
-    'remember_token',
-])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
     use HasFactory, HasTeams, Notifiable, TwoFactorAuthenticatable;
 
     /**
+     * The attributes that are mass assignable.
+     */
+    protected $fillable = [
+        'name',
+        'email',
+        'password',
+        'current_team_id',
+        'role',
+        'department',
+        'can_finalize_schedule',
+    ];
+
+    /**
+     * The attributes that should be hidden for serialization.
+     */
+    protected $hidden = [
+        'password',
+        'two_factor_secret',
+        'two_factor_recovery_codes',
+        'remember_token',
+    ];
+
+    /**
      * Get the attributes that should be cast.
-     *
-     * @return array<string, string>
      */
     protected function casts(): array
     {
         return [
-            'email_verified_at'      => 'datetime',
-            'password'               => 'hashed',
-            'two_factor_confirmed_at'=> 'datetime',
-            'can_finalize_schedule'  => 'boolean',   // cast so ?? false works reliably
+            'email_verified_at'       => 'datetime',
+            'password'                => 'hashed',
+            'two_factor_confirmed_at' => 'datetime',
+            'can_finalize_schedule'   => 'boolean',
         ];
     }
 
@@ -65,6 +64,9 @@ class User extends Authenticatable
         return $this->role === $role;
     }
 
+    /**
+     * Check if the user is an admin.
+     */
     public function isAdmin(): bool
     {
         return $this->role === 'admin' || $this->is_admin === true;

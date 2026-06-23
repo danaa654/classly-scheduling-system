@@ -15,12 +15,13 @@ use Illuminate\Support\Facades\DB;
 class DeanDashboard extends Component
 {
     public $department;
-    public $academicOverview  = [];
-    public $approvalQueue     = [];
-    public $curriculumCoverage = [];
-    public $facultySummary    = [];
-    public $escalatedConflicts = [];
-    public $requestTracking   = [];
+    public $academicOverview      = [];
+    public $approvalQueue         = [];
+    public $curriculumCoverage    = [];
+    public $facultySummary        = [];
+    public $escalatedConflicts    = [];
+    public $requestTracking       = [];
+    public $facultyRequestHistory = [];
 
     public function mount(): void
     {
@@ -32,6 +33,7 @@ class DeanDashboard extends Component
         $this->loadFacultySummary();
         $this->loadEscalatedConflicts();
         $this->loadRequestTracking();
+        $this->loadFacultyRequestHistory();
     }
 
     private function loadAcademicOverview(): void
@@ -179,6 +181,45 @@ class DeanDashboard extends Component
             ])->toArray();
     }
 
+    private function loadFacultyRequestHistory(): void
+    {
+        // Fetch approved/rejected/pending faculty requested by the dean's department,
+        // joined with the activity log to find who acted on each request.
+        $this->facultyRequestHistory = Faculty::where('department', $this->department)
+            ->whereIn('status', ['approved', 'rejected', 'pending'])
+            ->with('requestedBy')
+            ->latest('updated_at')
+            ->limit(10)
+            ->get()
+            ->map(function ($f) {
+                // Try to find who acted on this request from the activity log
+                $actedBy = null;
+                if (in_array($f->status, ['approved', 'rejected'])) {
+                    $action   = $f->status === 'approved' ? 'approved' : 'rejected';
+                    $activity = DB::table('activities')
+                        ->join('users', 'activities.user_id', '=', 'users.id')
+                        ->where('activities.module', 'Faculty')
+                        ->where('activities.action', $action)
+                        ->where('activities.description', 'like', "%{$f->full_name}%")
+                        ->orderByDesc('activities.created_at')
+                        ->select('users.name')
+                        ->first();
+                    $actedBy = optional($activity)->name;
+                }
+
+                return [
+                    'id'               => $f->id,
+                    'name'             => $f->full_name,
+                    'employment_type'  => $f->employment_type ?? 'Full-time',
+                    'status'           => $f->status,
+                    'rejection_reason' => $f->rejection_reason,
+                    'submitted_by'     => optional($f->requestedBy)->name ?? 'System',
+                    'acted_by'         => $actedBy,
+                    'time'             => $f->updated_at->diffForHumans(),
+                ];
+            })->toArray();
+    }
+
     public function approveItem(int $id, string $module): void
     {
         if ($module === 'faculty') {
@@ -197,6 +238,7 @@ class DeanDashboard extends Component
 
         $this->loadApprovalQueue();
         $this->loadFacultySummary();
+        $this->loadFacultyRequestHistory();
     }
 
     public function rejectItem(int $id, string $module): void
@@ -216,6 +258,7 @@ class DeanDashboard extends Component
         }
 
         $this->loadApprovalQueue();
+        $this->loadFacultyRequestHistory();
     }
 
     public function render()

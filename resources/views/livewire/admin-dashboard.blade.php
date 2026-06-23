@@ -69,8 +69,8 @@
 
 <div
     x-data="{
-        clock: '{{ date('H:i:s') }}',
-        init() { setInterval(() => { this.clock = new Date().toLocaleTimeString('en-GB'); }, 1000); }
+        clock: '{{ date('h:i:s A') }}',
+        init() { setInterval(() => { this.clock = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }); }, 1000); }
     }"
     class="min-h-screen w-full font-mono antialiased overflow-x-hidden transition-colors duration-500
            bg-slate-100 dark:bg-[#080d1a]
@@ -95,7 +95,7 @@
             <div class="flex items-center gap-2 mb-1">
                 <span class="inline-block w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399] animate-pulse"></span>
                 <span class="text-[11px] tracking-[0.25em] text-slate-500 dark:text-slate-500 uppercase">
-                    System Administrator — Root Access
+                    System Administrator — Admin
                 </span>
             </div>
             <h1 class="text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
@@ -119,7 +119,7 @@
             ['label'=>'Users',     'value'=>$stats['total_users'],     'color'=>'blue',    'icon'=>'<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>'],
             ['label'=>'Faculty',   'value'=>$stats['total_faculty'],   'color'=>'violet',  'icon'=>'<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l9-5-9-5-9 5 9 5z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l6.16-3.422a12.083 12.083 0 01.665 6.479A11.952 11.952 0 0012 20.055a11.952 11.952 0 00-6.824-2.998 12.078 12.078 0 01.665-6.479L12 14z"/></svg>'],
             ['label'=>'Rooms',     'value'=>$stats['total_rooms'],     'color'=>'cyan',    'icon'=>'<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>'],
-            ['label'=>'Schedules', 'value'=>$stats['total_schedules'], 'color'=>'emerald', 'icon'=>'<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>'],
+            ['label'=>'Total Schedules', 'value'=>$stats['total_subjects'] ?? $stats['total_schedules'], 'color'=>'emerald', 'icon'=>'<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>'],
         ];
         $vColors = [
             'blue'    => 'border-blue-200 dark:border-blue-500/30 text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-500/5',
@@ -131,10 +131,10 @@
 
         <div class="col-span-12 lg:col-span-7 grid grid-cols-4 gap-3">
         @foreach($vitals as $v)
-        <div class="card-lift border {{ $vColors[$v['color']] }} rounded-2xl p-4 flex flex-col gap-2.5 cursor-default">
-            <span class="{{ $vColors[$v['color']] }} w-9 h-9 rounded-lg flex items-center justify-center">{!! $v['icon'] !!}</span>
-            <span class="text-[38px] font-bold text-slate-900 dark:text-white tabular-nums leading-none">{{ number_format($v['value']) }}</span>
-            <span class="text-[13px] uppercase tracking-widest text-slate-500">{{ $v['label'] }}</span>
+        <div class="card-lift border {{ $vColors[$v['color']] }} rounded-2xl p-3.5 flex flex-col gap-2 cursor-default">
+            <span class="{{ $vColors[$v['color']] }} w-7 h-7 rounded-lg flex items-center justify-center">{!! $v['icon'] !!}</span>
+            <span class="text-[28px] font-bold text-slate-900 dark:text-white tabular-nums leading-none">{{ number_format($v['value']) }}</span>
+            <span class="text-[11px] uppercase tracking-widest text-slate-500">{{ $v['label'] }}</span>
         </div>
         @endforeach
     </div>
@@ -210,31 +210,25 @@
     ];
 @endphp
 
-<div class="grid grid-cols-6 gap-3 px-5 pt-4">
-    @foreach($wfCards as $card)
-    <div class="card-lift {{ $card['glow'] }}
-                bg-white dark:bg-white/[0.03]
-                border {{ $card['border'] }}
-                rounded-2xl p-5 flex flex-col gap-3 cursor-default relative overflow-hidden">
-
-        {{-- Active pulse indicator --}}
-        @if($card['count'] > 0 && $card['color'] !== 'slate')
-        <span class="absolute top-3 right-3 w-2 h-2">
-            <span class="stage-ping absolute inset-0 rounded-full {{ $card['dot'] }} opacity-75"></span>
-            <span class="relative block w-2 h-2 rounded-full {{ $card['dot'] }}"></span>
-        </span>
-        @endif
-
-        <span class="w-2.5 h-2.5 rounded-full {{ $card['dot'] }} flex-shrink-0"></span>
-        <span class="text-[40px] font-bold tabular-nums text-slate-900 dark:text-white leading-none">
-            {{ number_format($card['count']) }}
-        </span>
-        <div>
-            <p class="text-[14px] font-semibold text-slate-700 dark:text-slate-300 uppercase tracking-wider">{{ $card['label'] }}</p>
-            <p class="text-[12px] text-slate-400 mt-1 leading-snug">{{ $card['desc'] }}</p>
+<div class="px-5 pt-4">
+    <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl px-4 py-3 shadow-sm dark:shadow-none">
+        <div class="grid grid-cols-3 lg:grid-cols-6 gap-3">
+            @foreach($wfCards as $card)
+            <div class="card-lift flex flex-col gap-1.5 p-3 rounded-xl border {{ $card['border'] }} {{ $card['glow'] }} transition-all duration-500 cursor-default">
+                <div class="flex items-center gap-1.5">
+                    <span class="w-1.5 h-1.5 rounded-full flex-shrink-0 {{ $card['dot'] }}"></span>
+                    <span class="text-[10px] font-semibold uppercase tracking-[0.15em] text-slate-500 dark:text-slate-400 truncate">
+                        {{ $card['label'] }}
+                    </span>
+                </div>
+                <span class="text-[26px] font-bold tabular-nums text-slate-900 dark:text-white leading-none">
+                    {{ number_format($card['count']) }}
+                </span>
+                <span class="text-[10px] text-slate-400 leading-snug">{{ $card['desc'] }}</span>
+            </div>
+            @endforeach
         </div>
     </div>
-    @endforeach
 </div>
 
 
@@ -311,15 +305,19 @@
 @endphp
 
 <div class="px-5 pt-4">
-    <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none">
+    <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-4 shadow-sm dark:shadow-none">
 
-        <div class="flex items-center justify-between mb-5">
+        <div class="flex items-center justify-between mb-4">
             <div class="flex items-center gap-2">
                 <span class="w-1 h-4 bg-blue-400 rounded-full shadow-[0_0_8px_#60a5fa]"></span>
                 <h3 class="text-[13px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Scheduling Workflow</h3>
             </div>
             <div class="flex items-center gap-4">
-                @php $rate = $schedulingAnalytics['completion_rate'] ?? 0; @endphp
+                @php
+                    $totalSubjects = $stats['total_subjects'] ?? $stats['total_schedules'];
+                    $finalizedCount = $wf['finalized'] ?? $schedulingAnalytics['finalized'] ?? 0;
+                    $rate = $totalSubjects > 0 ? round(($finalizedCount / $totalSubjects) * 100, 1) : 0;
+                @endphp
                 <span class="text-[12px] text-slate-500 uppercase tracking-widest">
                     Completion: <span class="text-emerald-500 font-bold">{{ $rate }}%</span>
                 </span>
@@ -340,19 +338,19 @@
                         transition-all duration-500">
 
                 {{-- Circle + Ping --}}
-                <div class="relative mb-3">
+                <div class="relative mb-2">
                     @if($stage['active'])
                     <span class="stage-ping absolute inset-0 rounded-full ring-1 {{ $stage['palette']['ring'] }}"></span>
                     @endif
-                    <div class="relative w-12 h-12 rounded-full flex items-center justify-center
+                    <div class="relative w-9 h-9 rounded-full flex items-center justify-center
                                 ring-1 {{ $stage['active'] ? $stage['palette']['ring'] : 'ring-slate-200 dark:ring-white/10' }}
                                 {{ $stage['active'] ? $stage['palette']['bg'] : 'bg-slate-100 dark:bg-white/[0.03]' }}">
                         @if($stage['done'] && $stage['count'] > 0)
-                        <svg class="w-5 h-5 {{ $stage['palette']['label'] }}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <svg class="w-4 h-4 {{ $stage['palette']['label'] }}" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
                         </svg>
                         @else
-                        <span class="text-sm font-bold {{ $stage['active'] ? $stage['palette']['label'] : 'text-slate-400 dark:text-slate-600' }}">
+                        <span class="text-xs font-bold {{ $stage['active'] ? $stage['palette']['label'] : 'text-slate-400 dark:text-slate-600' }}">
                             {{ $stage['step'] }}
                         </span>
                         @endif
@@ -360,17 +358,17 @@
                 </div>
 
                 {{-- Label + count --}}
-                <p class="text-[13px] font-bold uppercase tracking-wider {{ $stage['active'] ? $stage['palette']['label'] : 'text-slate-400 dark:text-slate-600' }} mb-1.5 text-center">
+                <p class="text-[11px] font-bold uppercase tracking-wider {{ $stage['active'] ? $stage['palette']['label'] : 'text-slate-400 dark:text-slate-600' }} mb-1 text-center">
                     {{ $stage['title'] }}
                 </p>
-                <p class="text-[11px] text-slate-400 text-center leading-snug px-2 mb-2.5">{{ $stage['sub'] }}</p>
+                <p class="text-[10px] text-slate-400 text-center leading-snug px-2 mb-2">{{ $stage['sub'] }}</p>
 
                 @if($stage['count'] > 0)
-                <span class="px-2.5 py-0.5 rounded-full text-[12px] font-bold {{ $stage['palette']['badge'] }}">
+                <span class="px-2 py-0.5 rounded-full text-[11px] font-bold {{ $stage['palette']['badge'] }}">
                     {{ number_format($stage['count']) }}
                 </span>
                 @else
-                <span class="text-[11px] text-slate-400 dark:text-slate-600">—</span>
+                <span class="text-[10px] text-slate-400 dark:text-slate-600">—</span>
                 @endif
             </div>
 
@@ -389,7 +387,7 @@
         <div class="mt-5 pt-4 border-t border-slate-100 dark:border-white/[0.05]">
             <div class="flex items-center justify-between mb-2.5">
                 <span class="text-[12px] text-slate-500 uppercase tracking-widest">Overall Progress</span>
-                <span class="text-[13px] font-bold text-emerald-500">{{ $schedulingAnalytics['finalized'] ?? 0 }} / {{ $schedulingAnalytics['total_scheduled'] ?? 0 }} finalized</span>
+                <span class="text-[13px] font-bold text-emerald-500">{{ $wf['finalized'] ?? $schedulingAnalytics['finalized'] ?? 0 }} / {{ $stats['total_subjects'] ?? $stats['total_schedules'] }} finalized</span>
             </div>
             <div class="w-full h-1.5 bg-slate-100 dark:bg-white/[0.05] rounded-full overflow-hidden">
                 @php $barWidth = max(0, min(100, $rate)); @endphp
@@ -408,7 +406,7 @@
 <div class="grid grid-cols-12 gap-4 p-5 pt-4">
 
     {{-- ─── LEFT COL: Department Progress ──────────── --}}
-    <div class="col-span-12 lg:col-span-4 flex flex-col gap-4">
+    <div class="col-span-12 lg:col-span-5 flex flex-col gap-4">
 
         {{-- Dept Progress Tracker --}}
         <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none">
@@ -460,40 +458,6 @@
             </div>
         </div>
 
-        {{-- System Status --}}
-        <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none">
-            <div class="flex items-center gap-2 mb-4">
-                <span class="w-1 h-4 bg-emerald-400 rounded-full shadow-[0_0_8px_#34d399]"></span>
-                <h3 class="text-[13px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">System Status</h3>
-            </div>
-            @php
-                $statusRows = [
-                    ['label'=>'AI Scheduler',    'status'=>$systemStatus['scheduler'],       'detail'=>$systemStatus['conflict_count'].' conflicts'],
-                    ['label'=>'Database',        'status'=>$systemStatus['db_tables'],       'detail'=>'Connected'],
-                    ['label'=>'Room Index',      'status'=>$systemStatus['rooms_available'], 'detail'=>$stats['total_rooms'].' rooms active'],
-                    ['label'=>'Faculty Roster',  'status'=>'healthy',                        'detail'=>$systemStatus['faculty_assigned'].' approved'],
-                    ['label'=>'Pending Faculty', 'status'=>$stats['pending_faculty']>0?'warning':'healthy', 'detail'=>$stats['pending_faculty'].' queued'],
-                    ['label'=>'Active Term',     'status'=>'healthy',                        'detail'=>$systemStatus['current_semester'] ?? '—'],
-                ];
-                $dot = [
-                    'healthy'  => 'bg-emerald-400 shadow-[0_0_6px_#34d399]',
-                    'warning'  => 'bg-yellow-400 shadow-[0_0_6px_#facc15]',
-                    'critical' => 'bg-rose-500 shadow-[0_0_6px_#f43f5e]',
-                ];
-            @endphp
-            <div class="space-y-3.5">
-                @foreach($statusRows as $row)
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-2.5">
-                        <span class="w-2 h-2 rounded-full flex-shrink-0 {{ $dot[$row['status']] ?? $dot['healthy'] }}"></span>
-                        <span class="text-[13px] text-slate-600 dark:text-slate-400">{{ $row['label'] }}</span>
-                    </div>
-                    <span class="text-[13px] font-bold text-slate-700 dark:text-slate-300 tabular-nums">{{ $row['detail'] }}</span>
-                </div>
-                @endforeach
-            </div>
-        </div>
-
         {{-- Pending Faculty Verifications --}}
         @if(count($pendingVerifications) > 0)
         <div class="bg-yellow-50 dark:bg-yellow-500/5 border border-yellow-200 dark:border-yellow-500/20 rounded-2xl p-5">
@@ -528,11 +492,63 @@
             </div>
         </div>
         @endif
+
+        {{-- Global Audit Log (moved here, into System Status's old slot) --}}
+        <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none flex-1 flex flex-col min-h-0">
+            <div class="flex items-center justify-between mb-1">
+                <div class="flex items-center gap-2">
+                    <span class="w-1 h-4 bg-blue-400 rounded-full shadow-[0_0_8px_#60a5fa]"></span>
+                    <h3 class="text-[13px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Global Audit Log</h3>
+                </div>
+                <span class="flex items-center gap-1.5 text-[11px] text-emerald-500">
+                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+                    Live
+                </span>
+            </div>
+            <div class="flex items-center justify-between mb-4">
+                <span class="text-[11px] text-slate-400">{{ count($recentActivities) }} entries</span>
+                <a href="{{ route('manage-users') }}"
+                   class="text-[11px] font-bold uppercase text-blue-600 dark:text-blue-400 hover:underline">
+                    Manage Users
+                </a>
+            </div>
+
+            @php
+                $auditColors = [
+                    'critical' => 'text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10',
+                    'warning'  => 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-500/10',
+                    'success'  => 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10',
+                    'info'     => 'text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-500/10',
+                ];
+            @endphp
+
+            <div class="panel-scroll overflow-y-auto flex-1 min-h-0 pr-1">
+                @forelse($recentActivities as $i => $a)
+                @php $ac = $auditColors[$a['severity'] ?? 'info']; @endphp
+                <div class="fade-row border-b border-slate-100 dark:border-white/[0.04] last:border-0 py-3"
+                     style="animation-delay: {{ $i * 30 }}ms">
+                    <div class="flex items-center justify-between gap-2 mb-1">
+                        <div class="flex items-center gap-2 min-w-0">
+                            <span class="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase flex-shrink-0 {{ $ac }}">{{ $a['action'] }}</span>
+                            <span class="text-[10px] font-bold uppercase text-slate-500 truncate">{{ $a['module'] }}</span>
+                        </div>
+                        <span class="text-[11px] text-slate-400 tabular-nums whitespace-nowrap flex-shrink-0">{{ $a['created_at'] }}</span>
+                    </div>
+                    <p class="text-[12px] text-slate-600 dark:text-slate-400 leading-snug line-clamp-2">{{ $a['description'] }}</p>
+                    <p class="text-[11px] text-slate-400 mt-1">{{ $a['user'] }}@if(!empty($a['role'])) · {{ $a['role'] }} @endif</p>
+                </div>
+                @empty
+                <div class="flex flex-col items-center justify-center py-8 text-slate-400">
+                    <p class="text-[13px]">No activity logs found</p>
+                </div>
+                @endforelse
+            </div>
+        </div>
     </div>
 
-    {{-- ─── CENTER COL: Approval Queue Table ────────── --}}
-    <div class="col-span-12 lg:col-span-5">
-        <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none h-full flex flex-col">
+    {{-- ─── CENTER COL: Approval Queue Table + System Status ────────── --}}
+    <div class="col-span-12 lg:col-span-5 flex flex-col gap-4">
+        <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none flex-1 flex flex-col min-h-0">
             <div class="flex items-center justify-between mb-4">
                 <div class="flex items-center gap-2">
                     <span class="w-1 h-4 bg-orange-400 rounded-full shadow-[0_0_8px_#fb923c]"></span>
@@ -546,7 +562,7 @@
                 <span class="text-[12px] text-slate-400 uppercase tracking-widest">Faculty-Assigned Schedules</span>
             </div>
 
-            <div class="flex-1 panel-scroll overflow-y-auto max-h-[420px] pr-1">
+            <div class="panel-scroll overflow-y-auto flex-1 min-h-0 pr-1">
                 @forelse($approvalQueue as $i => $q)
                 <div class="fade-row border-b border-slate-100 dark:border-white/[0.04] last:border-0 py-3.5"
                      style="animation-delay: {{ $i * 40 }}ms">
@@ -580,20 +596,54 @@
                     </div>
                 </div>
                 @empty
-                <div class="flex flex-col items-center justify-center h-48 text-slate-400">
-                    <svg class="w-10 h-10 mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div class="flex items-center gap-3 py-5 px-2 text-slate-400">
+                    <svg class="w-5 h-5 opacity-40 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
                     </svg>
-                    <p class="text-[13px]">No schedules pending approval</p>
-                    <p class="text-[11px] mt-1 text-slate-400">All caught up!</p>
+                    <div>
+                        <p class="text-[13px] text-slate-500">No schedules pending approval</p>
+                        <p class="text-[11px] text-slate-400 mt-0.5">Queue is clear — all caught up.</p>
+                    </div>
                 </div>
                 @endforelse
+            </div>
+        </div>
+
+        {{-- System Status (moved below Approval Queue) --}}
+        <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none">
+            <div class="flex items-center gap-2 mb-4">
+                <span class="w-1 h-4 bg-emerald-400 rounded-full shadow-[0_0_8px_#34d399]"></span>
+                <h3 class="text-[13px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">System Status</h3>
+            </div>
+            @php
+                $statusRows = [
+                    ['label'=>'AI Scheduler',    'status'=>$systemStatus['scheduler'],       'detail'=>$systemStatus['conflict_count'].' conflicts'],
+                    ['label'=>'Database',        'status'=>$systemStatus['db_tables'],       'detail'=>'Connected'],
+                    ['label'=>'Pending Faculty', 'status'=>$stats['pending_faculty']>0?'warning':'healthy', 'detail'=>$stats['pending_faculty'].' queued'],
+                    ['label'=>'Active Term',     'status'=>'healthy',                        'detail'=>$systemStatus['current_semester'] ?? '—'],
+                ];
+                $dot = [
+                    'healthy'  => 'bg-emerald-400 shadow-[0_0_6px_#34d399]',
+                    'warning'  => 'bg-yellow-400 shadow-[0_0_6px_#facc15]',
+                    'critical' => 'bg-rose-500 shadow-[0_0_6px_#f43f5e]',
+                ];
+            @endphp
+            <div class="space-y-3.5">
+                @foreach($statusRows as $row)
+                <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2.5">
+                        <span class="w-2 h-2 rounded-full flex-shrink-0 {{ $dot[$row['status']] ?? $dot['healthy'] }}"></span>
+                        <span class="text-[13px] text-slate-600 dark:text-slate-400">{{ $row['label'] }}</span>
+                    </div>
+                    <span class="text-[13px] font-bold text-slate-700 dark:text-slate-300 tabular-nums">{{ $row['detail'] }}</span>
+                </div>
+                @endforeach
             </div>
         </div>
     </div>
 
     {{-- ─── RIGHT COL: Activity Feed + Alerts ──────── --}}
-    <div class="col-span-12 lg:col-span-3 flex flex-col gap-4">
+    <div class="col-span-12 lg:col-span-2 flex flex-col gap-4">
 
         {{-- Critical Alerts --}}
         @if(count($conflictAlerts) > 0)
@@ -668,72 +718,5 @@
     </div>
 </div>
 
-
-{{-- ═══════════════════════════════════════════════════
-     AUDIT TABLE  –  Full-width institutional log
-═══════════════════════════════════════════════════════ --}}
-<div class="px-5 pb-5">
-    <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none">
-
-        <div class="flex items-center justify-between mb-5">
-            <div class="flex items-center gap-2">
-                <span class="w-1 h-4 bg-blue-400 rounded-full shadow-[0_0_8px_#60a5fa]"></span>
-                <h3 class="text-[13px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Global Audit Log</h3>
-            </div>
-            <div class="flex items-center gap-3">
-                <span class="flex items-center gap-1.5 text-[12px] text-emerald-500">
-                    <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-                    Auto-sync active
-                </span>
-                <a href="{{ route('manage-users') }}"
-                   class="px-4 py-1.5 rounded-lg bg-blue-100 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 text-blue-700 dark:text-blue-400 text-[11px] font-bold uppercase hover:bg-blue-200 dark:hover:bg-blue-500/20 transition-colors">
-                    Manage Users
-                </a>
-            </div>
-        </div>
-
-        <div class="dash-scroll overflow-x-auto">
-            <table class="w-full text-[13px]">
-                <thead>
-                    <tr class="border-b border-slate-100 dark:border-white/[0.05] text-[12px] uppercase tracking-widest text-slate-500">
-                        <th class="text-left py-3 pr-4 font-semibold">Action</th>
-                        <th class="text-left py-3 pr-4 font-semibold">Module</th>
-                        <th class="text-left py-3 pr-4 font-semibold">User</th>
-                        <th class="text-left py-3 pr-4 font-semibold hidden md:table-cell">Role</th>
-                        <th class="text-left py-3 font-semibold">Description</th>
-                        <th class="text-right py-3 font-semibold whitespace-nowrap">Time</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-50 dark:divide-white/[0.02]">
-                    @forelse($recentActivities as $i => $a)
-                    @php
-                        $ac = match($a['severity'] ?? 'info') {
-                            'critical' => 'text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-500/10',
-                            'warning'  => 'text-yellow-600 dark:text-yellow-400 bg-yellow-50 dark:bg-yellow-500/10',
-                            'success'  => 'text-emerald-600 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-500/10',
-                            default    => 'text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-500/10',
-                        };
-                    @endphp
-                    <tr class="hover:bg-slate-50 dark:hover:bg-white/[0.02] transition-colors fade-row"
-                        style="animation-delay: {{ $i * 30 }}ms">
-                        <td class="py-3.5 pr-4">
-                            <span class="px-2 py-0.5 rounded text-[11px] font-bold uppercase {{ $ac }}">{{ $a['action'] }}</span>
-                        </td>
-                        <td class="py-3.5 pr-4 font-bold text-[13px] uppercase text-slate-600 dark:text-slate-400">{{ $a['module'] }}</td>
-                        <td class="py-3.5 pr-4 text-[13px] text-slate-600 dark:text-slate-400">{{ $a['user'] }}</td>
-                        <td class="py-3.5 pr-4 text-[12px] text-slate-400 hidden md:table-cell uppercase tracking-widest">{{ $a['role'] ?? '—' }}</td>
-                        <td class="py-3.5 text-slate-500 text-[13px] truncate max-w-xs">{{ $a['description'] }}</td>
-                        <td class="py-3.5 text-right text-slate-400 text-[12px] tabular-nums whitespace-nowrap">{{ $a['created_at'] }}</td>
-                    </tr>
-                    @empty
-                    <tr>
-                        <td colspan="6" class="py-12 text-center text-slate-400 text-[13px]">No activity logs found</td>
-                    </tr>
-                    @endforelse
-                </tbody>
-            </table>
-        </div>
-    </div>
-</div>
 
 </div>
