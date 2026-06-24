@@ -83,6 +83,7 @@
      ROOT WRAPPER — Alpine live clock + dark/light radial tint
 ════════════════════════════════════════════════════════════════════════ --}}
 <div
+    wire:poll.10s="refreshSystemReadiness"
     x-data="{
         clock: '{{ date('h:i:s A') }}',
         init() { setInterval(() => { this.clock = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }); }, 1000); }
@@ -100,7 +101,47 @@
 ════════════════════════════════════════════════════════════════════════ --}}
 @php
     $period = \App\Models\Setting::getAcademicPeriod();
+    $periodLabel = ($currentPeriod['semester_name'] ?? null)
+        ?: \App\Models\Setting::semesterLabel($currentPeriod['semester'] ?? '1st') . ' ' . ($currentPeriod['school_year'] ?? '');
 @endphp
+<div class="px-5 pt-4">
+    @if(! $systemReady)
+    <div class="rounded-2xl border border-amber-200 bg-amber-50/90 p-5 shadow-sm dark:border-amber-500/25 dark:bg-amber-500/[0.06]">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+                <p class="text-[11px] font-bold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-300">New Semester Setup</p>
+                <h2 class="mt-1 text-lg font-bold text-slate-900 dark:text-white">The registrar is configuring {{ $periodLabel }}.</h2>
+                <p class="mt-1 max-w-3xl text-[13px] leading-6 text-slate-600 dark:text-slate-300">
+                    You can prepare faculty coordination and preferred room assignments now. MasterGrid room view will open once setup is finalized.
+                </p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <a href="{{ route('faculty-loading') }}" wire:navigate class="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-white px-3.5 py-2 text-[12px] font-bold text-violet-700 shadow-sm transition hover:bg-violet-50 dark:border-violet-500/25 dark:bg-white/[0.04] dark:text-violet-300">
+                    Faculty Loading
+                </a>
+                <a href="{{ route('manage.rooms') }}" wire:navigate class="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-3.5 py-2 text-[12px] font-bold text-blue-700 shadow-sm transition hover:bg-blue-50 dark:border-blue-500/25 dark:bg-white/[0.04] dark:text-blue-300">
+                    Manage Rooms
+                </a>
+                <button type="button" title="Available once system configuration is finalized" class="inline-flex cursor-not-allowed items-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-2 text-[12px] font-bold text-slate-400 dark:border-white/10 dark:bg-white/[0.03] dark:text-slate-500">
+                    MasterGrid Locked
+                </button>
+            </div>
+        </div>
+    </div>
+    @else
+    <div class="rounded-2xl border border-emerald-200 bg-emerald-50/90 px-5 py-4 shadow-sm dark:border-emerald-500/25 dark:bg-emerald-500/[0.06]">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p class="text-[13px] text-slate-600 dark:text-slate-300">
+                <span class="font-bold uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">Semester Ready</span>
+                <span class="ml-2">{{ $periodLabel }} configuration is finalized.</span>
+            </p>
+            <a href="{{ route('master-grid') }}" wire:navigate class="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-3.5 py-2 text-[12px] font-bold text-emerald-700 shadow-sm transition hover:bg-emerald-50 dark:border-emerald-500/25 dark:bg-white/[0.04] dark:text-emerald-300">
+                Open MasterGrid
+            </a>
+        </div>
+    </div>
+    @endif
+</div>
 <div class="grid grid-cols-12 gap-4 p-5 pb-0">
 
     {{-- Identity / Role / Clock ——————————————————————————————————————— --}}
@@ -231,10 +272,10 @@
         ],
         [
             'label'  => 'Finalized',
-            'count'  => $globalStats['total_schedules'],
+            'count'  => $globalStats['finalized_schedules'],
             'desc'   => 'Locked & published schedules',
             'color'  => 'violet',
-            'glow'   => $globalStats['total_schedules'] > 0 ? '' : '',
+            'glow'   => $globalStats['finalized_schedules'] > 0 ? '' : '',
             'dot'    => 'bg-violet-400 shadow-[0_0_8px_#a78bfa]',
             'badge'  => 'bg-violet-100 dark:bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-200 dark:border-violet-500/20',
             'border' => 'border-slate-200 dark:border-white/10',
@@ -486,8 +527,11 @@
             <div class="mb-5">
                 <p class="text-[11px] uppercase tracking-[0.2em] text-slate-500 mb-3">Dept. Loading</p>
                 <div class="space-y-3.5">
-                    @php $maxDept = max(array_values($facultyCoordination['dept_breakdown'] ?? [1])); @endphp
-                    @foreach($facultyCoordination['dept_breakdown'] ?? [] as $dept => $count)
+                    @php
+                        $deptBreakdown = $facultyCoordination['dept_breakdown'] ?? [];
+                        $maxDept = max(array_values($deptBreakdown ?: [1]));
+                    @endphp
+                    @forelse($deptBreakdown as $dept => $count)
                     @php $dpct = $maxDept > 0 ? round(($count / $maxDept) * 100) : 0; @endphp
                     <div>
                         <div class="flex items-center justify-between mb-1.5">
@@ -499,7 +543,11 @@
                                  style="width:{{ $dpct }}%; background:linear-gradient(90deg,#fb923c,#f59e0b,#fb923c); background-size:200% auto;"></div>
                         </div>
                     </div>
-                    @endforeach
+                    @empty
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-3 py-4 text-center text-[12px] font-semibold text-slate-400 dark:border-white/10 dark:bg-white/[0.03]">
+                        No faculty departments yet
+                    </div>
+                    @endforelse
                 </div>
             </div>
 

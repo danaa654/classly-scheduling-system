@@ -20,15 +20,73 @@ class AssistantDeanDashboard extends Component
     public $subjectDistribution  = [];
     public $aiRecommendations    = [];
     public $globalStats          = [];
+    public bool $systemReady = false;
+    public array $currentPeriod = [];
+
+    protected $listeners = [
+        'systemReadyChanged' => 'refreshSystemReadiness',
+    ];
 
     public function mount(): void
     {
+        $this->loadDashboard();
+    }
+
+    public function refreshSystemReadiness(): void
+    {
+        $wasReady = $this->systemReady;
+
+        $this->loadDashboard();
+
+        if (! $wasReady && $this->systemReady) {
+            $this->dispatch('notify', [
+                'type'    => 'success',
+                'message' => 'Semester configuration is ready. MasterGrid and room view are now available.',
+            ]);
+        }
+    }
+
+    private function loadSystemReadiness(): void
+    {
+        $this->systemReady = Setting::isSystemReady();
+        $this->currentPeriod = Setting::getAcademicPeriod();
+    }
+
+    private function loadDashboard(): void
+    {
+        $this->loadSystemReadiness();
         $this->loadGlobalStats();
         $this->loadFacultyCoordination();
+        $this->loadSubjectDistribution();
+
+        if (! $this->systemReady) {
+            $this->loadSetupModeDashboard();
+
+            return;
+        }
+
         $this->loadScheduleReview();
         $this->loadCurriculumValidation();
-        $this->loadSubjectDistribution();
         $this->loadAiRecommendations();
+    }
+
+    private function loadSetupModeDashboard(): void
+    {
+        $this->scheduleReview = [];
+        $this->curriculumValidation = [];
+        $this->aiRecommendations = [
+            [
+                'type'   => 'info',
+                'icon'   => '',
+                'title'  => 'Semester Setup In Progress',
+                'detail' => 'Registrar or admin is finalizing the academic period, active days, and schedule bounds.',
+                'action' => 'Prepare faculty loading and preferred rooms',
+            ],
+        ];
+
+        $this->globalStats['total_schedules'] = 0;
+        $this->globalStats['finalized_schedules'] = 0;
+        $this->globalStats['completion_pct'] = 0;
     }
 
     private function loadGlobalStats(): void

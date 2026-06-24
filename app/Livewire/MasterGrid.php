@@ -124,6 +124,14 @@ class MasterGrid extends Component
 
     public function mount()
     {
+        $role = auth()->user()?->role;
+
+        if (in_array($role, ['dean', 'oic', 'associate_dean'], true) && ! Setting::isSystemReady()) {
+            $this->redirectRoute($role === 'associate_dean' ? 'assistant-dean.dashboard' : 'dean.dashboard', navigate: true);
+
+            return;
+        }
+
         $this->loadSettings();
     }
 
@@ -211,7 +219,46 @@ class MasterGrid extends Component
         if (!$user) return false;
         
         $role = $user->role ?? 'guest';
-        return in_array($role, ['admin', 'registrar', 'associate_dean']);
+        return in_array($role, ['admin', 'registrar'], true);
+    }
+
+    private function normalizedSubjectType(?string $type): string
+    {
+        $type = strtolower(trim((string) $type));
+
+        return $type === 'minor' ? 'minor' : 'major';
+    }
+
+    private function canUserScheduleSubjectType(Subject $subject): bool
+    {
+        $role = auth()->user()?->role ?? 'guest';
+        $subjectType = $this->normalizedSubjectType($subject->type);
+
+        return match ($role) {
+            'admin', 'registrar' => true,
+            'associate_dean' => $subjectType === 'minor',
+            'dean', 'oic' => $subjectType === 'major',
+            default => false,
+        };
+    }
+
+    private function dispatchSubjectTypeDeniedToast(Subject $subject): void
+    {
+        $role = auth()->user()?->role ?? 'guest';
+        $subjectType = $this->normalizedSubjectType($subject->type);
+        $subjectLabel = strtoupper($subjectType);
+
+        $detail = match ($role) {
+            'associate_dean' => 'Associate Dean can only schedule minor subjects. Major subjects are handled by the Dean or OIC.',
+            'dean', 'oic' => 'Dean and OIC can only schedule major subjects. Minor subjects are handled by the Associate Dean.',
+            default => 'Only Admin and Registrar accounts can schedule all subject types.',
+        };
+
+        $this->dispatch('toast', [
+            'type' => 'error',
+            'message' => "Cannot drop {$subjectLabel} subject",
+            'detail' => "{$subject->subject_code} is a {$subjectLabel} subject. {$detail}",
+        ]);
     }
 
     public function canAutoGenerateSchedules(): bool
@@ -2118,6 +2165,11 @@ class MasterGrid extends Component
             return;
         }
 
+        if (!$this->canUserScheduleSubjectType($subject)) {
+            $this->dispatchSubjectTypeDeniedToast($subject);
+            return;
+        }
+
         $room = Room::find($this->selectedRoomId);
 
         if (!$room) {
@@ -2323,12 +2375,22 @@ class MasterGrid extends Component
         $query = $this->activeSubjectQuery()
             ->select('id', 'subject_code', 'description', 'edp_code', 'duration_hours', 'meetings_per_week', 'units', 'department', 'section', 'type', 'major', 'year_level', 'faculty_id');
 
-        // Access control for non-admin users
-        if (!$this->hasFullAccess()) {
+        $role = auth()->user()?->role ?? 'guest';
+
+        if ($role === 'associate_dean') {
+            $query->where('type', 'Minor');
+        } elseif (in_array($role, ['dean', 'oic'], true)) {
             $userDept = $this->getUserDepartment();
             if ($userDept) {
                 $query->whereIn('department', Department::aliasesFor($userDept));
             }
+            $query->where(function ($typeQuery) {
+                $typeQuery->where('type', 'Major')
+                    ->orWhereNull('type')
+                    ->orWhere('type', '');
+            });
+        } elseif (!$this->hasFullAccess()) {
+            $query->whereRaw('1 = 0');
         }
 
         // Search filter

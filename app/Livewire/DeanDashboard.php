@@ -22,11 +22,19 @@ class DeanDashboard extends Component
     public $escalatedConflicts    = [];
     public $requestTracking       = [];
     public $facultyRequestHistory = [];
+    public bool $systemReady = false;
+    public array $systemReadyMeta = [];
+    public array $currentPeriod = [];
+
+    protected $listeners = [
+        'systemReadyChanged' => 'refreshSystemReadiness',
+    ];
 
     public function mount(): void
     {
         $this->department = Auth::user()->department;
 
+        $this->loadSystemReadiness();
         $this->loadAcademicOverview();
         $this->loadApprovalQueue();
         $this->loadCurriculumCoverage();
@@ -34,6 +42,27 @@ class DeanDashboard extends Component
         $this->loadEscalatedConflicts();
         $this->loadRequestTracking();
         $this->loadFacultyRequestHistory();
+    }
+
+    public function refreshSystemReadiness(): void
+    {
+        $wasReady = $this->systemReady;
+
+        $this->loadSystemReadiness();
+
+        if (! $wasReady && $this->systemReady) {
+            $this->dispatch('notify', [
+                'type'    => 'success',
+                'message' => 'Semester configuration is ready. MasterGrid and room view are now available.',
+            ]);
+        }
+    }
+
+    private function loadSystemReadiness(): void
+    {
+        $this->systemReady = Setting::isSystemReady();
+        $this->systemReadyMeta = Setting::getSystemReadyMeta();
+        $this->currentPeriod = Setting::getAcademicPeriod();
     }
 
     private function loadAcademicOverview(): void

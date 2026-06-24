@@ -47,6 +47,7 @@
 </style>
 
 <div
+    wire:poll.10s="refreshSystemReadiness"
     x-data="{
         clock: '{{ date('g:i:s A') }}',
         init() {
@@ -75,6 +76,8 @@
 @php
     $pendingCount   = count($approvalQueue);
     $conflictCount  = count($escalatedConflicts);
+    $periodLabel    = ($currentPeriod['semester_name'] ?? null)
+        ?: \App\Models\Setting::semesterLabel($currentPeriod['semester'] ?? '1st') . ' ' . ($currentPeriod['school_year'] ?? '');
 @endphp
 
 @if($pendingCount > 0 || $conflictCount > 0)
@@ -107,6 +110,45 @@
 {{-- ═══════════════════════════════════════════════════
      HEADER — Identity + Live Clock + KPI Vitals
 ═══════════════════════════════════════════════════════ --}}
+<div class="px-5 pt-4">
+    @if(! $systemReady)
+    <div class="rounded-2xl border border-amber-200 bg-amber-50/90 p-5 shadow-sm dark:border-amber-500/25 dark:bg-amber-500/[0.06]">
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+                <p class="text-[11px] font-bold uppercase tracking-[0.2em] text-amber-700 dark:text-amber-300">New Semester Setup</p>
+                <h2 class="mt-1 text-lg font-bold text-slate-900 dark:text-white">The registrar is configuring {{ $periodLabel }}.</h2>
+                <p class="mt-1 max-w-3xl text-[13px] leading-6 text-slate-600 dark:text-slate-300">
+                    You can get a head start with faculty loading and preferred room assignments. MasterGrid room view will open as soon as the setup is finalized.
+                </p>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <a href="{{ route('faculty-loading') }}" wire:navigate class="inline-flex items-center gap-2 rounded-xl border border-violet-200 bg-white px-3.5 py-2 text-[12px] font-bold text-violet-700 shadow-sm transition hover:bg-violet-50 dark:border-violet-500/25 dark:bg-white/[0.04] dark:text-violet-300">
+                    Faculty Loading
+                </a>
+                <a href="{{ route('manage.rooms') }}" wire:navigate class="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-white px-3.5 py-2 text-[12px] font-bold text-blue-700 shadow-sm transition hover:bg-blue-50 dark:border-blue-500/25 dark:bg-white/[0.04] dark:text-blue-300">
+                    Manage Rooms
+                </a>
+                <button type="button" title="Available once system configuration is finalized" class="inline-flex cursor-not-allowed items-center gap-2 rounded-xl border border-slate-200 bg-slate-100 px-3.5 py-2 text-[12px] font-bold text-slate-400 dark:border-white/10 dark:bg-white/[0.03] dark:text-slate-500">
+                    MasterGrid Locked
+                </button>
+            </div>
+        </div>
+    </div>
+    @else
+    <div class="rounded-2xl border border-emerald-200 bg-emerald-50/90 px-5 py-4 shadow-sm dark:border-emerald-500/25 dark:bg-emerald-500/[0.06]">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p class="text-[13px] text-slate-600 dark:text-slate-300">
+                <span class="font-bold uppercase tracking-[0.16em] text-emerald-700 dark:text-emerald-300">Semester Ready</span>
+                <span class="ml-2">{{ $periodLabel }} configuration is finalized.</span>
+            </p>
+            <a href="{{ route('master-grid') }}" wire:navigate class="inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-200 bg-white px-3.5 py-2 text-[12px] font-bold text-emerald-700 shadow-sm transition hover:bg-emerald-50 dark:border-emerald-500/25 dark:bg-white/[0.04] dark:text-emerald-300">
+                Open MasterGrid
+            </a>
+        </div>
+    </div>
+    @endif
+</div>
+
 <div class="grid grid-cols-12 gap-4 p-5 pb-0">
 
     {{-- Identity / Role / Clock --}}
