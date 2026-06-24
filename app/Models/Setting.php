@@ -47,13 +47,17 @@ class Setting extends Model
     ];
 
     protected $casts = [
-        'value' => 'string',
-        'config_locked' => 'boolean',
-        'last_updated_at' => 'datetime',
+        'value'          => 'string',
+        'config_locked'  => 'boolean',
+        'last_updated_at'=> 'datetime',
     ];
 
+    // =========================================================================
+    // CORE KEY/VALUE HELPERS
+    // =========================================================================
+
     /**
-     * Get a setting value by key with default fallback
+     * Get a setting value by key with default fallback.
      */
     public static function getValue(string $key, $default = null)
     {
@@ -61,14 +65,15 @@ class Setting extends Model
     }
 
     /**
-     * Persist a key/value setting while keeping the key/value table as the source of truth.
+     * Persist a key/value setting while keeping the key/value table as the
+     * source of truth.
      */
     public static function setValue(string $key, mixed $value, ?int $userId = null): self
     {
         return self::updateOrCreate(['key' => $key], [
-            'value' => is_array($value) ? json_encode(array_values($value)) : (string) $value,
-            'last_updated_by' => $userId,
-            'last_updated_at' => now(),
+            'value'          => is_array($value) ? json_encode(array_values($value)) : (string) $value,
+            'last_updated_by'=> $userId,
+            'last_updated_at'=> now(),
         ]);
     }
 
@@ -83,33 +88,182 @@ class Setting extends Model
         return filter_var($value, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE) ?? $default;
     }
 
+    // =========================================================================
+    // LOCK / MAINTENANCE
+    // =========================================================================
+
     /**
-     * Check if configuration is locked
+     * Check if configuration is locked.
      */
     public static function isConfigLocked(): bool
     {
         return self::getBoolean('config_locked', true);
     }
 
+    // =========================================================================
+    // SYSTEM READINESS  ← NEW SECTION
+    // =========================================================================
+
     /**
-     * Get hard-coded lunch break times
+     * Whether the system has been explicitly marked ready by an Admin/Registrar.
+     *
+     * This flag is set to FALSE automatically whenever the semester is ended /
+     * advanced so that the new semester always starts in "setup required" mode.
+     */
+    public static function isSystemReady(): bool
+    {
+        return self::getBoolean('system_ready', false);
+    }
+
+    /**
+     * Mark the system as ready for the current semester.
+     * Should only be called after the setup checklist is fully satisfied.
+     *
+     * @param  int|null  $userId  The user performing the action (for audit).
+     */
+    public static function markSystemReady(?int $userId = null): void
+    {
+        self::setValue('system_ready', '1', $userId);
+        self::setValue('system_ready_at', now()->toIso8601String(), $userId);
+        self::setValue('system_ready_by', (string) $userId, $userId);
+    }
+
+    /**
+     * Revert the system back to "not ready" — called automatically on semester
+     * advancement or any major reconfiguration.
+     *
+     * @param  int|null  $userId
+     */
+    public static function markSystemNotReady(?int $userId = null): void
+    {
+        self::setValue('system_ready', '0', $userId);
+        self::setValue('system_ready_at', '', $userId);
+        self::setValue('system_ready_by', '', $userId);
+    }
+
+    /**
+     * Return a structured checklist of every prerequisite step that must be
+     * completed before the system can be marked ready.
+     *
+     * Each item has:
+     *   - key        : machine-readable identifier
+     *   - label      : human-readable step name
+     *   - description: short helper text shown in the UI
+     *   - done       : bool — whether the step passes right now
+     *
+     * @return array<int, array{key: string, label: string, description: string, done: bool}>
+     */
+    public static function getSetupChecklist(): array
+    {
+        $period      = self::getAcademicPeriod();
+        $bounds      = self::getDayBounds();
+        $activeDays  = self::getActiveDays();
+        $isLocked    = self::isConfigLocked();
+
+        // Step 1 – academic period has been set (non-default values are present)
+        $academicPeriodSet = filled($period['school_year'])
+            && filled($period['semester'])
+            && filled($period['semester_name']);
+
+        // Step 2 – scheduling bounds look sensible
+        $boundsSet = filled($bounds['start'])
+            && filled($bounds['end'])
+            && Carbon::parse($bounds['start'])->lt(Carbon::parse($bounds['end']));
+
+        // Step 3 – at least one active day is configured
+        $daysSet = count($activeDays) >= 1;
+
+        // Step 4 – slot duration has been set (non-zero)
+        $slotDurationSet = self::getSlotDurationMinutes() > 0;
+
+        // Step 5 – configuration has been locked (signals "intentionally saved")
+        $configLockedStep = $isLocked;
+
+        return [
+            [
+                'key'         => 'academic_period',
+                'label'       => 'Academic Period Set',
+                'description' => 'School year and semester must be configured (e.g. 2026-2027, 1st Semester).',
+                'done'        => $academicPeriodSet,
+            ],
+            [
+                'key'         => 'scheduling_bounds',
+                'label'       => 'Scheduling Bounds Set',
+                'description' => 'Day start and end times must be defined and valid.',
+                'done'        => $boundsSet,
+            ],
+            [
+                'key'         => 'active_days',
+                'label'       => 'Active Days Configured',
+                'description' => 'At least one active school day must be selected.',
+                'done'        => $daysSet,
+            ],
+            [
+                'key'         => 'slot_duration',
+                'label'       => 'Slot Duration Set',
+                'description' => 'Default scheduling slot duration must be greater than zero.',
+                'done'        => $slotDurationSet,
+            ],
+            [
+                'key'         => 'config_locked',
+                'label'       => 'Configuration Locked',
+                'description' => 'Settings must be saved and locked before the system can go live.',
+                'done'        => $configLockedStep,
+            ],
+        ];
+    }
+
+    /**
+     * Convenience helper: returns true only when every checklist item passes.
+     */
+    public static function isSetupComplete(): bool
+    {
+        foreach (self::getSetupChecklist() as $item) {
+            if (! $item['done']) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Returns details about who marked the system ready and when, if available.
+     *
+     * @return array{ready: bool, ready_at: string|null, ready_by: int|null}
+     */
+    public static function getSystemReadyMeta(): array
+    {
+        return [
+            'ready'    => self::isSystemReady(),
+            'ready_at' => self::getValue('system_ready_at') ?: null,
+            'ready_by' => ($id = self::getValue('system_ready_by')) ? (int) $id : null,
+        ];
+    }
+
+    // =========================================================================
+    // TIME / SCHEDULE SETTINGS
+    // =========================================================================
+
+    /**
+     * Get hard-coded lunch break times.
      */
     public static function getLunchBreakTimes(): array
     {
         return [
             'start' => '12:00',
-            'end' => '13:00',
+            'end'   => '13:00',
         ];
     }
 
     /**
-     * Get master day bounds
+     * Get master day bounds.
      */
     public static function getDayBounds(): array
     {
         return [
             'start' => self::normalizeTime(self::getValue('day_start', '07:00'), '07:00'),
-            'end' => self::normalizeTime(self::getValue('day_end', '21:00'), '21:00'),
+            'end'   => self::normalizeTime(self::getValue('day_end', '21:00'), '21:00'),
         ];
     }
 
@@ -119,7 +273,7 @@ class Setting extends Model
 
         if (is_string($value) && trim($value) !== '') {
             $decoded = json_decode($value, true);
-            $days = json_last_error() === JSON_ERROR_NONE
+            $days    = json_last_error() === JSON_ERROR_NONE
                 ? $decoded
                 : preg_split('/[,|\/]+/', $value);
 
@@ -148,9 +302,9 @@ class Setting extends Model
         $bounds = self::getDayBounds();
 
         return [
-            'active_days' => self::getActiveDays(),
-            'start_time' => $bounds['start'],
-            'end_time' => $bounds['end'],
+            'active_days'           => self::getActiveDays(),
+            'start_time'            => $bounds['start'],
+            'end_time'              => $bounds['end'],
             'slot_duration_minutes' => self::getSlotDurationMinutes(),
         ];
     }
@@ -174,10 +328,10 @@ class Setting extends Model
         $slotMinutes = self::getSlotDurationMinutes();
         $lunchBreak  = self::getLunchBreakTimes();
 
-        $cursor     = \Carbon\Carbon::createFromTimeString($bounds['start']);
-        $dayEnd     = \Carbon\Carbon::createFromTimeString($bounds['end']);
-        $lunchStart = \Carbon\Carbon::createFromTimeString($lunchBreak['start']);
-        $lunchEnd   = \Carbon\Carbon::createFromTimeString($lunchBreak['end']);
+        $cursor     = Carbon::createFromTimeString($bounds['start']);
+        $dayEnd     = Carbon::createFromTimeString($bounds['end']);
+        $lunchStart = Carbon::createFromTimeString($lunchBreak['start']);
+        $lunchEnd   = Carbon::createFromTimeString($lunchBreak['end']);
 
         $slots = [];
 
@@ -198,6 +352,10 @@ class Setting extends Model
 
         return $slots;
     }
+
+    // =========================================================================
+    // DAY NORMALIZATION
+    // =========================================================================
 
     public static function normalizeActiveDays(array $days): array
     {
@@ -235,22 +393,26 @@ class Setting extends Model
         return $normalized !== null && in_array($normalized, self::getActiveDays(), true);
     }
 
+    // =========================================================================
+    // ACADEMIC PERIOD
+    // =========================================================================
+
     /**
-     * Get academic year and semester
+     * Get academic year and semester.
      */
     public static function getAcademicPeriod(): array
     {
         $schoolYear = self::getValue('school_year', '2026-2027');
-        $semester = self::normalizeSemester(self::getValue('semester', self::SEMESTER_FIRST));
+        $semester   = self::normalizeSemester(self::getValue('semester', self::SEMESTER_FIRST));
 
         return [
-            'school_year' => $schoolYear,
+            'school_year'   => $schoolYear,
             'academic_year' => $schoolYear,
-            'semester' => $semester,
+            'semester'      => $semester,
             'semester_name' => self::getValue('semester_name', self::semesterDisplayName($semester, $schoolYear)),
             'workspace_key' => self::workspaceKey($schoolYear, $semester),
-            'year_prefix' => self::academicYearPrefix($schoolYear),
-            'edp_prefix' => self::edpTermPrefix($schoolYear, $semester),
+            'year_prefix'   => self::academicYearPrefix($schoolYear),
+            'edp_prefix'    => self::edpTermPrefix($schoolYear, $semester),
         ];
     }
 
@@ -264,40 +426,40 @@ class Setting extends Model
         $semester = trim((string) $semester);
 
         return match (strtolower($semester)) {
-            '1', '1st', 'first', 'first semester', '1st semester' => self::SEMESTER_FIRST,
-            '2', '2nd', 'second', 'second semester', '2nd semester' => self::SEMESTER_SECOND,
-            'summer', 'summer semester' => self::SEMESTER_SUMMER,
-            default => self::SEMESTER_FIRST,
+            '1', '1st', 'first', 'first semester', '1st semester'     => self::SEMESTER_FIRST,
+            '2', '2nd', 'second', 'second semester', '2nd semester'   => self::SEMESTER_SECOND,
+            'summer', 'summer semester'                                => self::SEMESTER_SUMMER,
+            default                                                    => self::SEMESTER_FIRST,
         };
     }
 
     public static function semesterLabel(?string $semester): string
     {
         return match (self::normalizeSemester($semester)) {
-            self::SEMESTER_FIRST => '1st Semester',
+            self::SEMESTER_FIRST  => '1st Semester',
             self::SEMESTER_SECOND => '2nd Semester',
             self::SEMESTER_SUMMER => 'Summer',
-            default => '1st Semester',
+            default               => '1st Semester',
         };
     }
 
     public static function semesterCode(?string $semester): string
     {
         return match (self::normalizeSemester($semester)) {
-            self::SEMESTER_FIRST => '1ST',
+            self::SEMESTER_FIRST  => '1ST',
             self::SEMESTER_SECOND => '2ND',
             self::SEMESTER_SUMMER => 'SUM',
-            default => '1ST',
+            default               => '1ST',
         };
     }
 
     public static function semesterEdpDigit(?string $semester): string
     {
         return match (self::normalizeSemester($semester)) {
-            self::SEMESTER_FIRST => '1',
+            self::SEMESTER_FIRST  => '1',
             self::SEMESTER_SECOND => '2',
             self::SEMESTER_SUMMER => '3',
-            default => '1',
+            default               => '1',
         };
     }
 
@@ -309,7 +471,7 @@ class Setting extends Model
     public static function workspaceKey(?string $schoolYear = null, ?string $semester = null): string
     {
         $schoolYear = trim((string) ($schoolYear ?: self::getValue('school_year', '2026-2027')));
-        $semester = self::normalizeSemester($semester ?: self::getValue('semester', self::SEMESTER_FIRST));
+        $semester   = self::normalizeSemester($semester ?: self::getValue('semester', self::SEMESTER_FIRST));
 
         return $schoolYear.'_'.$semester;
     }
@@ -331,7 +493,7 @@ class Setting extends Model
 
     public static function edpCodePrefix(string $major, int $yearLevel, ?string $schoolYear = null, ?string $semester = null): string
     {
-        $major = strtoupper(trim($major ?: 'GEN'));
+        $major     = strtoupper(trim($major ?: 'GEN'));
         $yearLevel = max(1, min(9, $yearLevel));
 
         return "{$major}-".self::edpTermPrefix($schoolYear, $semester).$yearLevel;
@@ -352,27 +514,31 @@ class Setting extends Model
 
     public static function nextAcademicPeriod(?string $semester = null, ?string $schoolYear = null): array
     {
-        $semester = self::normalizeSemester($semester ?? self::getValue('semester', self::SEMESTER_FIRST));
+        $semester   = self::normalizeSemester($semester ?? self::getValue('semester', self::SEMESTER_FIRST));
         $schoolYear ??= self::getValue('school_year', '2026-2027');
 
         if ($semester === self::SEMESTER_FIRST) {
-            $nextSemester = self::SEMESTER_SECOND;
+            $nextSemester   = self::SEMESTER_SECOND;
             $nextSchoolYear = $schoolYear;
         } else {
-            $nextSemester = self::SEMESTER_FIRST;
+            $nextSemester   = self::SEMESTER_FIRST;
             $nextSchoolYear = self::nextAcademicYear($schoolYear);
         }
 
         return [
-            'semester' => $nextSemester,
-            'school_year' => $nextSchoolYear,
+            'semester'      => $nextSemester,
+            'school_year'   => $nextSchoolYear,
             'academic_year' => $nextSchoolYear,
             'semester_name' => self::semesterDisplayName($nextSemester, $nextSchoolYear),
             'workspace_key' => self::workspaceKey($nextSchoolYear, $nextSemester),
-            'year_prefix' => self::academicYearPrefix($nextSchoolYear),
-            'edp_prefix' => self::edpTermPrefix($nextSchoolYear, $nextSemester),
+            'year_prefix'   => self::academicYearPrefix($nextSchoolYear),
+            'edp_prefix'    => self::edpTermPrefix($nextSchoolYear, $nextSemester),
         ];
     }
+
+    // =========================================================================
+    // PRIVATE UTILITIES
+    // =========================================================================
 
     private static function normalizeTime(?string $time, string $default): string
     {

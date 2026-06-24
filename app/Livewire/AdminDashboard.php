@@ -14,22 +14,56 @@ use Illuminate\Support\Facades\DB;
 
 class AdminDashboard extends Component
 {
-    public $stats = [];
-    public $systemStatus = [];
-    public $recentActivities = [];
-    public $pendingVerifications = [];
-    public $conflictAlerts = [];
-    public $schedulingAnalytics = [];
-    public $workflowCounts = [];
-    public $departmentProgress = [];
-    public $approvalQueue = [];
+    // -------------------------------------------------------------------------
+    // Dashboard data
+    // -------------------------------------------------------------------------
+    public array $stats                = [];
+    public array $systemStatus         = [];
+    public array $recentActivities     = [];
+    public array $pendingVerifications = [];
+    public array $conflictAlerts       = [];
+    public array $schedulingAnalytics  = [];
+    public array $workflowCounts       = [];
+    public array $departmentProgress   = [];
+    public array $approvalQueue        = [];
 
+    // -------------------------------------------------------------------------
+    // System-readiness state
+    // -------------------------------------------------------------------------
+
+    /** Whether the system has been marked ready for the current semester. */
+    public bool $systemReady = false;
+
+    /** Structured checklist items – each has key/label/description/done. */
+    public array $setupChecklist = [];
+
+    /** True only when every checklist item passes. */
+    public bool $setupComplete = false;
+
+    /** Metadata: who marked ready and when. */
+    public array $systemReadyMeta = [];
+
+    /** Confirmation modal for "Mark as Ready". */
+    public bool $confirmingMarkReady = false;
+
+    /** Confirmation modal for "Revert to Not Ready". */
+    public bool $confirmingMarkNotReady = false;
+
+    // -------------------------------------------------------------------------
+    // Livewire listeners
+    // -------------------------------------------------------------------------
     protected $listeners = [
-        'refreshDashboard' => '$refresh',
+        'refreshDashboard'    => '$refresh',
+        'systemReadyChanged'  => 'refreshSystemReadiness',
     ];
 
-    public function mount()
+    // =========================================================================
+    // LIFECYCLE
+    // =========================================================================
+
+    public function mount(): void
     {
+        $this->loadSystemReadiness();
         $this->loadStats();
         $this->loadSystemStatus();
         $this->loadRecentActivities();
@@ -41,17 +75,214 @@ class AdminDashboard extends Component
         $this->loadApprovalQueue();
     }
 
+    // =========================================================================
+    // SYSTEM READINESS ACTIONS
+    // =========================================================================
+
+    /**
+     * Load / refresh all system-readiness properties.
+     * Also called via the 'systemReadyChanged' Livewire event.
+     */
+    public function refreshSystemReadiness(): void
+    {
+        $this->loadSystemReadiness();
+    }
+
+    /**
+     * Open the "Mark as Ready" confirmation modal.
+     * Guarded: setup must be complete before this is callable.
+     */
+    public function openMarkReadyModal(): void
+    {
+        $this->loadSystemReadiness();          // fresh check before showing modal
+
+        if (! $this->setupComplete) {
+            $this->dispatch('notify', [
+                'type'    => 'warning',
+                'message' => 'Please complete all setup steps before marking the system as ready.',
+            ]);
+
+            return;
+        }
+
+        $this->confirmingMarkReady = true;
+    }
+
+    /** Cancel the "Mark as Ready" confirmation. */
+    public function cancelMarkReady(): void
+    {
+        $this->confirmingMarkReady = false;
+    }
+
+    /**
+     * Confirm and execute "Mark as Ready".
+     * Dispatches a broadcast event so Dean/OIC/AssistantDean dashboards
+     * update automatically via their own listener.
+     */
+    public function confirmMarkReady(): void
+    {
+        $this->confirmingMarkReady = false;
+
+        if (! $this->setupComplete) {
+            $this->dispatch('notify', [
+                'type'    => 'error',
+                'message' => 'Setup checklist is not complete. Cannot mark the system as ready.',
+            ]);
+
+            return;
+        }
+
+        Setting::markSystemReady(auth()->id());
+
+        // Audit trail
+        DB::table('activities')->insert([
+            'user_id'     => auth()->id(),
+            'action'      => 'system_ready',
+            'module'      => 'Settings',
+            'description' => 'Marked the system as ready for ' . (Setting::getAcademicPeriod()['semester_name'] ?? 'current semester'),
+            'created_at'  => now(),
+            'updated_at'  => now(),
+        ]);
+
+        $this->loadSystemReadiness();
+        $this->loadRecentActivities();
+
+        // Notify other open Livewire components (Dean dashboards, etc.)
+        $this->dispatch('systemReadyChanged');
+
+        $this->dispatch('notify', [
+            'type'    => 'success',
+            'message' => 'System marked as ready! Deans and other roles will now see the semester is live.',
+        ]);
+    }
+
+    /** Open the "Revert to Not Ready" confirmation modal. */
+    public function openMarkNotReadyModal(): void
+    {
+        $this->confirmingMarkNotReady = true;
+    }
+
+    /** Cancel the "Revert to Not Ready" confirmation. */
+    public function cancelMarkNotReady(): void
+    {
+        $this->confirmingMarkNotReady = false;
+    }
+
+    /**
+     * Confirm and execute "Revert to Not Ready".
+     * This hides the MasterGrid from Dean-level roles again.
+     */
+    public function confirmMarkNotReady(): void
+    {
+        $this->confirmingMarkNotReady = false;
+
+        Setting::markSystemNotReady(auth()->id());
+
+        DB::table('activities')->insert([
+            'user_id'     => auth()->id(),
+            'action'      => 'system_not_ready',
+            'module'      => 'Settings',
+            'description' => 'Reverted system to not-ready state for ' . (Setting::getAcademicPeriod()['semester_name'] ?? 'current semester'),
+            'created_at'  => now(),
+            'updated_at'  => now(),
+        ]);
+
+        $this->loadSystemReadiness();
+        $this->loadRecentActivities();
+
+        $this->dispatch('systemReadyChanged');
+
+        $this->dispatch('notify', [
+            'type'    => 'warning',
+            'message' => 'System reverted to not-ready. Dean-level roles will see the holding screen again.',
+        ]);
+    }
+
+    // =========================================================================
+    // EXISTING ACTIONS
+    // =========================================================================
+
+    public function approveFaculty(int $id): void
+    {
+        $faculty = Faculty::findOrFail($id);
+        $faculty->update(['status' => 'approved']);
+
+        DB::table('activities')->insert([
+            'user_id'     => auth()->id(),
+            'action'      => 'approved',
+            'module'      => 'Faculty',
+            'description' => "Approved faculty: {$faculty->full_name}",
+            'created_at'  => now(),
+            'updated_at'  => now(),
+        ]);
+
+        $this->loadPendingVerifications();
+        $this->loadStats();
+        $this->loadWorkflowCounts();
+    }
+
+    public function rejectFaculty(int $id): void
+    {
+        $faculty = Faculty::findOrFail($id);
+        $faculty->update(['status' => 'rejected']);
+
+        DB::table('activities')->insert([
+            'user_id'     => auth()->id(),
+            'action'      => 'rejected',
+            'module'      => 'Faculty',
+            'description' => "Rejected faculty: {$faculty->full_name}",
+            'created_at'  => now(),
+            'updated_at'  => now(),
+        ]);
+
+        $this->loadPendingVerifications();
+        $this->loadStats();
+    }
+
+    public function finalizeSchedule(int $id): void
+    {
+        $schedule = Schedule::findOrFail($id);
+        $schedule->update(['status' => Schedule::STATUS_FINALIZED]);
+
+        DB::table('activities')->insert([
+            'user_id'     => auth()->id(),
+            'action'      => 'finalized',
+            'module'      => 'Schedule',
+            'description' => "Admin finalized schedule ID #{$id}",
+            'created_at'  => now(),
+            'updated_at'  => now(),
+        ]);
+
+        $this->loadApprovalQueue();
+        $this->loadStats();
+        $this->loadWorkflowCounts();
+        $this->loadSchedulingAnalytics();
+        $this->loadDepartmentProgress();
+    }
+
+    // =========================================================================
+    // PRIVATE LOADERS
+    // =========================================================================
+
+    private function loadSystemReadiness(): void
+    {
+        $this->systemReady    = Setting::isSystemReady();
+        $this->setupChecklist = Setting::getSetupChecklist();
+        $this->setupComplete  = Setting::isSetupComplete();
+        $this->systemReadyMeta = Setting::getSystemReadyMeta();
+    }
+
     private function loadStats(): void
     {
         $this->stats = [
-            'total_users'        => User::count(),
-            'total_faculty'      => Faculty::count(),
-            'total_rooms'        => Room::count(),
-            'total_subjects'     => Subject::activeTerm()->count(),
-            'total_schedules'    => Schedule::activeTerm()->count(),
-            'pending_faculty'    => Faculty::where('status', 'pending')->count(),
-            'finalized_schedules'=> Schedule::activeTerm()->where('status', 'finalized')->count(),
-            'draft_schedules'    => Schedule::activeTerm()->where('status', 'draft')->count(),
+            'total_users'         => User::count(),
+            'total_faculty'       => Faculty::count(),
+            'total_rooms'         => Room::count(),
+            'total_subjects'      => Subject::activeTerm()->count(),
+            'total_schedules'     => Schedule::activeTerm()->count(),
+            'pending_faculty'     => Faculty::where('status', 'pending')->count(),
+            'finalized_schedules' => Schedule::activeTerm()->where('status', 'finalized')->count(),
+            'draft_schedules'     => Schedule::activeTerm()->where('status', 'draft')->count(),
         ];
     }
 
@@ -78,7 +309,7 @@ class AdminDashboard extends Component
         $this->systemStatus = [
             'scheduler'        => $conflictCount === 0 ? 'healthy' : 'warning',
             'conflict_count'   => $conflictCount,
-            'db_tables'        => DB::select("SHOW TABLES") ? 'healthy' : 'critical',
+            'db_tables'        => DB::select('SHOW TABLES') ? 'healthy' : 'critical',
             'rooms_available'  => Room::count() > 0 ? 'healthy' : 'warning',
             'faculty_assigned' => Faculty::where('status', 'approved')->count(),
             'current_semester' => $period['semester_name'],
@@ -151,7 +382,7 @@ class AdminDashboard extends Component
                 'type'        => 'room_conflict',
                 'room'        => $c->room_name,
                 'day'         => $c->day,
-                'time'        => Carbon::parse($c->start_time)->format('h:i A') . ' – ' . Carbon::parse($c->end_time)->format('h:i A'),
+                'time'        => Carbon::parse($c->start_time)->format('h:i A').' – '.Carbon::parse($c->end_time)->format('h:i A'),
                 'severity'    => 'critical',
                 'schedule_id' => $c->id,
             ])->toArray();
@@ -173,7 +404,7 @@ class AdminDashboard extends Component
 
     private function loadSchedulingAnalytics(): void
     {
-        $totalSchedules    = Schedule::activeTerm()->count();
+        $totalSchedules     = Schedule::activeTerm()->count();
         $finalizedSchedules = Schedule::activeTerm()->where('status', 'finalized')->count();
 
         $this->schedulingAnalytics = [
@@ -208,10 +439,10 @@ class AdminDashboard extends Component
     private function loadDepartmentProgress(): void
     {
         $departments = [
-            ['code' => 'CCS', 'label' => 'College of Computer Studies', 'majors' => ['IT', 'ACT'], 'color' => 'yellow'],
-            ['code' => 'CTE', 'label' => 'College of Teacher Education',  'majors' => ['ED'],           'color' => 'blue'],
-            ['code' => 'COC', 'label' => 'College of Criminology',        'majors' => ['FB','LD','QD'], 'color' => 'violet'],
-            ['code' => 'SHTM','label' => 'School of Hospitality & Tourism','majors' => ['HM','TM'],     'color' => 'orange'],
+            ['code' => 'CCS',  'label' => 'College of Computer Studies',       'majors' => ['IT', 'ACT'],       'color' => 'yellow'],
+            ['code' => 'CTE',  'label' => 'College of Teacher Education',       'majors' => ['ED'],              'color' => 'blue'],
+            ['code' => 'COC',  'label' => 'College of Criminology',             'majors' => ['FB', 'LD', 'QD'], 'color' => 'violet'],
+            ['code' => 'SHTM', 'label' => 'School of Hospitality & Tourism',   'majors' => ['HM', 'TM'],        'color' => 'orange'],
         ];
 
         $this->departmentProgress = collect($departments)->map(function ($dept) {
@@ -231,8 +462,9 @@ class AdminDashboard extends Component
                 ->whereHas('schedules', fn ($q) => $q->activeTerm()->where('status', 'finalized'))
                 ->count();
 
-            $pendingSubjects = $totalSubjects - $scheduledSubjects;
-            $rate = $totalSubjects > 0 ? round(($finalizedSubjects / $totalSubjects) * 100) : 0;
+            $rate = $totalSubjects > 0
+                ? round(($finalizedSubjects / $totalSubjects) * 100)
+                : 0;
 
             return [
                 'code'      => $dept['code'],
@@ -242,7 +474,7 @@ class AdminDashboard extends Component
                 'total'     => $totalSubjects,
                 'scheduled' => $scheduledSubjects,
                 'finalized' => $finalizedSubjects,
-                'pending'   => max(0, $pendingSubjects),
+                'pending'   => max(0, $totalSubjects - $scheduledSubjects),
                 'rate'      => $rate,
             ];
         })->toArray();
@@ -250,7 +482,6 @@ class AdminDashboard extends Component
 
     private function loadApprovalQueue(): void
     {
-        // Schedules with status = faculty_assigned are queued for admin review
         $this->approvalQueue = Schedule::activeTerm()
             ->where('status', Schedule::STATUS_FACULTY_ASSIGNED)
             ->with(['subject', 'room', 'faculty'])
@@ -260,75 +491,21 @@ class AdminDashboard extends Component
             ->map(fn ($s) => [
                 'id'         => $s->id,
                 'department' => $s->subject?->department ?? $s->department ?? '—',
-                'major'      => $s->subject?->major ?? $s->major ?? '—',
-                'year_level' => $s->year_level ?? $s->subject?->year_level ?? '—',
-                'section'    => $s->section ?? '—',
+                'major'      => $s->subject?->major     ?? $s->major      ?? '—',
+                'year_level' => $s->year_level          ?? $s->subject?->year_level ?? '—',
+                'section'    => $s->section             ?? '—',
                 'subject'    => $s->subject?->description ?? $s->subject?->subject_code ?? '—',
-                'room'       => $s->room?->room_name ?? '—',
+                'room'       => $s->room?->room_name    ?? '—',
                 'faculty'    => $s->faculty?->full_name ?? 'Unassigned',
                 'day'        => $s->day,
-                'time'       => Carbon::parse($s->start_time)->format('h:i A') . '–' . Carbon::parse($s->end_time)->format('h:i A'),
+                'time'       => Carbon::parse($s->start_time)->format('h:i A').'–'.Carbon::parse($s->end_time)->format('h:i A'),
                 'status'     => $s->status,
             ])->toArray();
     }
 
-    public function approveFaculty(int $id): void
-    {
-        $faculty = Faculty::findOrFail($id);
-        $faculty->update(['status' => 'approved']);
-
-        DB::table('activities')->insert([
-            'user_id'     => auth()->id(),
-            'action'      => 'approved',
-            'module'      => 'Faculty',
-            'description' => "Approved faculty: {$faculty->full_name}",
-            'created_at'  => now(),
-            'updated_at'  => now(),
-        ]);
-
-        $this->loadPendingVerifications();
-        $this->loadStats();
-        $this->loadWorkflowCounts();
-    }
-
-    public function rejectFaculty(int $id): void
-    {
-        $faculty = Faculty::findOrFail($id);
-        $faculty->update(['status' => 'rejected']);
-
-        DB::table('activities')->insert([
-            'user_id'     => auth()->id(),
-            'action'      => 'rejected',
-            'module'      => 'Faculty',
-            'description' => "Rejected faculty: {$faculty->full_name}",
-            'created_at'  => now(),
-            'updated_at'  => now(),
-        ]);
-
-        $this->loadPendingVerifications();
-        $this->loadStats();
-    }
-
-    public function finalizeSchedule(int $id): void
-    {
-        $schedule = Schedule::findOrFail($id);
-        $schedule->update(['status' => Schedule::STATUS_FINALIZED]);
-
-        DB::table('activities')->insert([
-            'user_id'     => auth()->id(),
-            'action'      => 'finalized',
-            'module'      => 'Schedule',
-            'description' => "Admin finalized schedule ID #{$id}",
-            'created_at'  => now(),
-            'updated_at'  => now(),
-        ]);
-
-        $this->loadApprovalQueue();
-        $this->loadStats();
-        $this->loadWorkflowCounts();
-        $this->loadSchedulingAnalytics();
-        $this->loadDepartmentProgress();
-    }
+    // =========================================================================
+    // UTILITIES
+    // =========================================================================
 
     private function deriveSeverity(string $action): string
     {
@@ -340,15 +517,38 @@ class AdminDashboard extends Component
             return 'warning';
         }
 
-        if (str_contains($action, 'approved') || str_contains($action, 'finalized')) {
+        if (str_contains($action, 'approved') || str_contains($action, 'finalized') || str_contains($action, 'ready')) {
             return 'success';
         }
 
         return 'info';
     }
 
+    // =========================================================================
+    // RENDER
+    // =========================================================================
+
     public function render()
     {
-        return view('livewire.admin-dashboard')->layout('layouts.app');
+        return view('livewire.admin-dashboard', [
+            // System-readiness — always passed explicitly so the blade
+            // can render the setup banner / checklist without needing
+            // to call Setting:: helpers directly.
+            'systemReady'     => $this->systemReady,
+            'setupChecklist'  => $this->setupChecklist,
+            'setupComplete'   => $this->setupComplete,
+            'systemReadyMeta' => $this->systemReadyMeta,
+
+            // Existing dashboard data
+            'stats'                => $this->stats,
+            'systemStatus'         => $this->systemStatus,
+            'recentActivities'     => $this->recentActivities,
+            'pendingVerifications' => $this->pendingVerifications,
+            'conflictAlerts'       => $this->conflictAlerts,
+            'schedulingAnalytics'  => $this->schedulingAnalytics,
+            'workflowCounts'       => $this->workflowCounts,
+            'departmentProgress'   => $this->departmentProgress,
+            'approvalQueue'        => $this->approvalQueue,
+        ])->layout('layouts.app');
     }
 }
