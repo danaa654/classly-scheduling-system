@@ -281,7 +281,69 @@ class MasterGrid extends Component
 
     public function canDeleteSchedule($scheduleId): bool
     {
-        return $this->canAutoGenerateSchedules() && $this->activeScheduleQuery()->whereKey($scheduleId)->exists();
+        $user = auth()->user();
+
+        if (!$user) {
+            return false;
+        }
+
+        $schedule = $this->activeScheduleQuery()
+            ->with('subject')
+            ->find($scheduleId);
+
+        if (!$schedule || !$schedule->subject) {
+            return false;
+        }
+
+        $role = $user->role ?? 'guest';
+
+        if (in_array($role, ['admin', 'registrar'], true)) {
+            return true;
+        }
+
+        if ($schedule->status === Schedule::STATUS_FINALIZED) {
+            return false;
+        }
+
+        $subjectType = $this->normalizedSubjectType($schedule->subject->type);
+
+        if ($role === 'associate_dean') {
+            return $subjectType === 'minor';
+        }
+
+        if (in_array($role, ['dean', 'oic'], true)) {
+            $userDepartment = Department::normalizeCode($user->department ?? null);
+            $scheduleDepartment = $schedule->subject->department ?? $schedule->department;
+
+            return $subjectType === 'major'
+                && $userDepartment
+                && Department::codesMatch($userDepartment, $scheduleDepartment);
+        }
+
+        return false;
+    }
+
+    private function scheduleDeletionDeniedDetail($scheduleId): string
+    {
+        $role = auth()->user()?->role ?? 'guest';
+        $schedule = $this->activeScheduleQuery()
+            ->with('subject:id,subject_code,type,department')
+            ->find($scheduleId);
+
+        if (!$schedule) {
+            return 'The selected schedule may have already been removed or is outside the active term.';
+        }
+
+        if ($schedule->status === Schedule::STATUS_FINALIZED && !in_array($role, ['admin', 'registrar'], true)) {
+            return 'This schedule is already finalized in Block Schedule. Only Admin or Registrar accounts can remove finalized schedules.';
+        }
+
+        return match ($role) {
+            'associate_dean' => 'Associate Dean can only remove minor subject schedules.',
+            'dean', 'oic' => 'Dean and OIC can only remove major subject schedules from their own department.',
+            'admin', 'registrar' => 'This schedule could not be removed. Please refresh the grid and try again.',
+            default => 'Only Admin, Registrar, or the authorized department role can remove this schedule.',
+        };
     }
 
     public function getDepartmentColor($department): string
@@ -2311,7 +2373,7 @@ class MasterGrid extends Component
             $this->dispatch('toast', [
                 'type' => 'error',
                 'message' => '❌ Permission Denied',
-                'detail' => 'Only Admin and Registrar accounts can remove schedules.'
+                'detail' => $this->scheduleDeletionDeniedDetail($scheduleId)
             ]);
             return;
         }

@@ -864,6 +864,11 @@ class BlockSchedule extends Component
             $roomId = filled($row['room_id'] ?? null) ? (int) $row['room_id'] : null;
             $facultyId = filled($row['faculty_id'] ?? null) ? (int) $row['faculty_id'] : null;
             $days = $row['days'] ?? [];
+            $scheduleIds = collect($row['schedule_ids'] ?? [])
+                ->map(fn ($id) => (int) $id)
+                ->filter()
+                ->values()
+                ->all();
 
             if (! $roomId || empty($days)) {
                 continue;
@@ -874,7 +879,7 @@ class BlockSchedule extends Component
                 $roomConflict = Schedule::activeTerm($this->semester, $this->schoolYear)
                     ->where('room_id', $roomId)
                     ->where('day', $day)
-                    ->whereNotIn('pairing_key', [$row['pairing_key'] ?? ''])
+                    ->when(! empty($scheduleIds), fn ($query) => $query->whereNotIn('id', $scheduleIds))
                     ->where('start_time', '<', $row['end_time'] ?? '23:59')
                     ->where('end_time', '>', $row['start_time'] ?? '00:00')
                     ->where('status', '!=', Schedule::STATUS_FINALIZED)
@@ -893,7 +898,7 @@ class BlockSchedule extends Component
                     $facultyConflict = Schedule::activeTerm($this->semester, $this->schoolYear)
                         ->where('faculty_id', $facultyId)
                         ->where('day', $day)
-                        ->whereNotIn('pairing_key', [$row['pairing_key'] ?? ''])
+                        ->when(! empty($scheduleIds), fn ($query) => $query->whereNotIn('id', $scheduleIds))
                         ->where('start_time', '<', $row['end_time'] ?? '23:59')
                         ->where('end_time', '>', $row['start_time'] ?? '00:00')
                         ->where('status', '!=', Schedule::STATUS_FINALIZED)
@@ -914,7 +919,7 @@ class BlockSchedule extends Component
                     foreach ($days as $day) {
                         $sectionConflict = Schedule::activeTerm($this->semester, $this->schoolYear)
                             ->where('day', $day)
-                            ->whereNotIn('pairing_key', [$row['pairing_key'] ?? ''])
+                            ->when(! empty($scheduleIds), fn ($query) => $query->whereNotIn('id', $scheduleIds))
                             ->where('department', $subject->department)
                             ->where('major', $subject->major)
                             ->where('year_level', $subject->year_level)
@@ -1031,12 +1036,7 @@ class BlockSchedule extends Component
             // Associate Dean see only minor/GenEd rows institution-wide.
             // Admin/Registrar see everything (filter returns true for them).
             ->filter(fn (Schedule $schedule) => $this->canEditRowSubject($schedule->subject))
-            ->groupBy(fn (Schedule $schedule) => $schedule->pairing_key ?: implode('|', [
-                $schedule->subject_id,
-                $schedule->room_id,
-                $schedule->start_time,
-                $schedule->end_time,
-            ]))
+            ->groupBy(fn (Schedule $schedule) => $this->blockScheduleGroupKey($schedule))
             ->mapWithKeys(function (Collection $group, string $pairingKey) use ($dayOrder) {
                 $first = $group->first();
                 $days = $group->pluck('day')
@@ -1121,6 +1121,7 @@ class BlockSchedule extends Component
                 $schedule->fill([
                     'room_id' => $roomId,
                     'faculty_id' => $facultyId,
+                    'pairing_key' => $pairingKey,
                     'day' => $day,
                     'start_time' => $start,
                     'end_time' => $end,
@@ -1153,6 +1154,25 @@ class BlockSchedule extends Component
     private function workspaceEditKey(string $pairingKey): string
     {
         return md5($pairingKey);
+    }
+
+    private function blockScheduleGroupKey(Schedule $schedule): string
+    {
+        $startTime = filled($schedule->start_time)
+            ? Carbon::parse($schedule->start_time)->format('H:i:s')
+            : 'no-start';
+        $endTime = filled($schedule->end_time)
+            ? Carbon::parse($schedule->end_time)->format('H:i:s')
+            : 'no-end';
+
+        return implode('|', [
+            'subject',
+            $schedule->subject_id,
+            $schedule->room_id ?: 'no-room',
+            $startTime,
+            $endTime,
+            $schedule->section ?: $schedule->subject?->section ?: 'A',
+        ]);
     }
 
     private function currentBlockSchedules(): Collection
@@ -1221,7 +1241,17 @@ class BlockSchedule extends Component
         $this->facultySearch    = '';
         $this->assignError      = '';
         $this->facultyAssignmentSuggestions = [];
-        $this->currentFacultyId = Schedule::find($scheduleIds[0] ?? null)?->faculty_id;
+        $assignedFacultyIds = Schedule::whereIn('id', $scheduleIds)
+            ->pluck('faculty_id')
+            ->filter()
+            ->unique()
+            ->values();
+        $hasMissingFaculty = Schedule::whereIn('id', $scheduleIds)
+            ->whereNull('faculty_id')
+            ->exists();
+        $this->currentFacultyId = ($assignedFacultyIds->count() === 1 && ! $hasMissingFaculty)
+            ? (int) $assignedFacultyIds->first()
+            : null;
         $this->showFacultyModal = true;
     }
 
@@ -2032,7 +2062,8 @@ class BlockSchedule extends Component
                     ->where('day', $primaryDay)
                     ->where('start_time', '<', $endTime)
                     ->where('end_time',   '>', $startTime)
-                    ->whereNotIn('pairing_key', array_filter([$pairingKey]))
+                    ->when(! empty($scheduleIds), fn ($query) => $query->whereNotIn('id', $scheduleIds))
+                    ->when(empty($scheduleIds) && filled($pairingKey), fn ($query) => $query->where('pairing_key', '!=', $pairingKey))
                     ->exists();
             }
 
@@ -2067,7 +2098,8 @@ class BlockSchedule extends Component
                     ->where('day', $primaryDay)
                     ->where('start_time', '<', $endTime)
                     ->where('end_time',   '>', $startTime)
-                    ->whereNotIn('pairing_key', array_filter([$pairingKey]))
+                    ->when(! empty($scheduleIds), fn ($query) => $query->whereNotIn('id', $scheduleIds))
+                    ->when(empty($scheduleIds) && filled($pairingKey), fn ($query) => $query->where('pairing_key', '!=', $pairingKey))
                     ->exists();
             }
 
@@ -2161,14 +2193,7 @@ class BlockSchedule extends Component
         // UPDATED: Always detect conflicts, even in edit mode
         $scheduleRows = $filteredSchedules
             ->whereIn('day', $dayOrder)
-            ->groupBy(function ($schedule) {
-                return $schedule->pairing_key ?: implode('|', [
-                    $schedule->subject_id,
-                    $schedule->room_id,
-                    $schedule->start_time,
-                    $schedule->end_time,
-                ]);
-            })
+            ->groupBy(fn (Schedule $schedule) => $this->blockScheduleGroupKey($schedule))
             ->map(function ($group, $pairingKey) use ($dayOrder) {
                 $first = $group->first();
                 $editKey = $this->workspaceEditKey((string) $pairingKey);
@@ -2178,11 +2203,27 @@ class BlockSchedule extends Component
                     ->sortBy(fn ($day) => array_search($day, $dayOrder, true))
                     ->values()
                     ->all();
+                $assignedFacultyIds = $group->pluck('faculty_id')
+                    ->filter()
+                    ->unique()
+                    ->values();
+                $hasMissingFaculty = $group->contains(fn (Schedule $schedule) => blank($schedule->faculty_id));
+                $hasSplitFaculty = $assignedFacultyIds->count() > 1;
+                $groupFaculty = ($assignedFacultyIds->count() === 1 && ! $hasMissingFaculty)
+                    ? $group->firstWhere('faculty_id', $assignedFacultyIds->first())?->faculty
+                    : null;
+                $groupStatus = match (true) {
+                    $group->every(fn (Schedule $schedule) => $schedule->status === Schedule::STATUS_FINALIZED) => Schedule::STATUS_FINALIZED,
+                    $groupFaculty !== null => Schedule::STATUS_FACULTY_ASSIGNED,
+                    default => Schedule::STATUS_PARTIAL,
+                };
 
                 // UPDATED: ALWAYS detect conflicts, including during edit mode
-                $hasConflict    = false;
-                $conflictReason = '';
-                $conflictType   = '';
+                $hasConflict    = $hasSplitFaculty;
+                $conflictReason = $hasSplitFaculty
+                    ? 'This subject has different faculty across its schedule days. Assign one faculty to the grouped row.'
+                    : '';
+                $conflictType   = $hasSplitFaculty ? 'FACULTY SPLIT' : '';
 
                 // Check if we have real-time conflict data from edit mode
                 if ($this->workspaceEditMode && isset($this->workspaceRealTimeConflicts[$editKey])) {
@@ -2195,11 +2236,11 @@ class BlockSchedule extends Component
                     $hasConflict = true;
                     $conflictReason = 'Workspace edit needs review';
                     $conflictType = 'VALIDATION ERROR';
-                } elseif ($first->faculty_id) {
+                } elseif ($groupFaculty) {
                     // Normal conflict detection outside edit mode
                     foreach ($group as $slot) {
                         $clash = Schedule::activeTerm($this->semester, $this->schoolYear)
-                            ->where('faculty_id', $first->faculty_id)
+                            ->where('faculty_id', $groupFaculty->id)
                             ->where('day', $slot->day)
                             ->where('id', '!=', $slot->id)
                             ->where('start_time', '<', $slot->end_time)
@@ -2221,8 +2262,8 @@ class BlockSchedule extends Component
                     'ids'               => $group->pluck('id')->all(),
                     'subject'           => $first->subject,
                     'room'              => $first->room,
-                    'faculty'           => $first->faculty,
-                    'status'            => $first->status,
+                    'faculty'           => $groupFaculty,
+                    'status'            => $groupStatus,
                     'start_time'        => $first->start_time,
                     'end_time'          => $first->end_time,
                     'days'              => $days,
