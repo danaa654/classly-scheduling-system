@@ -163,6 +163,101 @@
                 </div>
 
                 {{-- ════════════════════════════════════════════════════
+                     PENDING FACULTY REVISION REQUESTS — Admin / Registrar
+                     Placed here so it's visible immediately on page load,
+                     before the metrics and activity feed.
+                ════════════════════════════════════════════════════ --}}
+                @if($canReviewRevision && $pendingRevisionRequests->isNotEmpty())
+                    <div class="mt-5 rounded-2xl border border-amber-300/60 bg-amber-50/80 dark:bg-amber-950/20 dark:border-amber-700/40 overflow-hidden shadow-sm print:hidden">
+
+                        {{-- Header --}}
+                        <div class="flex items-center justify-between px-4 py-2.5 border-b border-amber-200/60 dark:border-amber-800/40">
+                            <div class="flex items-center gap-2">
+                                <div class="w-6 h-6 rounded-lg bg-amber-500 flex items-center justify-center shadow-sm flex-shrink-0">
+                                    <svg class="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                    </svg>
+                                </div>
+                                <div>
+                                    <h3 class="text-[12px] font-black uppercase tracking-widest text-amber-800 dark:text-amber-300">⏳ Pending Faculty Revision Requests</h3>
+                                    <p class="text-[9px] font-semibold text-amber-600 dark:text-amber-500 uppercase tracking-wider">Awaiting your review</p>
+                                </div>
+                            </div>
+                            <span class="rounded-full bg-amber-500 px-2.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-white shadow-sm">
+                                {{ $pendingRevisionRequests->count() }} pending
+                            </span>
+                        </div>
+
+                        {{-- Compact list rows (one per request) --}}
+                        <div class="divide-y divide-amber-100/60 dark:divide-amber-900/20">
+                            @foreach($pendingRevisionRequests as $req)
+                                @php
+                                    $reqRole = match($req->requester?->role) {
+                                        'dean'           => 'Dean',
+                                        'oic'            => 'OIC',
+                                        'associate_dean' => 'Assoc. Dean',
+                                        default          => ucfirst(str_replace('_', ' ', $req->requester?->role ?? '')),
+                                    };
+                                @endphp
+                                <div class="flex items-center gap-3 px-4 py-2.5 bg-white/80 dark:bg-slate-900/50 hover:bg-amber-50/60 dark:hover:bg-amber-950/20 transition-colors">
+
+                                    {{-- Subject + faculty change info --}}
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex items-center gap-2 flex-wrap">
+                                            <span class="text-[12px] font-black uppercase text-slate-800 dark:text-slate-100">
+                                                {{ $req->subject?->subject_code }}
+                                            </span>
+                                            @if($req->subject?->description)
+                                                <span class="text-[10px] text-slate-500 dark:text-slate-400 hidden sm:inline truncate">— {{ Str::limit($req->subject->description, 35) }}</span>
+                                            @endif
+                                            <span class="rounded bg-blue-100 dark:bg-blue-900/40 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-wide text-blue-700 dark:text-blue-300 shrink-0">
+                                                {{ $req->requester?->name ?? 'Unknown' }} · {{ $reqRole }}
+                                            </span>
+                                        </div>
+                                        <div class="flex items-center gap-1.5 mt-0.5 text-[10px]">
+                                            <span class="text-slate-500 dark:text-slate-400 truncate">{{ $req->currentFaculty?->full_name ?? 'Unassigned' }}</span>
+                                            <svg class="w-3 h-3 text-slate-300 dark:text-slate-600 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+                                            </svg>
+                                            <span class="font-bold text-emerald-600 dark:text-emerald-400 truncate">{{ $req->requestedFaculty?->full_name ?? '—' }}</span>
+                                            @if($req->reason)
+                                                <span class="hidden lg:inline text-slate-400 dark:text-slate-500 italic truncate max-w-[200px]">"{{ Str::limit($req->reason, 45) }}"</span>
+                                            @endif
+                                        </div>
+                                    </div>
+
+                                    {{-- Timestamp --}}
+                                    <span class="text-[9px] text-slate-400 dark:text-slate-500 shrink-0 hidden md:inline whitespace-nowrap">{{ $req->created_at->diffForHumans() }}</span>
+
+                                    {{-- Approve / Reject buttons --}}
+                                    <div class="flex items-center gap-1.5 shrink-0">
+                                        <button
+                                            type="button"
+                                            wire:click="approveRevisionRequest({{ $req->id }})"
+                                            wire:loading.attr="disabled"
+                                            wire:target="approveRevisionRequest({{ $req->id }})"
+                                            wire:confirm="Approve this faculty revision for {{ $req->subject?->subject_code }}? The schedule will be updated immediately."
+                                            class="rounded-lg bg-emerald-600 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-white hover:bg-emerald-500 transition-all active:scale-95 disabled:opacity-60">
+                                            ✓ Approve
+                                        </button>
+                                        <button
+                                            type="button"
+                                            wire:click="rejectRevisionRequest({{ $req->id }})"
+                                            wire:loading.attr="disabled"
+                                            wire:target="rejectRevisionRequest({{ $req->id }})"
+                                            wire:confirm="Reject this faculty revision request? The requester will be notified."
+                                            class="rounded-lg bg-red-600 px-3 py-1.5 text-[9px] font-black uppercase tracking-widest text-white hover:bg-red-500 transition-all active:scale-95 disabled:opacity-60">
+                                            ✕ Reject
+                                        </button>
+                                    </div>
+
+                                </div>
+                            @endforeach
+                        </div>
+                    </div>
+                @endif
+
+                {{-- ════════════════════════════════════════════════════
                      LIVE CLOCK RIBBON
                 ════════════════════════════════════════════════════ --}}
                 <div class="mt-7 mb-1 flex items-center gap-3">
@@ -303,6 +398,8 @@
 
 
             </div>
+
+
 
             {{-- ── MAJOR SELECTION (open folder view) — 2-column workspace layout ── --}}
             <template x-for="(college, code) in colleges" :key="code">
@@ -496,22 +593,45 @@
                                     </thead>
                                     <tbody class="divide-y divide-slate-50 dark:divide-slate-800/80">
                                         <template x-for="section in collegeSections(college)" :key="section.code">
-                                            <tr class="hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition-colors">
-                                                <td class="px-4 py-3">
-                                                    <span class="text-[13px] font-black text-slate-800 dark:text-slate-100" x-text="section.code"></span>
-                                                </td>
+                                            <tr class="cursor-pointer hover:bg-slate-100/80 dark:hover:bg-slate-800/60 transition-colors group/row"
+                                                @click="
+                                                    openCollege = section.college;
+                                                    openMajor = section.major;
+                                                    $wire.set('selectedDepartment', section.major);
+                                                    $wire.set('selectedYear', section.yearLevel);
+                                                    $wire.set('selectedSection', section.sectionLetter);
+                                                ">
                                                 <td class="px-4 py-3">
                                                     <div class="flex items-center gap-2">
+                                                        <span class="text-[13px] font-black text-slate-800 dark:text-slate-100" x-text="section.code"></span>
+                                                        {{-- Arrow hint on hover --}}
+                                                        <svg class="w-3.5 h-3.5 text-slate-300 dark:text-slate-600 opacity-0 group-hover/row:opacity-100 transition-opacity flex-shrink-0"
+                                                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M9 5l7 7-7 7"/>
+                                                        </svg>
+                                                    </div>
+                                                </td>
+                                                <td class="px-4 py-3">
+                                                    <div class="flex items-center gap-2 flex-wrap">
                                                         <span class="text-[12px] font-bold text-slate-600 dark:text-slate-300 tabular-nums" x-text="section.units + ' / ' + section.maxUnits + ' Units Loaded'"></span>
                                                         <span class="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider border"
-                                                              :class="section.units >= section.maxUnits
+                                                              :class="section.sectionStatus === 'finalized'
                                                                         ? 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
-                                                                        : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800'"
-                                                              x-text="section.units >= section.maxUnits ? 'Full' : 'Partial'"></span>
+                                                                        : section.sectionStatus === 'unassigned'
+                                                                            ? 'bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800'
+                                                                            : 'bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border-amber-200 dark:border-amber-800'"
+                                                              x-text="section.sectionStatus === 'finalized'
+                                                                        ? section.totalCount + ' / ' + section.totalCount + ' Finalized'
+                                                                        : section.sectionStatus === 'unassigned'
+                                                                            ? 'Unassigned'
+                                                                            : section.scheduledCount + ' / ' + section.totalCount + ' Partial'"></span>
                                                     </div>
                                                 </td>
                                                 <td class="px-4 py-3 text-right">
-                                                    <span class="text-[11px] font-semibold text-slate-400 dark:text-slate-500" x-text="'Updated at ' + section.updated"></span>
+                                                    <div class="flex items-center justify-end gap-2">
+                                                        <span class="text-[11px] font-semibold text-slate-400 dark:text-slate-500" x-text="'Updated at ' + section.updated"></span>
+                                                        <span class="text-[10px] font-black uppercase tracking-widest text-slate-300 dark:text-slate-600 opacity-0 group-hover/row:opacity-100 transition-opacity">View →</span>
+                                                    </div>
                                                 </td>
                                             </tr>
                                         </template>
@@ -537,12 +657,6 @@
          SCHEDULE CONTENT (shown only when a major is selected)
     ════════════════════════════════════════════════════════════════════ --}}
     <div x-show="isScheduleVisible()" x-transition.opacity class="px-5 pb-6">
-        {{-- College color accent bar at top --}}
-        <template x-for="(college, code) in colleges" :key="code">
-            <div x-show="openCollege === code"
-                 class="max-w-[1500px] mx-auto mb-3 h-1 rounded-full bg-gradient-to-r"
-                 :class="colors[code].bg"></div>
-        </template>
         <div class="max-w-[1500px] mx-auto space-y-4">
 
         {{-- ── Flash Message ─────────────────────────────────────────────── --}}
@@ -554,8 +668,18 @@
                     'bg-amber-50 border-amber-200 text-amber-800 dark:bg-amber-900/20 dark:border-amber-700 dark:text-amber-300' => $flashType === 'warning',
                     'bg-blue-50 border-blue-200 text-blue-800 dark:bg-blue-900/20 dark:border-blue-700 dark:text-blue-300'       => $flashType === 'info',
                 ])
-                 x-data
-                 x-init="setTimeout(() => $el.remove(), 6000)">
+                 x-data="{ visible: true }"
+                 x-show="visible"
+                 x-transition:leave="transition ease-in duration-300"
+                 x-transition:leave-start="opacity-100 translate-y-0"
+                 x-transition:leave-end="opacity-0 -translate-y-1"
+                 x-init="
+                     setTimeout(() => {
+                         visible = false;
+                         $wire.set('flashMessage', '');
+                         $wire.set('flashType', '');
+                     }, 5000)
+                 ">
                 <span class="text-base mt-0.5 flex-shrink-0">
                     @if($flashType === 'success') ✅ @elseif($flashType === 'error') ⛔ @elseif($flashType === 'info') ℹ️ @else ⚠️ @endif
                 </span>
@@ -926,9 +1050,212 @@
                 </div>
             @endif
 
-            <div class="print:hidden border-b border-slate-200 dark:border-slate-800
-                        bg-slate-50/90 dark:bg-slate-800/40 px-8 py-4">
-                <div class="flex flex-wrap gap-5 items-end">
+            {{-- ──────────────────────────────────────────────────────────────
+                 MY REVISION REQUESTS — Dean / OIC / Associate Dean view
+                 Shows the LATEST revision request per subject (deduplicated),
+                 up to 8 cards. A "+N more" badge appears if the user has
+                 submitted requests for more than 8 distinct subjects.
+                 Collapsible via Alpine.js toggle; collapsed by default.
+                 ────────────────────────────────────────────────────────────── --}}
+            @if($canRequestRevision && !$canReviewRevision && $myRevisionRequests->isNotEmpty())
+                @php
+                    $myPending  = $myRevisionRequests->where('status', 'pending')->count();
+                    $myApproved = $myRevisionRequests->where('status', 'approved')->count();
+                    $myRejected = $myRevisionRequests->where('status', 'rejected')->count();
+                    $myOverflow = max(0, ($myRevisionRequestsTotal ?? 0) - $myRevisionRequests->count());
+                @endphp
+                <div class="print:hidden border-b border-blue-200/40 bg-blue-50/40 dark:bg-blue-950/10 dark:border-blue-800/20"
+                     x-data="{ expanded: false }">
+
+                    {{-- ── Collapsible header ── --}}
+                    <button type="button"
+                            @click="expanded = !expanded"
+                            class="w-full flex items-center justify-between gap-3 px-8 py-3
+                                   hover:bg-blue-50/80 dark:hover:bg-blue-950/20
+                                   transition-colors text-left group">
+
+                        <div class="flex items-center gap-2.5 min-w-0">
+                            {{-- Icon + title --}}
+                            <span class="text-[13px] leading-none select-none">📋</span>
+                            <p class="text-[11px] font-black uppercase tracking-widest
+                                      text-blue-700 dark:text-blue-300 shrink-0">
+                                My Faculty Revision Requests
+                            </p>
+
+                            {{-- Status pills --}}
+                            <div class="flex items-center gap-1.5 flex-wrap">
+                                @if($myApproved > 0)
+                                    <span class="inline-flex items-center gap-0.5 rounded-full
+                                                 bg-emerald-500/15 border border-emerald-300/40
+                                                 px-2 py-0.5 text-[8px] font-black uppercase
+                                                 text-emerald-700 dark:text-emerald-300">
+                                        <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                                        </svg>
+                                        {{ $myApproved }} Approved
+                                    </span>
+                                @endif
+                                @if($myPending > 0)
+                                    <span class="inline-flex items-center gap-0.5 rounded-full
+                                                 bg-amber-500/15 border border-amber-300/40
+                                                 px-2 py-0.5 text-[8px] font-black uppercase
+                                                 text-amber-700 dark:text-amber-300">
+                                        <svg class="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24">
+                                            <circle cx="12" cy="12" r="10" opacity=".3"/><path d="M12 7v5l3 3"/>
+                                        </svg>
+                                        {{ $myPending }} Pending
+                                    </span>
+                                @endif
+                                @if($myRejected > 0)
+                                    <span class="inline-flex items-center gap-0.5 rounded-full
+                                                 bg-red-500/15 border border-red-300/40
+                                                 px-2 py-0.5 text-[8px] font-black uppercase
+                                                 text-red-700 dark:text-red-300">
+                                        <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"/>
+                                        </svg>
+                                        {{ $myRejected }} Rejected
+                                    </span>
+                                @endif
+                                @if($myOverflow > 0)
+                                    <span class="rounded-full bg-slate-200/80 dark:bg-slate-700/60
+                                                 border border-slate-300/40 dark:border-slate-600/40
+                                                 px-2 py-0.5 text-[8px] font-black uppercase
+                                                 text-slate-500 dark:text-slate-400">
+                                        +{{ $myOverflow }} more
+                                    </span>
+                                @endif
+                            </div>
+                        </div>
+
+                        {{-- Chevron --}}
+                        <svg class="w-4 h-4 text-blue-400 dark:text-blue-500 shrink-0
+                                    transition-transform duration-200"
+                             :class="expanded ? 'rotate-180' : ''"
+                             fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 9l-7 7-7-7"/>
+                        </svg>
+                    </button>
+
+                    {{-- ── Collapsible body ── --}}
+                    <div x-show="expanded"
+                         x-transition:enter="transition ease-out duration-200"
+                         x-transition:enter-start="opacity-0 -translate-y-1"
+                         x-transition:enter-end="opacity-100 translate-y-0"
+                         x-transition:leave="transition ease-in duration-150"
+                         x-transition:leave-start="opacity-100 translate-y-0"
+                         x-transition:leave-end="opacity-0 -translate-y-1"
+                         class="px-8 pb-5">
+
+                        {{-- Grid: up to 4 cols wide, max 8 cards (2 neat rows at XL) --}}
+                        <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                            @foreach($myRevisionRequests as $myReq)
+                                @php
+                                    [$reqBorder, $reqBg, $reqBadgeBg, $reqBadgeText, $reqIcon] = match($myReq->status) {
+                                        'approved' => [
+                                            'border-emerald-200 dark:border-emerald-800/50',
+                                            'bg-emerald-50/80 dark:bg-emerald-950/20',
+                                            'bg-emerald-100 dark:bg-emerald-900/40',
+                                            'text-emerald-800 dark:text-emerald-300',
+                                            '✓',
+                                        ],
+                                        'rejected' => [
+                                            'border-red-200 dark:border-red-800/50',
+                                            'bg-red-50/80 dark:bg-red-950/20',
+                                            'bg-red-100 dark:bg-red-900/40',
+                                            'text-red-800 dark:text-red-300',
+                                            '✕',
+                                        ],
+                                        default => [
+                                            'border-amber-200 dark:border-amber-800/50',
+                                            'bg-white/90 dark:bg-slate-900/60',
+                                            'bg-amber-100 dark:bg-amber-900/40',
+                                            'text-amber-800 dark:text-amber-300',
+                                            '⏳',
+                                        ],
+                                    };
+                                @endphp
+
+                                <div class="rounded-xl border p-2.5 shadow-sm {{ $reqBorder }} {{ $reqBg }}">
+
+                                    {{-- Top row: badge + timestamp --}}
+                                    <div class="flex items-center justify-between gap-1.5 mb-1.5">
+                                        <span class="inline-block rounded px-1.5 py-0.5
+                                                     text-[8px] font-black uppercase tracking-wide
+                                                     {{ $reqBadgeBg }} {{ $reqBadgeText }}">
+                                            {{ $reqIcon }} {{ ucfirst($myReq->status) }}
+                                        </span>
+                                        <span class="text-[8px] text-slate-400 dark:text-slate-500 shrink-0">
+                                            {{ $myReq->created_at->diffForHumans() }}
+                                        </span>
+                                    </div>
+
+                                    {{-- Subject --}}
+                                    <p class="font-black uppercase text-slate-800 dark:text-slate-100
+                                              text-[11px] leading-snug truncate mb-0.5">
+                                        {{ $myReq->subject?->subject_code }}
+                                    </p>
+                                    @if($myReq->subject?->description)
+                                        <p class="text-[9px] text-slate-500 dark:text-slate-400 truncate mb-2">
+                                            {{ $myReq->subject->description }}
+                                        </p>
+                                    @endif
+
+                                    {{-- Faculty change --}}
+                                    <div class="space-y-0.5 mb-1.5">
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="text-[8px] font-black uppercase tracking-widest
+                                                         text-slate-400 w-6 shrink-0">From</span>
+                                            <span class="text-[10px] font-semibold text-slate-500 dark:text-slate-400 truncate">
+                                                {{ $myReq->currentFaculty?->full_name ?? 'Unassigned' }}
+                                            </span>
+                                        </div>
+                                        <div class="flex items-center gap-1.5">
+                                            <span class="text-[8px] font-black uppercase tracking-widest
+                                                         text-slate-400 w-6 shrink-0">To</span>
+                                            <span class="text-[10px] font-bold text-slate-800 dark:text-slate-100 truncate">
+                                                {{ $myReq->requestedFaculty?->full_name ?? '—' }}
+                                            </span>
+                                        </div>
+                                    </div>
+
+                                    {{-- Reviewer note (approved / rejected only) --}}
+                                    @if($myReq->status !== 'pending' && $myReq->reviewer)
+                                        <div class="rounded-lg px-2 py-1 text-[8px]
+                                                    {{ $myReq->status === 'approved'
+                                                        ? 'bg-emerald-100/60 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400'
+                                                        : 'bg-red-100/60 dark:bg-red-900/20 text-red-700 dark:text-red-400' }}">
+                                            <span class="font-black uppercase tracking-wider">
+                                                {{ $myReq->status === 'approved' ? 'Approved' : 'Rejected' }}
+                                                by {{ $myReq->reviewer->name }}
+                                            </span>
+                                            @if($myReq->review_note)
+                                                <p class="mt-0.5 italic">{{ $myReq->review_note }}</p>
+                                            @endif
+                                        </div>
+                                    @endif
+                                </div>
+                            @endforeach
+
+                            {{-- Overflow placeholder card — shown when more than 8 subjects exist --}}
+                            @if($myOverflow > 0)
+                                <div class="rounded-xl border border-dashed border-slate-300 dark:border-slate-700
+                                            bg-slate-50/60 dark:bg-slate-800/30
+                                            p-2.5 flex flex-col items-center justify-center gap-1 text-center">
+                                    <span class="text-[22px] font-black text-slate-300 dark:text-slate-600">
+                                        +{{ $myOverflow }}
+                                    </span>
+                                    <p class="text-[8px] font-black uppercase tracking-widest
+                                              text-slate-400 dark:text-slate-500">
+                                        more subject{{ $myOverflow !== 1 ? 's' : '' }}
+                                    </p>
+                                </div>
+                            @endif
+                        </div>
+                    </div>
+                </div>
+            @endif
+                <div class="flex flex-wrap gap-5 items-end px-8 py-5">
 
                     {{-- ── Left: Year / Section (Department handled by folder nav) ──── --}}
                     <div class="flex flex-col gap-1.5" style="display:none !important;">
@@ -1175,6 +1502,36 @@
                                    text-[15px] font-black uppercase tracking-tight
                                    text-slate-800 dark:text-slate-100">
                             {{ $sched->subject?->subject_code ?? '—' }}
+
+                            {{-- Subject-type pill: Major (programme) vs Minor/GenEd --}}
+                            @if($sched->status !== 'not_scheduled')
+                                <div class="mt-1">
+                                    @if($sched->is_major_subject)
+                                        <span class="inline-block rounded px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+                                            Major
+                                        </span>
+                                    @else
+                                        <span class="inline-block rounded px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest bg-teal-100 text-teal-700 dark:bg-teal-900/40 dark:text-teal-300">
+                                            Minor/GE
+                                        </span>
+                                    @endif
+
+                                    {{-- Jurisdiction lock: row is visible but outside current user's edit scope --}}
+                                    @php
+                                        $userRole = Auth::user()?->role;
+                                        $rowOutsideJurisdiction = in_array($userRole, ['dean','oic','associate_dean'], true)
+                                            && ! $sched->can_assign_fac
+                                            && ! $sched->can_request_rev
+                                            && $sched->status !== 'not_scheduled';
+                                    @endphp
+                                    @if($rowOutsideJurisdiction)
+                                        <span class="inline-block rounded px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400 ml-0.5"
+                                              title="View-only: this subject type is outside your jurisdiction">
+                                            🔒 View-only
+                                        </span>
+                                    @endif
+                                </div>
+                            @endif
                         </td>
 
                         {{-- ── Description ──────────────────────────────── --}}
@@ -1340,11 +1697,14 @@
                                         </span>
                                     @endif
                                 </div>
-                            @elseif($sched->status === \App\Models\Schedule::STATUS_FINALIZED && $canRequestRevision)
-                                {{-- Always show faculty name first, then the revision action below ─────── --}}
+                            @elseif($sched->status === \App\Models\Schedule::STATUS_FINALIZED && $sched->can_request_rev)
+                                {{--
+                                    FINALIZED ROW — current user has row-level revision authority.
+                                    Show faculty name + revision request controls.
+                                --}}
                                 <div class="flex flex-col items-center gap-1.5">
 
-                                    {{-- Faculty name (always visible) ────────────────────────────────── --}}
+                                    {{-- Faculty name (always visible) --}}
                                     @if($sched->faculty)
                                         <div class="flex items-center gap-1.5 w-full">
                                             <div class="w-5 h-5 rounded-full bg-emerald-500 flex-shrink-0 flex items-center justify-center">
@@ -1360,7 +1720,7 @@
                                         <span class="text-[11px] italic text-slate-400 dark:text-slate-500">Unassigned</span>
                                     @endif
 
-                                    {{-- Revision action ─────────────────────────────────────────────── --}}
+                                    {{-- Revision action --}}
                                     @if(($sched->revision_request?->status ?? null) === \App\Models\ScheduleRevisionRequest::STATUS_PENDING)
                                         <span class="inline-block w-full text-center rounded-lg border border-amber-300 bg-amber-100 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-amber-800 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-200">
                                             ⏳ Pending Revision
@@ -1369,6 +1729,12 @@
                                         <span class="inline-block w-full text-center rounded-lg border border-emerald-300 bg-emerald-100 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-emerald-800 dark:border-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200">
                                             ✓ Revision Approved
                                         </span>
+                                        <button type="button"
+                                                wire:click="openRevisionModal({{ json_encode($sched->ids) }}, {{ $sched->subject?->id ?? 0 }})"
+                                                class="w-full rounded-lg border border-slate-300 bg-slate-50 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-600 transition hover:border-amber-400 hover:bg-amber-50 hover:text-amber-700 dark:border-slate-600 dark:bg-slate-800/50 dark:text-slate-400 dark:hover:border-amber-700 dark:hover:text-amber-300"
+                                                title="Request another faculty change for this subject">
+                                            ↻ Request Again
+                                        </button>
                                     @elseif(($sched->revision_request?->status ?? null) === \App\Models\ScheduleRevisionRequest::STATUS_REJECTED)
                                         <button type="button"
                                                 wire:click="openRevisionModal({{ json_encode($sched->ids) }}, {{ $sched->subject?->id ?? 0 }})"
@@ -1384,8 +1750,12 @@
                                     @endif
 
                                 </div>
-                            @elseif($canAssign && $sched->status !== 'not_scheduled')
 
+                            @elseif($sched->can_assign_fac && $sched->status !== 'not_scheduled')
+                                {{--
+                                    NON-FINALIZED ROW — current user has row-level assign authority.
+                                    Show interactive faculty assignment button.
+                                --}}
                                 <button
                                     wire:click="openFacultyModal(
                                         '{{ $sched->pairing_key }}',
@@ -1452,21 +1822,48 @@
                                 </button>
 
                             @elseif($sched->faculty)
-                                <div class="flex items-center justify-center gap-2 px-2 py-2">
-                                    <span class="text-[13px] font-semibold text-slate-600 dark:text-slate-400">
-                                        {{ $sched->faculty->full_name }}
-                                    </span>
-                                    <span class="text-slate-400 dark:text-slate-500 text-xs">🔒</span>
+                                {{--
+                                    READ-ONLY ROW WITH FACULTY — user can see the assignment
+                                    but cannot interact (outside jurisdiction or finalized without revision rights).
+                                --}}
+                                <div class="flex flex-col items-center gap-1 px-2 py-1.5">
+                                    <div class="flex items-center gap-2 w-full">
+                                        <div class="w-5 h-5 rounded-full bg-slate-400 dark:bg-slate-600 flex-shrink-0 flex items-center justify-center">
+                                            <svg class="w-3 h-3 text-white" fill="currentColor" viewBox="0 0 20 20">
+                                                <path d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z"/>
+                                            </svg>
+                                        </div>
+                                        <span class="text-[12px] font-semibold text-slate-600 dark:text-slate-400 truncate leading-snug">
+                                            {{ $sched->faculty->full_name }}
+                                        </span>
+                                        <span class="text-slate-300 dark:text-slate-600 text-[11px] ml-auto flex-shrink-0" title="Read-only for your role">🔒</span>
+                                    </div>
+                                    {{-- Jurisdiction hint shown in workspace edit mode so the user understands why the row is locked --}}
+                                    @if($workspaceEditMode)
+                                        <span class="inline-block w-full text-center rounded px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest bg-slate-100 text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
+                                            Outside jurisdiction
+                                        </span>
+                                    @endif
                                 </div>
 
                             @else
-                                <span @class([
-                                    'text-[12px] italic',
-                                    'font-black uppercase text-red-600 dark:text-red-300' => $sched->status === 'not_scheduled',
-                                    'text-slate-400 dark:text-slate-500' => $sched->status !== 'not_scheduled',
-                                ])>
-                                    {{ $sched->status === 'not_scheduled' ? 'UNASSIGNED' : 'Unassigned' }}
-                                </span>
+                                {{--
+                                    READ-ONLY ROW WITHOUT FACULTY — unassigned but not editable by this user.
+                                --}}
+                                <div class="flex flex-col items-center gap-1">
+                                    <span @class([
+                                        'text-[12px] italic',
+                                        'font-black uppercase text-red-600 dark:text-red-300' => $sched->status === 'not_scheduled',
+                                        'text-slate-400 dark:text-slate-500' => $sched->status !== 'not_scheduled',
+                                    ])>
+                                        {{ $sched->status === 'not_scheduled' ? 'UNASSIGNED' : 'Unassigned' }}
+                                    </span>
+                                    @if($workspaceEditMode && $sched->status !== 'not_scheduled')
+                                        <span class="inline-block rounded px-1.5 py-0.5 text-[8px] font-black uppercase tracking-widest bg-slate-100 text-slate-500 dark:bg-slate-800/60 dark:text-slate-400">
+                                            Outside jurisdiction
+                                        </span>
+                                    @endif
+                                </div>
                             @endif
                         </td>
 
@@ -1475,11 +1872,11 @@
                             @php
                                 $statusMap = [
                                     \App\Models\Schedule::STATUS_PARTIAL          => [
-                                        'label' => 'Partial',
+                                        'label' => 'Scheduled',
                                         'cls'   => 'bg-amber-100 text-amber-800 border-amber-200 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700',
                                     ],
                                     \App\Models\Schedule::STATUS_FACULTY_ASSIGNED => [
-                                        'label' => 'Assigned',
+                                        'label' => 'Partial',
                                         'cls'   => 'bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700',
                                     ],
                                     \App\Models\Schedule::STATUS_FINALIZED        => [
@@ -1487,7 +1884,7 @@
                                         'cls'   => 'bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-300 dark:border-emerald-700',
                                     ],
                                     'not_scheduled' => [
-                                        'label' => 'Not Scheduled',
+                                        'label' => 'Unassigned',
                                         'cls'   => 'bg-red-600 text-white border-red-500 dark:bg-red-500 dark:text-white dark:border-red-400',
                                     ],
                                 ];
@@ -2366,59 +2763,46 @@
     }
 
     @media print {
-        /* ── Hide every interactive / chrome element ──────────────────── */
-        aside, nav, header, footer,
-        .sidebar, .navbar,
-        [class*="sidebar"], [class*="navbar"],
-        [class*="nav-bar"], [class*="top-bar"], [class*="topbar"],
-        .screen-only, button, [wire\:confirm] {
-            display: none !important;
+        /*
+         * ── VISIBILITY-BASED PRINT ISOLATION ─────────────────────────────────
+         * Hide EVERYTHING on the page, then selectively reveal only
+         * #official-print-block and its descendants. This is the most reliable
+         * cross-browser approach — it sidesteps the need to enumerate every
+         * sidebar / navbar / widget that should be hidden and avoids Livewire's
+         * wire:id wrapper elements fighting back against display:none overrides.
+         * ─────────────────────────────────────────────────────────────────── */
+        body * {
+            visibility: hidden !important;
         }
 
-        /* The entire interactive workspace card (color bar, gradient header,
-           filters, action buttons, and the editable schedule table) is
-           replaced on the printed page by #official-print-block below.
-           Hiding it here — rather than trying to selectively hide its
-           columns with :nth-child rules — is what fixes the old leaky,
-           garbled print output (it was printing form controls and the
-           Faculty column because the column-hiding hacks didn't keep up
-           with the table's structure). */
-        #study-load-container {
-            display: none !important;
+        #official-print-block,
+        #official-print-block * {
+            visibility: visible !important;
         }
 
+        /* Must explicitly set display:block to override class="hidden"
+           (visibility:visible alone cannot un-hide display:none elements).
+           position:absolute pins it to the page origin so no blank space
+           from all the hidden-but-still-laid-out content above it.
+           position:fixed is avoided — Chrome drops fixed elements in print. */
+        #official-print-block {
+            display: block !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            background: white !important;
+            color: #1e293b !important;
+            font-family: 'Calibri', 'Arial', sans-serif !important;
+        }
+
+        /* ── Suppress all decorative effects ─────────────────────────────── */
         *, *::before, *::after {
             box-shadow: none !important;
             text-shadow: none !important;
         }
 
-        html, body {
-            margin: 0 !important;
-            padding: 0 !important;
-            background: white !important;
-            overflow: visible !important;
-            font-family: 'Calibri', 'Arial', sans-serif;
-        }
-
-        [wire\:id], [data-livewire], [data-livewire] > div {
-            all: unset !important;
-            display: block !important;
-        }
-
-        .min-h-screen, div[class*="max-w-"], div[class*="space-y-"] {
-            min-height: unset !important;
-            max-width: 100% !important;
-            background: white !important;
-            padding: 0 !important;
-            margin: 0 !important;
-        }
-
-        /* ── Official Print Block ─────────────────────────────────────── */
-        #official-print-block {
-            display: block !important;
-            color: #1e293b;
-        }
-
+        /* ── Letterhead ───────────────────────────────────────────────────── */
         .print-letterhead {
             text-align: center;
             margin-bottom: 2mm;
@@ -2429,12 +2813,15 @@
             text-transform: uppercase;
             letter-spacing: 0.02em;
             margin: 0;
+            color: #1e293b;
         }
         .print-letterhead p {
             font-size: 10pt;
             margin: 1mm 0 0;
+            color: #475569;
         }
 
+        /* ── Title block (double rule) ────────────────────────────────────── */
         .print-title-block {
             text-align: center;
             border-top: 2px solid #1e293b;
@@ -2448,26 +2835,31 @@
             text-transform: uppercase;
             letter-spacing: 0.04em;
             margin: 0;
+            color: #1e293b;
         }
         .print-title-block p {
             font-size: 9.5pt;
             font-weight: 700;
             text-transform: uppercase;
             margin: 1mm 0 0;
+            color: #1e293b;
         }
 
+        /* ── Meta (Dept / Program / Year-Sec) ───────────────────────────── */
         .print-meta {
             margin-bottom: 4mm;
             font-size: 9.5pt;
         }
-        .print-meta p { margin: 0.5mm 0; }
+        .print-meta p { margin: 0.5mm 0; color: #1e293b; }
         .print-meta span {
             display: inline-block;
             width: 26mm;
             font-weight: 900;
             text-transform: uppercase;
+            color: #1e293b;
         }
 
+        /* ── Schedule table ──────────────────────────────────────────────── */
         table.print-table {
             width: 100% !important;
             table-layout: fixed !important;
@@ -2476,13 +2868,14 @@
             page-break-inside: auto;
         }
 
-        table.print-table thead { display: table-header-group; }
+        table.print-table thead {
+            display: table-header-group;
+        }
 
         table.print-table thead tr {
             background-color: #1e293b !important;
-            color: white !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
         }
 
         table.print-table th {
@@ -2494,11 +2887,13 @@
             text-transform: uppercase;
             letter-spacing: 0.05em !important;
             color: white !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
         }
 
         table.print-table td {
             border: 1px solid #cbd5e1 !important;
-            padding: 4px 6px !important;
+            padding: 5px 7px !important;
             font-size: 9pt !important;
             color: #1e293b !important;
             vertical-align: middle !important;
@@ -2507,17 +2902,20 @@
         }
 
         table.print-table td.print-center { text-align: center !important; }
-        table.print-table td.print-subject { font-weight: 700; }
+        table.print-table td.print-subject { font-weight: 700 !important; }
 
         table.print-table tbody tr:nth-child(even) td {
             background-color: #f8fafc !important;
-            -webkit-print-color-adjust: exact;
-            print-color-adjust: exact;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
         }
-        table.print-table tbody tr:nth-child(odd) td { background-color: #ffffff !important; }
+        table.print-table tbody tr:nth-child(odd) td {
+            background-color: #ffffff !important;
+        }
 
         table.print-table tr { page-break-inside: avoid; }
 
+        /* ── Footer ──────────────────────────────────────────────────────── */
         .print-footer {
             margin-top: 5mm;
             padding-top: 2mm;

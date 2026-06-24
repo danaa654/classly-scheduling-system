@@ -263,7 +263,7 @@ class BlockSchedule extends Component
         $scheduledRows = Schedule::activeTerm($this->semester, $this->schoolYear)
             ->whereNotNull('day')
             ->whereNotNull('start_time')
-            ->get(['subject_id', 'updated_at']);
+            ->get(['subject_id', 'status', 'updated_at']);
 
         // subject_id → max(updated_at) for "last activity" display
         $latestBySubject = $scheduledRows
@@ -271,6 +271,12 @@ class BlockSchedule extends Component
             ->map(fn ($rows) => $rows->max('updated_at'));
 
         $scheduledSubjectIds = $scheduledRows->pluck('subject_id')->unique();
+
+        // subject_id set where every schedule row is finalized
+        $finalizedSubjectIds = $scheduledRows
+            ->groupBy('subject_id')
+            ->filter(fn ($rows) => $rows->every(fn ($r) => $r->status === Schedule::STATUS_FINALIZED))
+            ->keys();
 
         // ── 2. Per-college aggregation ──────────────────────────────────────
         foreach (self::COLLEGE_DEPARTMENTS as $collegeCode => $deptCodes) {
@@ -313,15 +319,16 @@ class BlockSchedule extends Component
                 // Group by year_level + section to build one row per block
                 $sectionRows = $deptSubjects
                     ->groupBy(fn ($s) => $s->year_level . '|' . ($s->section ?? 'A'))
-                    ->map(function ($group, $key) use ($deptCode, $scheduledSubjectIds, $latestBySubject) {
+                    ->map(function ($group, $key) use ($deptCode, $collegeCode, $scheduledSubjectIds, $latestBySubject, $finalizedSubjectIds) {
                         [$yearLevel, $section] = explode('|', $key, 2);
 
                         $totalUnits = (int) $group->sum('units');
+                        $totalSubjects = $group->count();
 
-                        // Units that have been placed on a day/time slot
-                        $scheduledUnits = (int) $group
-                            ->filter(fn ($s) => $scheduledSubjectIds->contains($s->id))
-                            ->sum('units');
+                        // Subjects that have been placed on a day/time slot
+                        $scheduledGroup = $group->filter(fn ($s) => $scheduledSubjectIds->contains($s->id));
+                        $scheduledUnits    = (int) $scheduledGroup->sum('units');
+                        $scheduledSubjects = $scheduledGroup->count();
 
                         // Last schedule change for any subject in this section
                         $lastActivity = $group->pluck('id')
@@ -329,11 +336,30 @@ class BlockSchedule extends Component
                             ->filter()
                             ->max();
 
+                        $finalizedSubjects = $group
+                            ->filter(fn ($s) => $finalizedSubjectIds->contains($s->id))
+                            ->count();
+
+                        if ($scheduledSubjects === 0) {
+                            $sectionStatus = 'unassigned';
+                        } elseif ($finalizedSubjects >= $totalSubjects && $totalSubjects > 0) {
+                            $sectionStatus = 'finalized';
+                        } else {
+                            $sectionStatus = 'partial';
+                        }
+
                         return [
-                            'code'     => strtoupper($deptCode) . ' ' . $yearLevel . '-' . $section,
-                            'units'    => $scheduledUnits,
-                            'maxUnits' => $totalUnits,
-                            'updated'  => $lastActivity
+                            'code'             => strtoupper($deptCode) . ' ' . $yearLevel . '-' . $section,
+                            'college'          => $collegeCode,
+                            'major'            => $deptCode,
+                            'yearLevel'        => (string) $yearLevel,
+                            'sectionLetter'    => $section,
+                            'units'            => $scheduledUnits,
+                            'maxUnits'         => $totalUnits,
+                            'scheduledCount'   => $scheduledSubjects,
+                            'totalCount'       => $totalSubjects,
+                            'sectionStatus'    => $sectionStatus,
+                            'updated'          => $lastActivity
                                 ? Carbon::parse($lastActivity)->format('h:i A')
                                 : '—',
                         ];
@@ -417,6 +443,77 @@ class BlockSchedule extends Component
     public function isReadOnlyContext(): bool
     {
         return $this->isReadOnlyDepartment($this->selectedDepartment);
+    }
+
+    /**
+     * Determine whether the given subject is a "major" (programme-specific)
+     * subject, as opposed to a minor / GenEd subject shared across programmes.
+     *
+     * Detection order:
+     *   1. Explicit `type` column on the subjects table ('major' → true;
+     *      'minor', 'gened', 'general' → false).
+     *   2. Fallback: the subject's major/department code must be one of the
+     *      known programme codes listed in ALL_DEPARTMENTS.
+     */
+    protected function isSubjectMajor(?Subject $subject): bool
+    {
+        if (! $subject) {
+            return false;
+        }
+
+        // Prefer an explicit type column if the subjects table carries one.
+        if (array_key_exists('type', $subject->getAttributes())) {
+            return in_array(strtolower((string) $subject->type), ['major', 'program'], true);
+        }
+
+        // Fallback: subjects whose primary code is in ALL_DEPARTMENTS are
+        // treated as major subjects; everything else is minor / GenEd.
+        $code = strtoupper(trim((string) ($subject->major ?: $subject->department ?: '')));
+
+        return $code !== '' && array_key_exists($code, self::ALL_DEPARTMENTS);
+    }
+
+    /**
+     * Row-level edit authority: may the current user edit, assign faculty,
+     * or request revisions for the schedule row whose subject is given?
+     *
+     *  Admin / Registrar  → any row (no restriction)
+     *  Dean / OIC         → major rows within their own college only
+     *                       (rows outside their college are always read-only
+     *                        via isReadOnlyContext() regardless of type)
+     *  Associate Dean     → minor / GenEd rows institution-wide
+     *                       (major rows are read-only for them everywhere)
+     */
+    public function canEditRowSubject(?Subject $subject): bool
+    {
+        $user = Auth::user();
+        $role = $user?->role;
+
+        if (! $role) {
+            return false;
+        }
+
+        // Admin and Registrar have no row-type restriction.
+        if (in_array($role, ['admin', 'registrar'], true)) {
+            return true;
+        }
+
+        $isMajor = $this->isSubjectMajor($subject);
+
+        // Dean / OIC: own-college major rows only.
+        if (in_array($role, ['dean', 'oic'], true)) {
+            if ($this->isReadOnlyContext()) {
+                return false; // Cross-college view → always read-only.
+            }
+            return $isMajor;  // Own college → only programme subjects.
+        }
+
+        // Associate Dean: minor / GenEd rows, institution-wide.
+        if ($role === 'associate_dean') {
+            return ! $isMajor;
+        }
+
+        return false;
     }
 
     /**
@@ -929,6 +1026,11 @@ class BlockSchedule extends Component
 
         return $this->currentBlockSchedules()
             ->where('status', '!=', Schedule::STATUS_FINALIZED)
+            // ── Row-level jurisdiction filter ─────────────────────────────────
+            // Dean/OIC see only their own-college major rows in edit mode.
+            // Associate Dean see only minor/GenEd rows institution-wide.
+            // Admin/Registrar see everything (filter returns true for them).
+            ->filter(fn (Schedule $schedule) => $this->canEditRowSubject($schedule->subject))
             ->groupBy(fn (Schedule $schedule) => $schedule->pairing_key ?: implode('|', [
                 $schedule->subject_id,
                 $schedule->room_id,
@@ -1087,6 +1189,22 @@ class BlockSchedule extends Component
             return;
         }
 
+        // ── Row-level jurisdiction guard ──────────────────────────────────────
+        // Dean/OIC may only assign faculty on major rows in their own college.
+        // Associate Dean may only assign faculty on minor/GenEd rows.
+        $guardSubject = Subject::find($subjectId);
+        if (! $this->canEditRowSubject($guardSubject)) {
+            $user = Auth::user();
+            $this->flashMessage = match ($user?->role) {
+                'dean', 'oic'      => 'Deans and OICs may only assign faculty for major/programme subjects within their college.',
+                'associate_dean'   => 'Associate Deans may only assign faculty for minor/GenEd subjects.',
+                default            => 'You do not have jurisdiction to assign faculty for this subject.',
+            };
+            $this->flashType = 'error';
+            return;
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         $hasFinalizedRows = Schedule::whereIn('id', $scheduleIds)
             ->where('status', Schedule::STATUS_FINALIZED)
             ->exists();
@@ -1126,6 +1244,20 @@ class BlockSchedule extends Component
             $this->flashType = 'error';
             return;
         }
+
+        // ── Row-level jurisdiction guard ──────────────────────────────────────
+        $guardSubject = Subject::find($subjectId);
+        if (! $this->canEditRowSubject($guardSubject)) {
+            $user = Auth::user();
+            $this->flashMessage = match ($user?->role) {
+                'dean', 'oic'    => 'Deans and OICs may only request revisions for major/programme subjects within their college.',
+                'associate_dean' => 'Associate Deans may only request revisions for minor/GenEd subjects.',
+                default          => 'You do not have jurisdiction to request revisions for this subject.',
+            };
+            $this->flashType = 'error';
+            return;
+        }
+        // ─────────────────────────────────────────────────────────────────────
 
         $schedule = Schedule::whereIn('id', $scheduleIds)
             ->where('status', Schedule::STATUS_FINALIZED)
@@ -2173,6 +2305,24 @@ class BlockSchedule extends Component
             return $row;
         });
 
+        // ── Per-row role-scoped action permissions ────────────────────────────
+        // Pre-compute whether the current user may act on each individual row
+        // based on their role AND the subject type (major vs minor/GenEd).
+        // The blade uses these instead of the global canAssign/canRequestRevision
+        // flags so that non-editable rows are shown read-only with context.
+        $globalCanAssign  = $this->canAssignFaculty();
+        $globalCanRevise  = $this->canRequestRevision();
+
+        $scheduleRows = $scheduleRows->map(function ($row) use ($globalCanAssign, $globalCanRevise) {
+            $rowEditable = $this->canEditRowSubject($row->subject);
+
+            $row->is_major_subject = $this->isSubjectMajor($row->subject);
+            $row->can_assign_fac   = $globalCanAssign && $rowEditable;
+            $row->can_request_rev  = $globalCanRevise && $rowEditable;
+
+            return $row;
+        });
+
         $schedules      = $filteredSchedules->whereIn('day', $dayOrder)->groupBy('day');
         $departmentName = $this->getDepartmentName($this->selectedDepartment);
 
@@ -2236,6 +2386,34 @@ class BlockSchedule extends Component
                 ->get()
             : collect();
 
+        // For Dean/OIC/Associate Dean: load their own submitted revision requests
+        // so they can see approval/rejection status in a dedicated panel.
+        // We deduplicate by subject_id so the panel shows ONE card per subject
+        // (the most recent request) — avoids the "5 cards for SP 101" noise.
+        // A maximum of 8 subjects are displayed; the total unique count is passed
+        // separately so the blade can render a "+N more" overflow badge.
+        $user = Auth::user();
+        $myRevisionRequestsAll = ($this->canRequestRevision() && ! $this->canReviewRevisionRequests() && $user)
+            ? ScheduleRevisionRequest::forWorkspace($this->semester, $this->schoolYear)
+                ->where('requested_by', $user->id)
+                ->with([
+                    'subject:id,subject_code,description,year_level,section',
+                    'currentFaculty:id,full_name',
+                    'requestedFaculty:id,full_name',
+                    'reviewer:id,name',
+                ])
+                ->latest()
+                ->get()
+                ->unique('subject_id') // keep the most recent request per subject
+                ->values()
+            : collect();
+
+        // Total unique subjects with any revision request (for overflow badge)
+        $myRevisionRequestsTotal = $myRevisionRequestsAll->count();
+
+        // Only show up to 8 cards — keeps the panel tight and scannable
+        $myRevisionRequests = $myRevisionRequestsAll->take(8);
+
         // ── Official Print Letterhead Data ──────────────────────────────────
         // Resolves the college (e.g. "CCS") that owns the selected department
         // so the printable "Official Block Schedule" can show both the
@@ -2277,7 +2455,9 @@ class BlockSchedule extends Component
             'allRegistrars'           => $allRegistrars,
             'registrarWithPermission' => $registrarWithPermission,
             'recentPermissionLogs'    => $recentPermissionLogs,
-            'pendingRevisionRequests' => $pendingRevisionRequests,
+            'pendingRevisionRequests'      => $pendingRevisionRequests,
+            'myRevisionRequests'           => $myRevisionRequests,
+            'myRevisionRequestsTotal'      => $myRevisionRequestsTotal,
         ]);
     }
 }
