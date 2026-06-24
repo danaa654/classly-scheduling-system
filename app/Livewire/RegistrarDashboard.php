@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\DB;
 class RegistrarDashboard extends Component
 {
     public $schedulingStats      = [];
+    public $systemStatus         = [];
     public $conflicts            = [];
     public $roomUtilization      = [];
     public $facultyLoad          = [];
@@ -23,8 +24,22 @@ class RegistrarDashboard extends Component
     public $unscheduledSubjects  = [];
     public $pendingFaculty       = [];
 
+    public bool $systemReady = false;
+    public array $setupChecklist = [];
+    public bool $setupComplete = false;
+    public array $systemReadyMeta = [];
+    public bool $confirmingMarkReady = false;
+    public bool $confirmingMarkNotReady = false;
+
+    protected $listeners = [
+        'refreshDashboard'   => '$refresh',
+        'systemReadyChanged' => 'refreshSystemReadiness',
+    ];
+
     public function mount(): void
     {
+        $this->loadSystemReadiness();
+        $this->loadSystemStatus();
         $this->loadSchedulingStats();
         $this->loadConflicts();
         $this->loadRoomUtilization();
@@ -32,6 +47,125 @@ class RegistrarDashboard extends Component
         $this->loadRecentActivities();
         $this->loadUnscheduledSubjects();
         $this->loadPendingFaculty();
+    }
+
+    public function refreshSystemReadiness(): void
+    {
+        $this->loadSystemReadiness();
+        $this->loadSystemStatus();
+    }
+
+    public function openMarkReadyModal(): void
+    {
+        $this->loadSystemReadiness();
+
+        if (! $this->setupComplete) {
+            $this->dispatch('notify', [
+                'type'    => 'warning',
+                'message' => 'Please complete all setup steps before marking the system as ready.',
+            ]);
+
+            return;
+        }
+
+        $this->confirmingMarkReady = true;
+    }
+
+    public function cancelMarkReady(): void
+    {
+        $this->confirmingMarkReady = false;
+    }
+
+    public function confirmMarkReady(): void
+    {
+        $this->confirmingMarkReady = false;
+        $this->loadSystemReadiness();
+
+        if (! $this->setupComplete) {
+            $this->dispatch('notify', [
+                'type'    => 'error',
+                'message' => 'Setup checklist is not complete. Cannot mark the system as ready.',
+            ]);
+
+            return;
+        }
+
+        Setting::markSystemReady(auth()->id());
+
+        DB::table('activities')->insert([
+            'user_id'     => auth()->id(),
+            'action'      => 'system_ready',
+            'module'      => 'Settings',
+            'description' => 'Registrar marked the system as ready for ' . (Setting::getAcademicPeriod()['semester_name'] ?? 'current semester'),
+            'created_at'  => now(),
+            'updated_at'  => now(),
+        ]);
+
+        $this->loadSystemReadiness();
+        $this->loadRecentActivities();
+
+        $this->dispatch('systemReadyChanged');
+
+        $this->dispatch('notify', [
+            'type'    => 'success',
+            'message' => 'System marked as ready. Dean-level roles can now access the semester workspace.',
+        ]);
+    }
+
+    public function openMarkNotReadyModal(): void
+    {
+        $this->confirmingMarkNotReady = true;
+    }
+
+    public function cancelMarkNotReady(): void
+    {
+        $this->confirmingMarkNotReady = false;
+    }
+
+    public function confirmMarkNotReady(): void
+    {
+        $this->confirmingMarkNotReady = false;
+
+        Setting::markSystemNotReady(auth()->id());
+
+        DB::table('activities')->insert([
+            'user_id'     => auth()->id(),
+            'action'      => 'system_not_ready',
+            'module'      => 'Settings',
+            'description' => 'Registrar reopened setup for ' . (Setting::getAcademicPeriod()['semester_name'] ?? 'current semester'),
+            'created_at'  => now(),
+            'updated_at'  => now(),
+        ]);
+
+        $this->loadSystemReadiness();
+        $this->loadRecentActivities();
+
+        $this->dispatch('systemReadyChanged');
+
+        $this->dispatch('notify', [
+            'type'    => 'warning',
+            'message' => 'System reverted to not-ready. Dean-level roles will see the waiting state.',
+        ]);
+    }
+
+    private function loadSystemReadiness(): void
+    {
+        $this->systemReady     = Setting::isSystemReady();
+        $this->setupChecklist  = Setting::getSetupChecklist();
+        $this->setupComplete   = Setting::isSetupComplete();
+        $this->systemReadyMeta = Setting::getSystemReadyMeta();
+    }
+
+    private function loadSystemStatus(): void
+    {
+        $period = Setting::getAcademicPeriod();
+
+        $this->systemStatus = [
+            'current_semester' => $period['semester_name'],
+            'school_year'      => $period['school_year'],
+            'semester'         => $period['semester'],
+            'system_ready'     => Setting::isSystemReady(),
+        ];
     }
 
     private function loadSchedulingStats(): void
@@ -205,6 +339,12 @@ class RegistrarDashboard extends Component
 
     public function render()
     {
-        return view('livewire.registrar-dashboard')->layout('layouts.app');
+        return view('livewire.registrar-dashboard', [
+            'systemReady'     => $this->systemReady,
+            'setupChecklist'  => $this->setupChecklist,
+            'setupComplete'   => $this->setupComplete,
+            'systemReadyMeta' => $this->systemReadyMeta,
+            'systemStatus'    => $this->systemStatus,
+        ])->layout('layouts.app');
     }
 }

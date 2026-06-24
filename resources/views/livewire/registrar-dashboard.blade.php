@@ -105,6 +105,82 @@
 {{-- ═══════════════════════════════════════════════════
      SMART ALERTS STRIP
 ═══════════════════════════════════════════════════════ --}}
+@if(! $systemReady)
+<div class="px-5 pt-4 banner-slide">
+    <div class="rounded-2xl border border-amber-300 bg-amber-50 shadow-sm dark:border-amber-500/40 dark:bg-amber-500/[0.06]">
+        <div class="p-5">
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                    <h2 class="text-[15px] font-bold tracking-tight text-amber-800 dark:text-amber-300">New Semester - Setup Required</h2>
+                    <p class="mt-1 text-[12px] leading-snug text-amber-700/80 dark:text-amber-400/70">
+                        Registrar can configure this semester too. Complete the checklist, then mark the system ready for Dean-level roles.
+                    </p>
+                </div>
+
+                <div class="flex flex-shrink-0 flex-col items-stretch gap-2 sm:flex-row lg:flex-col">
+                    @if($setupComplete)
+                        <button wire:click="openMarkReadyModal"
+                                class="rounded-xl bg-emerald-500 px-4 py-2 text-[12px] font-bold uppercase tracking-wider text-white shadow-[0_4px_14px_rgba(16,185,129,0.4)] transition-colors hover:bg-emerald-600">
+                            Mark as Ready
+                        </button>
+                    @else
+                        <button disabled
+                                class="cursor-not-allowed rounded-xl bg-slate-200 px-4 py-2 text-[12px] font-bold uppercase tracking-wider text-slate-400 opacity-60 dark:bg-white/10 dark:text-slate-500">
+                            Mark as Ready
+                        </button>
+                    @endif
+
+                    <a href="{{ route('settings', ['unlock' => 1]) }}"
+                       wire:navigate
+                       class="rounded-xl border border-amber-300 bg-amber-100 px-4 py-2 text-center text-[12px] font-bold uppercase tracking-wider text-amber-800 transition-colors hover:bg-amber-200 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300 dark:hover:bg-amber-500/20">
+                        Open Settings
+                    </a>
+                </div>
+            </div>
+
+            <div class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                @foreach($setupChecklist as $i => $item)
+                    <div class="flex items-start gap-2.5 rounded-xl p-3 {{ $item['done'] ? 'border border-emerald-200 bg-emerald-50 dark:border-emerald-500/25 dark:bg-emerald-500/[0.06]' : 'border border-amber-200/60 bg-white/60 dark:border-amber-500/20 dark:bg-white/[0.03]' }}">
+                        <div class="mt-0.5 flex-shrink-0">
+                            @if($item['done'])
+                                <div class="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-400 text-white">
+                                    <svg class="h-3 w-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/>
+                                    </svg>
+                                </div>
+                            @else
+                                <div class="flex h-5 w-5 items-center justify-center rounded-full border-2 border-amber-300 bg-amber-100 dark:border-amber-500/50 dark:bg-amber-500/10">
+                                    <span class="text-[9px] font-bold text-amber-600 dark:text-amber-400">{{ $i + 1 }}</span>
+                                </div>
+                            @endif
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <p class="text-[12px] font-bold leading-snug {{ $item['done'] ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-800 dark:text-amber-300' }}">{{ $item['label'] }}</p>
+                            <p class="mt-0.5 text-[10px] leading-snug {{ $item['done'] ? 'text-emerald-600/70 dark:text-emerald-500/70' : 'text-amber-700/70 dark:text-amber-400/60' }}">{{ $item['description'] }}</p>
+                        </div>
+                    </div>
+                @endforeach
+            </div>
+        </div>
+    </div>
+</div>
+@else
+<div class="px-5 pt-4 banner-slide">
+    <div class="flex items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50 px-5 py-3 dark:border-emerald-500/25 dark:bg-emerald-500/[0.05]">
+        <div class="flex items-center gap-3">
+            <span class="h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]"></span>
+            <div>
+                <span class="text-[13px] font-bold text-emerald-700 dark:text-emerald-400">System is Live</span>
+                <span class="ml-2 text-[12px] text-slate-500 dark:text-slate-400">{{ $systemStatus['current_semester'] ?? '-' }}</span>
+            </div>
+        </div>
+        <span class="rounded-xl border border-emerald-200 bg-white px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-emerald-700 dark:border-emerald-500/25 dark:bg-white/[0.04] dark:text-emerald-400">
+            Ready to Manage Schedule
+        </span>
+    </div>
+</div>
+@endif
+
 @php
     $overloaded = collect($facultyLoad)->where('status', 'overloaded')->count();
 @endphp
@@ -1077,6 +1153,61 @@
 
 </div>{{-- end main 2-column grid --}}
 
+
+@if($confirmingMarkReady)
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+    <div class="w-full max-w-md rounded-2xl border border-emerald-200 bg-white p-6 shadow-2xl dark:border-emerald-500/20 dark:bg-[#0f172a]">
+        <h3 class="text-[16px] font-bold text-slate-900 dark:text-white">Mark System as Ready?</h3>
+        <p class="mt-3 text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">
+            This will notify Dean, OIC, and Assistant Dean roles that the semester configuration is ready.
+        </p>
+
+        <div class="mt-5 space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-white/10 dark:bg-white/[0.03]">
+            @foreach($setupChecklist as $item)
+                <div class="flex items-center gap-2">
+                    <svg class="h-3.5 w-3.5 flex-shrink-0 text-emerald-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/>
+                    </svg>
+                    <span class="text-[12px] text-slate-600 dark:text-slate-400">{{ $item['label'] }}</span>
+                </div>
+            @endforeach
+        </div>
+
+        <div class="mt-6 flex gap-2">
+            <button wire:click="cancelMarkReady"
+                    class="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-[13px] font-bold uppercase tracking-wider text-slate-600 transition-colors hover:bg-slate-50 dark:border-white/10 dark:text-slate-400 dark:hover:bg-white/[0.04]">
+                Cancel
+            </button>
+            <button wire:click="confirmMarkReady"
+                    class="flex-1 rounded-xl bg-emerald-500 px-4 py-2.5 text-[13px] font-bold uppercase tracking-wider text-white transition-colors hover:bg-emerald-600">
+                Yes, Go Live
+            </button>
+        </div>
+    </div>
+</div>
+@endif
+
+@if($confirmingMarkNotReady)
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 px-4">
+    <div class="w-full max-w-md rounded-2xl border border-rose-200 bg-white p-6 shadow-2xl dark:border-rose-500/20 dark:bg-[#0f172a]">
+        <h3 class="text-[16px] font-bold text-slate-900 dark:text-white">Reopen Semester Setup?</h3>
+        <p class="mt-3 text-[13px] leading-relaxed text-slate-600 dark:text-slate-400">
+            This marks the system as not ready. Dean-level roles will see the waiting state until the system is marked ready again.
+        </p>
+
+        <div class="mt-6 flex gap-2">
+            <button wire:click="cancelMarkNotReady"
+                    class="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-[13px] font-bold uppercase tracking-wider text-slate-600 transition-colors hover:bg-slate-50 dark:border-white/10 dark:text-slate-400 dark:hover:bg-white/[0.04]">
+                Cancel
+            </button>
+            <button wire:click="confirmMarkNotReady"
+                    class="flex-1 rounded-xl bg-rose-500 px-4 py-2.5 text-[13px] font-bold uppercase tracking-wider text-white transition-colors hover:bg-rose-600">
+                Reopen Setup
+            </button>
+        </div>
+    </div>
+</div>
+@endif
 
 
 

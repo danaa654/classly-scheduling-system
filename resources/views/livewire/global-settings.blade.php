@@ -96,6 +96,67 @@
             </div>
         </section>
 
+        <section class="rounded-lg border p-6 shadow-sm {{ $systemReady ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-900 dark:bg-emerald-950/20' : 'border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/20' }}">
+            <div class="flex flex-col gap-5 lg:flex-row lg:items-start lg:justify-between">
+                <div>
+                    <p class="text-[10px] font-black uppercase tracking-widest {{ $systemReady ? 'text-emerald-700 dark:text-emerald-300' : 'text-amber-700 dark:text-amber-300' }}">
+                        Semester Readiness
+                    </p>
+                    <h2 class="mt-2 text-lg font-black uppercase tracking-tight text-slate-900 dark:text-slate-100">
+                        {{ $systemReady ? 'System is ready' : 'New semester setup required' }}
+                    </h2>
+                    <p class="mt-2 max-w-2xl text-sm font-semibold {{ $systemReady ? 'text-emerald-800/80 dark:text-emerald-200/80' : 'text-amber-800/80 dark:text-amber-200/80' }}">
+                        @if($systemReady)
+                            Dean, OIC, and Assistant Dean dashboards can now access the MasterGrid and room view.
+                        @else
+                            Save the academic period, active days, and schedule bounds. Once the checklist is complete, mark the system as ready for this semester.
+                        @endif
+                    </p>
+                </div>
+
+                <div class="flex flex-col gap-2 sm:flex-row lg:flex-col">
+                    @if(! $systemReady)
+                        <button
+                            type="button"
+                            wire:click="openMarkReadyConfirmation"
+                            @disabled(! $setupComplete)
+                            class="rounded-md px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-sm transition {{ $setupComplete ? 'bg-emerald-600 hover:bg-emerald-700' : 'cursor-not-allowed bg-slate-400' }}">
+                            Mark as Ready
+                        </button>
+                        @if(! $setupComplete)
+                            <p class="text-center text-[10px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">
+                                {{ collect($setupChecklist)->where('done', false)->count() }} step(s) remaining
+                            </p>
+                        @endif
+                    @else
+                        <span class="rounded-md border border-emerald-200 bg-white px-5 py-3 text-center text-xs font-black uppercase tracking-widest text-emerald-700 dark:border-emerald-800 dark:bg-slate-900 dark:text-emerald-300">
+                            Ready
+                        </span>
+                        <button
+                            type="button"
+                            wire:click="openMarkNotReadyConfirmation"
+                            class="rounded-md bg-slate-700 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-sm transition hover:bg-slate-800">
+                            Reopen Setup
+                        </button>
+                    @endif
+                </div>
+            </div>
+
+            <div class="mt-5 grid gap-3 md:grid-cols-5">
+                @foreach($setupChecklist as $item)
+                    <div class="rounded-md border p-4 {{ $item['done'] ? 'border-emerald-200 bg-white dark:border-emerald-900 dark:bg-slate-900' : 'border-amber-200 bg-white/70 dark:border-amber-900 dark:bg-slate-900/70' }}">
+                        <div class="flex items-center gap-2">
+                            <span class="flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-black {{ $item['done'] ? 'bg-emerald-600 text-white' : 'bg-amber-200 text-amber-800 dark:bg-amber-900 dark:text-amber-200' }}">
+                                {{ $item['done'] ? '✓' : '!' }}
+                            </span>
+                            <p class="text-[11px] font-black uppercase tracking-wide text-slate-700 dark:text-slate-200">{{ $item['label'] }}</p>
+                        </div>
+                        <p class="mt-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">{{ $item['description'] }}</p>
+                    </div>
+                @endforeach
+            </div>
+        </section>
+
         <section class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div class="mb-5 flex items-center justify-between">
                 <h2 class="text-sm font-black uppercase tracking-widest">Academic Period Source of Truth</h2>
@@ -466,6 +527,69 @@
                     <button
                         type="button"
                         wire:click="$set('confirmingReset', false)"
+                        class="flex-1 rounded-md bg-slate-200 px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    @if($confirmingMarkReady)
+        <div class="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70 px-4">
+            <div class="w-full max-w-xl rounded-lg border border-emerald-200 bg-white p-6 shadow-2xl dark:border-emerald-900 dark:bg-slate-900">
+                <h3 class="text-lg font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-300">Mark System as Ready?</h3>
+                <p class="mt-3 text-sm font-semibold text-slate-600 dark:text-slate-300">
+                    This will notify Dean, OIC, and Assistant Dean users that the semester configuration is ready. MasterGrid and room views will become available to them.
+                </p>
+
+                <div class="mt-5 space-y-2 rounded-md border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+                    @foreach($setupChecklist as $item)
+                        <div class="flex items-center gap-2 text-xs font-bold text-slate-600 dark:text-slate-300">
+                            <span class="flex h-5 w-5 items-center justify-center rounded-full {{ $item['done'] ? 'bg-emerald-600 text-white' : 'bg-slate-300 text-slate-700' }}">
+                                {{ $item['done'] ? '✓' : '!' }}
+                            </span>
+                            <span>{{ $item['label'] }}</span>
+                        </div>
+                    @endforeach
+                </div>
+
+                <div class="mt-6 flex flex-col gap-3 sm:flex-row">
+                    <button
+                        type="button"
+                        wire:click="markSystemReady"
+                        class="flex-1 rounded-md bg-emerald-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:bg-emerald-700">
+                        Yes, Mark Ready
+                    </button>
+                    <button
+                        type="button"
+                        wire:click="$set('confirmingMarkReady', false)"
+                        class="flex-1 rounded-md bg-slate-200 px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+                        Cancel
+                    </button>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    @if($confirmingMarkNotReady)
+        <div class="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70 px-4">
+            <div class="w-full max-w-xl rounded-lg border border-amber-200 bg-white p-6 shadow-2xl dark:border-amber-900 dark:bg-slate-900">
+                <h3 class="text-lg font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">Reopen Semester Setup?</h3>
+                <p class="mt-3 text-sm font-semibold text-slate-600 dark:text-slate-300">
+                    This will mark the system as not ready again. Dean-level roles will see the waiting state until you mark the system ready once more.
+                </p>
+
+                <div class="mt-6 flex flex-col gap-3 sm:flex-row">
+                    <button
+                        type="button"
+                        wire:click="markSystemNotReady"
+                        class="flex-1 rounded-md bg-amber-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:bg-amber-700">
+                        Reopen Setup
+                    </button>
+                    <button
+                        type="button"
+                        wire:click="$set('confirmingMarkNotReady', false)"
                         class="flex-1 rounded-md bg-slate-200 px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
                         Cancel
                     </button>

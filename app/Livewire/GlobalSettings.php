@@ -115,6 +115,11 @@ class GlobalSettings extends Component
         }
 
         $this->loadAllSettings();
+
+        if (request()->boolean('unlock')) {
+            $this->unlockForSetup();
+        }
+
         $this->loadChangeHistory();
     }
 
@@ -191,6 +196,26 @@ class GlobalSettings extends Component
             'message' => $this->config_locked
                 ? 'Configuration locked. Changes are disabled.'
                 : 'Configuration unlocked. System marked as not ready until you save and lock again.',
+        ]);
+    }
+
+    private function unlockForSetup(): void
+    {
+        if (! $this->config_locked) {
+            return;
+        }
+
+        $this->config_locked = false;
+        $this->persistSetting('config_locked', '0', 'unlocked');
+        Setting::markSystemNotReady(auth()->id());
+
+        $this->system_ready   = false;
+        $this->setupChecklist = Setting::getSetupChecklist();
+        $this->setupComplete  = Setting::isSetupComplete();
+
+        $this->dispatch('notify', [
+            'type'    => 'warning',
+            'message' => 'Configuration unlocked. Save the settings to lock them again, then mark the system as ready.',
         ]);
     }
 
@@ -382,6 +407,8 @@ class GlobalSettings extends Component
 
             $this->system_ready        = true;
             $this->confirmingMarkReady = false;
+            $this->setupChecklist      = Setting::getSetupChecklist();
+            $this->setupComplete       = Setting::isSetupComplete();
             $this->loadChangeHistory();
 
             // Broadcast to all connected dashboards so the "waiting" state

@@ -122,6 +122,7 @@ class AdminDashboard extends Component
     public function confirmMarkReady(): void
     {
         $this->confirmingMarkReady = false;
+        $this->loadSystemReadiness();
 
         if (! $this->setupComplete) {
             $this->dispatch('notify', [

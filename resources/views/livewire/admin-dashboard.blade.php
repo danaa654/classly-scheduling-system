@@ -291,12 +291,13 @@
                 <p class="text-[11px] text-amber-700/70 dark:text-amber-400/60">
                     Dean, OIC and Assistant Dean roles are seeing a "Waiting on Config" holding screen until you mark the system as ready.
                 </p>
-                <a href="{{ route('settings') }}"
+                <a href="{{ route('settings', ['unlock' => 1]) }}"
                    class="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg
                           bg-amber-100 hover:bg-amber-200 dark:bg-amber-500/10 dark:hover:bg-amber-500/20
                           border border-amber-300 dark:border-amber-500/30
                           text-amber-800 dark:text-amber-300 text-[11px] font-bold uppercase tracking-wider
-                          transition-colors duration-200">
+                          transition-colors duration-200"
+                   wire:navigate>
                     <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                               d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
@@ -309,7 +310,7 @@
     </div>
 </div>
 
-{{-- When system IS ready: show a subtle "Live" pill with a revert option --}}
+{{-- When system IS ready: show a subtle "Live" pill with a positive next step --}}
 @else
 <div class="px-5 pt-4 banner-slide">
     <div class="flex items-center justify-between px-5 py-3 rounded-2xl
@@ -332,18 +333,15 @@
                 @endif
             </div>
         </div>
-        <button wire:click="openMarkNotReadyModal"
-                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg
-                       bg-white dark:bg-white/[0.04] border border-slate-200 dark:border-white/10
-                       text-slate-500 dark:text-slate-400 text-[11px] font-bold uppercase tracking-wider
-                       hover:border-rose-300 dark:hover:border-rose-500/40 hover:text-rose-600 dark:hover:text-rose-400
-                       transition-colors duration-200">
+        <span class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg
+                     bg-white dark:bg-white/[0.04] border border-emerald-200 dark:border-emerald-500/25
+                     text-emerald-700 dark:text-emerald-400 text-[11px] font-bold uppercase tracking-wider">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
             </svg>
-            Revert to Not Ready
-        </button>
+            Ready to Manage Schedule
+        </span>
     </div>
 </div>
 @endif
