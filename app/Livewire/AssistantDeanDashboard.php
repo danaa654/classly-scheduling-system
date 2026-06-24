@@ -20,6 +20,8 @@ class AssistantDeanDashboard extends Component
     public $subjectDistribution  = [];
     public $aiRecommendations    = [];
     public $globalStats          = [];
+    public array $workflowCounts = [];
+    public array $schedulingStats = [];
     public bool $systemReady = false;
     public array $currentPeriod = [];
 
@@ -56,6 +58,7 @@ class AssistantDeanDashboard extends Component
     {
         $this->loadSystemReadiness();
         $this->loadGlobalStats();
+        $this->loadSchedulingWorkflow();
         $this->loadFacultyCoordination();
         $this->loadSubjectDistribution();
 
@@ -110,6 +113,65 @@ class AssistantDeanDashboard extends Component
                 : 0,
             'departments'         => ['CCS', 'CTE', 'COC', 'SHTM'],
         ];
+    }
+
+    private function loadSchedulingWorkflow(): void
+    {
+        $totalSubjects = Subject::activeTerm()->count();
+        $scheduledSubjects = Subject::activeTerm()
+            ->whereHas('schedules', fn ($query) => $query->activeTerm())
+            ->count();
+        $finalizedSubjects = Subject::activeTerm()
+            ->whereHas('schedules', fn ($query) => $query->activeTerm()->where('status', Schedule::STATUS_FINALIZED))
+            ->count();
+
+        $draft = Schedule::activeTerm()->where('status', Schedule::STATUS_DRAFT)->count();
+        $partial = Schedule::activeTerm()->where('status', Schedule::STATUS_PARTIAL)->count();
+        $facultyAssigned = Schedule::activeTerm()
+            ->whereIn('status', [Schedule::STATUS_FACULTY_ASSIGNED, Schedule::STATUS_FACULTY_LOCKED])
+            ->count();
+        $finalized = Schedule::activeTerm()->where('status', Schedule::STATUS_FINALIZED)->count();
+        $conflicts = $this->countActiveRoomConflicts();
+
+        $this->workflowCounts = [
+            'draft'            => $draft,
+            'partial'          => $partial,
+            'faculty_assigned' => $facultyAssigned,
+            'finalized'        => $finalized,
+            'conflict_count'   => $conflicts,
+        ];
+
+        $this->schedulingStats = [
+            'total_subjects'       => $totalSubjects,
+            'scheduled_subjects'   => $scheduledSubjects,
+            'unscheduled_subjects' => max(0, $totalSubjects - $scheduledSubjects),
+            'draft_schedules'      => $draft,
+            'partial_schedules'    => $partial,
+            'finalized_schedules'  => $finalized,
+            'finalized_subjects'   => $finalizedSubjects,
+            'completion_pct'       => $totalSubjects > 0 ? round(($finalizedSubjects / $totalSubjects) * 100, 1) : 0,
+        ];
+    }
+
+    private function countActiveRoomConflicts(): int
+    {
+        $period = Setting::getAcademicPeriod();
+
+        return DB::table('schedules as s1')
+            ->join('schedules as s2', function ($join) {
+                $join->on('s1.room_id', '=', 's2.room_id')
+                    ->on('s1.day', '=', 's2.day')
+                    ->where('s1.id', '<', DB::raw('s2.id'))
+                    ->whereRaw('s1.start_time < s2.end_time')
+                    ->whereRaw('s1.end_time > s2.start_time');
+            })
+            ->where('s1.is_archived', false)
+            ->where('s2.is_archived', false)
+            ->where('s1.semester', $period['semester'])
+            ->where('s2.semester', $period['semester'])
+            ->where('s1.academic_year', $period['school_year'])
+            ->where('s2.academic_year', $period['school_year'])
+            ->count();
     }
 
     private function loadFacultyCoordination(): void

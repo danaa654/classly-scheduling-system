@@ -1917,8 +1917,10 @@ class BlockSchedule extends Component
             ->whereNotIn('id', $this->modalScheduleIds)
             ->with('subject:id,units')
             ->get()
-            ->unique('subject_id')
-            ->sum(fn ($s) => (int) ($s->subject?->units ?? 0));
+            ->pluck('subject')
+            ->filter()
+            ->unique('id')
+            ->sum(fn (Subject $subject) => (int) ($subject->units ?? 0));
     }
 
     // ── Role label helper ────────────────────────────────────────────────────
@@ -1927,6 +1929,32 @@ class BlockSchedule extends Component
      * Convert an internal role slug to a human-readable label.
      * Used in notification messages so we never show raw "associate_dean" etc.
      */
+    public function getFacultyProjectedUnits(int $facultyId, ?int $subjectId = null): int
+    {
+        $currentUnits = $this->getFacultyCurrentUnits($facultyId);
+        $subjectId = $subjectId ?: $this->modalSubjectId;
+
+        if (! $subjectId) {
+            return $currentUnits;
+        }
+
+        $subject = Subject::find($subjectId);
+
+        if (! $subject) {
+            return $currentUnits;
+        }
+
+        $alreadyCounted = Schedule::activeTerm($this->semester, $this->schoolYear)
+            ->where('faculty_id', $facultyId)
+            ->where('subject_id', $subject->id)
+            ->whereNotIn('id', $this->modalScheduleIds)
+            ->exists();
+
+        return $alreadyCounted
+            ? $currentUnits
+            : $currentUnits + (int) ($subject->units ?? 0);
+    }
+
     protected function formatRoleLabel(string $role): string
     {
         return match ($role) {
@@ -1952,6 +1980,7 @@ class BlockSchedule extends Component
             ->filter(fn (Faculty $faculty) => $this->facultyCanTakeScheduleGroup($faculty, $subject, $schedules))
             ->map(function (Faculty $faculty) use ($subject) {
                 $currentUnits = $this->getFacultyCurrentUnits((int) $faculty->id);
+                $projectedUnits = $this->getFacultyProjectedUnits((int) $faculty->id, (int) $subject->id);
                 $maxUnits = (int) ($faculty->max_units ?? 21);
                 $score = 100 + max(0, 30 - $currentUnits);
 
@@ -1963,7 +1992,7 @@ class BlockSchedule extends Component
                     'id' => $faculty->id,
                     'name' => $faculty->full_name,
                     'department' => $faculty->displayDepartment(),
-                    'load' => $currentUnits + (int) ($subject->units ?? 0),
+                    'load' => $projectedUnits,
                     'max_units' => $maxUnits,
                     'match_label' => $score >= 140 ? 'BEST MATCH' : ($score >= 115 ? 'GOOD MATCH' : 'FALLBACK'),
                     'score' => $score,
@@ -2007,7 +2036,7 @@ class BlockSchedule extends Component
             }
         }
 
-        return ($this->getFacultyCurrentUnits((int) $faculty->id) + (int) ($subject->units ?? 0))
+        return $this->getFacultyProjectedUnits((int) $faculty->id, (int) $subject->id)
             <= (int) ($faculty->max_units ?? 21);
     }
 

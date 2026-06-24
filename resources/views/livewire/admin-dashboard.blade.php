@@ -407,13 +407,15 @@
 ═══════════════════════════════════════════════════════ --}}
 @php
     $stages = [
-        ['step'=>'01','title'=>'Registrar',    'sub'=>'Auto-generates partial schedules',   'count'=>$workflowCounts['partial'] ?? 0,          'active'=>($workflowCounts['partial'] ?? 0) > 0,          'done'=>false,
-         'palette'=>['ring'=>'ring-blue-400/60 dark:ring-blue-500/50','bg'=>'bg-blue-500/10','label'=>'text-blue-600 dark:text-blue-400','badge'=>'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300','glow'=>'shadow-[0_0_24px_rgba(59,130,246,0.35)]','conn'=>'from-blue-400 to-yellow-400']],
-        ['step'=>'02','title'=>'Dept Review',  'sub'=>'Dean / OIC reviews assignments',     'count'=>$workflowCounts['faculty_assigned'] ?? 0,  'active'=>($workflowCounts['faculty_assigned'] ?? 0) > 0,  'done'=>false,
-         'palette'=>['ring'=>'ring-yellow-400/60 dark:ring-yellow-500/50','bg'=>'bg-yellow-500/10','label'=>'text-yellow-600 dark:text-yellow-400','badge'=>'bg-yellow-100 dark:bg-yellow-500/20 text-yellow-700 dark:text-yellow-300','glow'=>'shadow-[0_0_24px_rgba(234,179,8,0.35)]','conn'=>'from-yellow-400 to-orange-400']],
-        ['step'=>'03','title'=>'Admin Approval','sub'=>'System Admin gives final sign-off', 'count'=>$workflowCounts['faculty_assigned'] ?? 0,  'active'=>($workflowCounts['faculty_assigned'] ?? 0) > 0,  'done'=>false,
-         'palette'=>['ring'=>'ring-orange-400/60 dark:ring-orange-500/50','bg'=>'bg-orange-500/10','label'=>'text-orange-600 dark:text-orange-400','badge'=>'bg-orange-100 dark:bg-orange-500/20 text-orange-700 dark:text-orange-300','glow'=>'shadow-[0_0_24px_rgba(249,115,22,0.35)]','conn'=>'from-orange-400 to-emerald-400']],
-        ['step'=>'04','title'=>'Finalized',    'sub'=>'Schedules published & locked',       'count'=>$workflowCounts['finalized'] ?? 0,         'active'=>($workflowCounts['finalized'] ?? 0) > 0,         'done'=>true,
+        ['step'=>'01','title'=>'System Config', 'sub'=>'Admin sets term, days, roles',       'count'=>$workflowCounts['draft'] ?? 0,             'active'=>true,                                      'done'=>($systemStatus['is_ready'] ?? false),
+         'palette'=>['ring'=>'ring-slate-400/60 dark:ring-slate-500/50','bg'=>'bg-slate-500/10','label'=>'text-slate-600 dark:text-slate-300','badge'=>'bg-slate-100 dark:bg-slate-500/20 text-slate-700 dark:text-slate-300','glow'=>'shadow-[0_0_24px_rgba(100,116,139,0.25)]','conn'=>'from-slate-400 to-teal-400']],
+        ['step'=>'02','title'=>'Preparation',   'sub'=>'Dean / OIC / Associate Dean pre-assigns faculty', 'count'=>$workflowCounts['faculty_assigned'] ?? 0,  'active'=>($workflowCounts['faculty_assigned'] ?? 0) > 0,  'done'=>false,
+         'palette'=>['ring'=>'ring-teal-400/60 dark:ring-teal-500/50','bg'=>'bg-teal-500/10','label'=>'text-teal-600 dark:text-teal-400','badge'=>'bg-teal-100 dark:bg-teal-500/20 text-teal-700 dark:text-teal-300','glow'=>'shadow-[0_0_24px_rgba(20,184,166,0.35)]','conn'=>'from-teal-400 to-blue-400']],
+        ['step'=>'03','title'=>'Auto-generate', 'sub'=>'Admin / Registrar can run anytime',  'count'=>$workflowCounts['partial'] ?? 0,           'active'=>($workflowCounts['partial'] ?? 0) > 0,          'done'=>false,
+         'palette'=>['ring'=>'ring-blue-400/60 dark:ring-blue-500/50','bg'=>'bg-blue-500/10','label'=>'text-blue-600 dark:text-blue-400','badge'=>'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300','glow'=>'shadow-[0_0_24px_rgba(59,130,246,0.35)]','conn'=>'from-blue-400 to-amber-400']],
+        ['step'=>'04','title'=>'Dept Review',   'sub'=>'Can remove while status is partial', 'count'=>$workflowCounts['partial'] ?? 0,           'active'=>($workflowCounts['partial'] ?? 0) > 0,          'done'=>false,
+         'palette'=>['ring'=>'ring-amber-400/60 dark:ring-amber-500/50','bg'=>'bg-amber-500/10','label'=>'text-amber-600 dark:text-amber-400','badge'=>'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300','glow'=>'shadow-[0_0_24px_rgba(245,158,11,0.35)]','conn'=>'from-amber-400 to-emerald-400']],
+        ['step'=>'05','title'=>'Finalize',      'sub'=>'Admin / Registrar locks schedule',   'count'=>$workflowCounts['finalized'] ?? 0,         'active'=>($workflowCounts['finalized'] ?? 0) > 0,         'done'=>true,
          'palette'=>['ring'=>'ring-emerald-400/60 dark:ring-emerald-500/50','bg'=>'bg-emerald-500/10','label'=>'text-emerald-600 dark:text-emerald-400','badge'=>'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300','glow'=>'shadow-[0_0_24px_rgba(16,185,129,0.35)]','conn'=>'']],
     ];
 @endphp
@@ -478,6 +480,10 @@
             </div>
             @endif
             @endforeach
+        </div>
+
+        <div class="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-[12px] font-medium leading-snug text-blue-800 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
+            Step 02 is optional and improves generation quality. Auto-generation is still available to Admin and Registrar even if preparation is skipped.
         </div>
 
         {{-- Overall progress bar --}}

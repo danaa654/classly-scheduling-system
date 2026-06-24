@@ -23,9 +23,17 @@
     @keyframes glowPulseRed    { 0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,0);}   50%{box-shadow:0 0 16px 4px rgba(239,68,68,0.3);}   }
     @keyframes glowPulseGreen  { 0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,0);}  50%{box-shadow:0 0 16px 4px rgba(16,185,129,0.3);}  }
     @keyframes glowPulseYellow { 0%,100%{box-shadow:0 0 0 0 rgba(250,204,21,0);}  50%{box-shadow:0 0 16px 4px rgba(250,204,21,0.3);}  }
+    @keyframes glowPulseBlue   { 0%,100%{box-shadow:0 0 0 0 rgba(59,130,246,0);}  50%{box-shadow:0 0 16px 4px rgba(59,130,246,0.3);}  }
+    @keyframes glowPulseOrange { 0%,100%{box-shadow:0 0 0 0 rgba(251,146,60,0);}  50%{box-shadow:0 0 16px 4px rgba(251,146,60,0.3);}  }
+    @keyframes stagePing { 75%,100% { transform:scale(1.6); opacity:0; } }
+    @keyframes flowPulse { 0%,100%{opacity:.45;} 50%{opacity:1;} }
     .glow-green  { animation: glowPulseGreen  3s ease-in-out infinite; }
     .glow-red    { animation: glowPulseRed    3s ease-in-out infinite; }
     .glow-yellow { animation: glowPulseYellow 3s ease-in-out infinite; }
+    .glow-blue   { animation: glowPulseBlue   3s ease-in-out infinite; }
+    .glow-orange { animation: glowPulseOrange 3s ease-in-out infinite; }
+    .stage-ping { animation: stagePing 1.5s cubic-bezier(0,0,0.2,1) infinite; }
+    .flow-connector { animation: flowPulse 2.5s ease-in-out infinite; }
 
     /* ── Hover lift ─────────────────────────────────── */
     .card-lift { transition: transform 0.18s ease, box-shadow 0.18s ease; }
@@ -230,7 +238,84 @@
 
 
 {{-- ═══════════════════════════════════════════════════
-     MAIN 2-COLUMN GRID
+--}}
+@php
+    $wf = $workflowCounts ?? [];
+    $deptScheduling = $schedulingStats ?? [];
+    $completionRate = $deptScheduling['completion_pct'] ?? 0;
+    $periodText = ($currentPeriod['semester_name'] ?? null)
+        ?: \App\Models\Setting::semesterLabel($currentPeriod['semester'] ?? '1st') . ' ' . ($currentPeriod['school_year'] ?? '');
+
+    $workflowStages = [
+        ['step'=>'01','title'=>'System Config','sub'=>'Admin prepares term setup','count'=>$deptScheduling['total_subjects'] ?? 0,'active'=>$systemReady,'done'=>$systemReady,'palette'=>['ring'=>'ring-slate-400/60 dark:ring-slate-500/50','bg'=>'bg-slate-500/10 dark:bg-slate-500/10','label'=>'text-slate-600 dark:text-slate-300','badge'=>'bg-slate-100 dark:bg-slate-500/20 text-slate-700 dark:text-slate-300','glow'=>'shadow-[0_0_24px_rgba(100,116,139,0.25)]','conn'=>'from-slate-400 to-teal-400']],
+        ['step'=>'02','title'=>'Preparation','sub'=>'Dean / OIC pre-assigns faculty','count'=>$wf['faculty_assigned'] ?? 0,'active'=>($wf['faculty_assigned'] ?? 0) > 0,'done'=>false,'palette'=>['ring'=>'ring-teal-400/60 dark:ring-teal-500/50','bg'=>'bg-teal-500/10 dark:bg-teal-500/10','label'=>'text-teal-600 dark:text-teal-400','badge'=>'bg-teal-100 dark:bg-teal-500/20 text-teal-700 dark:text-teal-300','glow'=>'shadow-[0_0_24px_rgba(20,184,166,0.35)]','conn'=>'from-teal-400 to-blue-400']],
+        ['step'=>'03','title'=>'Auto-generate','sub'=>'Admin / Registrar can run anytime','count'=>($wf['draft'] ?? 0) + ($wf['partial'] ?? 0),'active'=>(($wf['draft'] ?? 0) + ($wf['partial'] ?? 0)) > 0,'done'=>false,'palette'=>['ring'=>'ring-blue-400/60 dark:ring-blue-500/50','bg'=>'bg-blue-500/10 dark:bg-blue-500/10','label'=>'text-blue-600 dark:text-blue-400','badge'=>'bg-blue-100 dark:bg-blue-500/20 text-blue-700 dark:text-blue-300','glow'=>'shadow-[0_0_24px_rgba(59,130,246,0.35)]','conn'=>'from-blue-400 to-amber-400']],
+        ['step'=>'04','title'=>'Dept Review','sub'=>'Review generated schedules','count'=>$wf['partial'] ?? 0,'active'=>($wf['partial'] ?? 0) > 0,'done'=>false,'palette'=>['ring'=>'ring-amber-400/60 dark:ring-amber-500/50','bg'=>'bg-amber-500/10 dark:bg-amber-500/10','label'=>'text-amber-600 dark:text-amber-400','badge'=>'bg-amber-100 dark:bg-amber-500/20 text-amber-700 dark:text-amber-300','glow'=>'shadow-[0_0_24px_rgba(245,158,11,0.35)]','conn'=>'from-amber-400 to-emerald-400']],
+        ['step'=>'05','title'=>'Finalize','sub'=>'Admin / Registrar locks schedule','count'=>$wf['finalized'] ?? 0,'active'=>($wf['finalized'] ?? 0) > 0,'done'=>true,'palette'=>['ring'=>'ring-emerald-400/60 dark:ring-emerald-500/50','bg'=>'bg-emerald-500/10 dark:bg-emerald-500/10','label'=>'text-emerald-600 dark:text-emerald-400','badge'=>'bg-emerald-100 dark:bg-emerald-500/20 text-emerald-700 dark:text-emerald-300','glow'=>'shadow-[0_0_24px_rgba(16,185,129,0.35)]','conn'=>'']],
+    ];
+@endphp
+
+<div class="px-5 pt-4">
+    <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-4 shadow-sm dark:shadow-none">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
+            <div class="flex items-center gap-2">
+                <span class="w-1 h-4 bg-blue-400 rounded-full shadow-[0_0_8px_#60a5fa]"></span>
+                <h3 class="text-[13px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-slate-400">Scheduling Workflow</h3>
+            </div>
+            <div class="flex items-center gap-4">
+                <span class="text-[12px] text-slate-500 uppercase tracking-widest">Completion: <span class="text-emerald-500 font-bold">{{ $completionRate }}%</span></span>
+                <span class="text-[12px] text-slate-500">{{ $periodText }}</span>
+            </div>
+        </div>
+
+        <div class="flex items-center gap-0 overflow-x-auto pb-1">
+            @foreach($workflowStages as $stage)
+            <div class="min-w-[150px] flex-1 flex flex-col items-center relative {{ $stage['active'] ? $stage['palette']['glow'].' rounded-xl' : '' }} transition-all duration-500">
+                <div class="relative mb-2">
+                    @if($stage['active'])
+                    <span class="stage-ping absolute inset-0 rounded-full ring-1 {{ $stage['palette']['ring'] }}"></span>
+                    @endif
+                    <div class="relative w-9 h-9 rounded-full flex items-center justify-center ring-1 {{ $stage['active'] ? $stage['palette']['ring'] : 'ring-slate-200 dark:ring-white/10' }} {{ $stage['active'] ? $stage['palette']['bg'] : 'bg-slate-100 dark:bg-white/[0.03]' }}">
+                        @if($stage['done'] && $stage['count'] > 0)
+                        <svg class="w-4 h-4 {{ $stage['palette']['label'] }}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>
+                        @else
+                        <span class="text-xs font-bold {{ $stage['active'] ? $stage['palette']['label'] : 'text-slate-400 dark:text-slate-600' }}">{{ $stage['step'] }}</span>
+                        @endif
+                    </div>
+                </div>
+                <p class="text-[11px] font-bold uppercase tracking-wider {{ $stage['active'] ? $stage['palette']['label'] : 'text-slate-400 dark:text-slate-600' }} mb-1 text-center">{{ $stage['title'] }}</p>
+                <p class="text-[10px] text-slate-400 text-center leading-snug px-2 mb-2">{{ $stage['sub'] }}</p>
+                @if($stage['count'] > 0)
+                <span class="px-2 py-0.5 rounded-full text-[11px] font-bold {{ $stage['palette']['badge'] }}">{{ number_format($stage['count']) }}</span>
+                @else
+                <span class="text-[10px] text-slate-400 dark:text-slate-600">-</span>
+                @endif
+            </div>
+            @if(!$loop->last)
+            <div class="w-10 lg:w-12 flex items-center justify-center flex-shrink-0 mb-8">
+                <div class="w-full h-0.5 {{ $stage['active'] ? 'flow-connector' : '' }} bg-gradient-to-r {{ $stage['palette']['conn'] ?: 'from-slate-200 to-slate-200 dark:from-white/10 dark:to-white/10' }} {{ !$stage['active'] ? 'opacity-20' : '' }} rounded-full"></div>
+            </div>
+            @endif
+            @endforeach
+        </div>
+
+        <div class="mt-4 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-[12px] font-medium leading-snug text-blue-800 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-200">
+            Step 02 is optional and improves generation quality. Auto-generation is still available to Admin and Registrar even if preparation is skipped.
+        </div>
+
+        <div class="mt-5 pt-4 border-t border-slate-100 dark:border-white/[0.05]">
+            <div class="flex items-center justify-between mb-2.5">
+                <span class="text-[12px] text-slate-500 uppercase tracking-widest">Overall Progress</span>
+                <span class="text-[13px] font-bold text-emerald-500">{{ $deptScheduling['finalized_subjects'] ?? 0 }} / {{ $deptScheduling['total_subjects'] ?? 0 }} finalized</span>
+            </div>
+            <div class="w-full h-1.5 bg-slate-100 dark:bg-white/[0.05] rounded-full overflow-hidden">
+                <div class="h-full rounded-full progress-bar-shine" style="width:{{ max(0, min(100, $completionRate)) }}%; background:linear-gradient(90deg,#34d399,#60a5fa,#34d399); background-size:200% auto;"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{{-- MAIN 2-COLUMN GRID
 ═══════════════════════════════════════════════════════ --}}
 <div class="grid grid-cols-12 gap-4 p-5 pt-4 pb-6">
 

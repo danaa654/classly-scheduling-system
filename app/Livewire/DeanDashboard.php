@@ -22,6 +22,8 @@ class DeanDashboard extends Component
     public $escalatedConflicts    = [];
     public $requestTracking       = [];
     public $facultyRequestHistory = [];
+    public array $workflowCounts = [];
+    public array $schedulingStats = [];
     public bool $systemReady = false;
     public array $systemReadyMeta = [];
     public array $currentPeriod = [];
@@ -40,6 +42,7 @@ class DeanDashboard extends Component
         $this->loadCurriculumCoverage();
         $this->loadFacultySummary();
         $this->loadEscalatedConflicts();
+        $this->loadSchedulingWorkflow();
         $this->loadRequestTracking();
         $this->loadFacultyRequestHistory();
     }
@@ -189,6 +192,47 @@ class DeanDashboard extends Component
                 'day'  => $c->day,
                 'time' => Carbon::parse($c->start_time)->format('h:i A'),
             ])->toArray();
+    }
+
+    private function loadSchedulingWorkflow(): void
+    {
+        $dept = $this->department;
+
+        $scheduleQuery = Schedule::activeTerm()
+            ->whereHas('subject', fn ($query) => $query->where('department', $dept));
+
+        $totalSubjects = Subject::activeTerm()
+            ->where('department', $dept)
+            ->count();
+
+        $scheduledSubjects = Subject::activeTerm()
+            ->where('department', $dept)
+            ->whereHas('schedules', fn ($query) => $query->activeTerm())
+            ->count();
+
+        $finalizedSubjects = Subject::activeTerm()
+            ->where('department', $dept)
+            ->whereHas('schedules', fn ($query) => $query->activeTerm()->where('status', Schedule::STATUS_FINALIZED))
+            ->count();
+
+        $this->workflowCounts = [
+            'draft'            => (clone $scheduleQuery)->where('status', Schedule::STATUS_DRAFT)->count(),
+            'partial'          => (clone $scheduleQuery)->where('status', Schedule::STATUS_PARTIAL)->count(),
+            'faculty_assigned' => (clone $scheduleQuery)->whereIn('status', [
+                Schedule::STATUS_FACULTY_ASSIGNED,
+                Schedule::STATUS_FACULTY_LOCKED,
+            ])->count(),
+            'finalized'        => (clone $scheduleQuery)->where('status', Schedule::STATUS_FINALIZED)->count(),
+            'conflict_count'   => count($this->escalatedConflicts),
+        ];
+
+        $this->schedulingStats = [
+            'total_subjects'       => $totalSubjects,
+            'scheduled_subjects'   => $scheduledSubjects,
+            'unscheduled_subjects' => max(0, $totalSubjects - $scheduledSubjects),
+            'finalized_subjects'   => $finalizedSubjects,
+            'completion_pct'       => $totalSubjects > 0 ? round(($finalizedSubjects / $totalSubjects) * 100, 1) : 0,
+        ];
     }
 
     private function loadRequestTracking(): void

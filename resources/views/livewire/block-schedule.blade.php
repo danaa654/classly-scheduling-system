@@ -2626,9 +2626,9 @@
                         @php
                             $isCurrentlyAssigned = ($faculty->id === $currentFacultyId);
                             $currentUnits        = $this->getFacultyCurrentUnits($faculty->id);
+                            $projectedUnits      = $this->getFacultyProjectedUnits($faculty->id, $modalSubject?->id);
                             $maxUnits            = $faculty->max_units ?? 21;
-                            $newUnits            = (int) ($modalSubject?->units ?? 0);
-                            $wouldOverload       = ($currentUnits + $newUnits) > $maxUnits;
+                            $wouldOverload       = $projectedUnits > $maxUnits;
                         @endphp
 
                         <button
@@ -2686,18 +2686,18 @@
                             <div class="flex-shrink-0 text-right min-w-[60px]">
                                 <div class="text-[12px] font-bold
                                             @if($wouldOverload) text-amber-600 dark:text-amber-400 @else text-slate-600 dark:text-slate-400 @endif">
-                                    {{ $currentUnits + $newUnits }}/{{ $maxUnits }}u
+                                    {{ $projectedUnits }}/{{ $maxUnits }}u
                                 </div>
                                 <div class="w-16 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full mt-1.5 overflow-hidden">
                                     <div class="h-full rounded-full transition-all
                                                 @if($wouldOverload)
                                                     bg-amber-400
-                                                @elseif(($currentUnits + $newUnits) >= $maxUnits * 0.8)
+                                                @elseif($projectedUnits >= $maxUnits * 0.8)
                                                     bg-yellow-400
                                                 @else
                                                     bg-emerald-500
                                                 @endif"
-                                         style="width: {{ min(100, round((($currentUnits + $newUnits) / max(1, $maxUnits)) * 100)) }}%">
+                                         style="width: {{ min(100, round(($projectedUnits / max(1, $maxUnits)) * 100)) }}%">
                                     </div>
                                 </div>
                             </div>
