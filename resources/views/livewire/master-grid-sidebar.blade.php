@@ -14,12 +14,53 @@
          @refreshGrid.window="$wire.$refresh()">
 
         {{-- HEADER --}}
-        <div class="h-12 px-3 py-2 border-b-2 border-slate-300 dark:border-slate-700 flex items-center justify-between bg-gradient-to-r from-blue-500/20 to-blue-600/20 dark:from-blue-900/40 dark:to-blue-800/40 backdrop-blur-sm flex-shrink-0">
-            <div class="flex items-center gap-1.5">
-                <div class="w-2 h-4 bg-blue-600 dark:bg-blue-400 rounded-full"></div>
-                <h3 class="text-[9px] font-black uppercase tracking-wider text-slate-900 dark:text-slate-100">Subjects</h3>
+        <div class="border-b-2 border-slate-300 dark:border-slate-700 bg-gradient-to-r from-blue-500/20 to-blue-600/20 dark:from-blue-900/40 dark:to-blue-800/40 backdrop-blur-sm flex-shrink-0">
+            {{-- Title row --}}
+            <div class="h-12 px-3 py-2 flex items-center justify-between">
+                <div class="flex items-center gap-1.5">
+                    <div class="w-2 h-4 bg-blue-600 dark:bg-blue-400 rounded-full"></div>
+                    <h3 class="text-[9px] font-black uppercase tracking-wider text-slate-900 dark:text-slate-100">Subjects</h3>
+                </div>
+                <span class="text-[8px] font-bold text-white bg-blue-600 dark:bg-blue-700 px-1.5 py-0.5 rounded-full">{{ count($subjects ?? []) }}</span>
             </div>
-            <span class="text-[8px] font-bold text-white bg-blue-600 dark:bg-blue-700 px-1.5 py-0.5 rounded-full">{{ count($subjects ?? []) }}</span>
+
+            {{-- Practicum / OJT hidden indicator + toggle --}}
+            @if(($practicumCount ?? 0) > 0 || ($showPracticum ?? false))
+                <div class="px-3 pb-2 flex items-center justify-between gap-2">
+                    <span class="flex items-center gap-1 text-[7.5px] font-bold text-amber-700 dark:text-amber-400">
+                        <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21" />
+                        </svg>
+                        @if($showPracticum ?? false)
+                            Practicum/OJT visible
+                        @else
+                            {{ $practicumCount ?? 0 }} Practicum/OJT hidden
+                        @endif
+                    </span>
+                    <button
+                        wire:click="$toggle('showPracticum')"
+                        type="button"
+                        class="flex items-center gap-1 text-[7px] font-black uppercase tracking-wide px-2 py-0.5 rounded-full border-2 transition-all
+                               {{ ($showPracticum ?? false)
+                                   ? 'border-amber-500 bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-600'
+                                   : 'border-slate-300 bg-white/60 text-slate-600 dark:bg-slate-700/60 dark:text-slate-300 dark:border-slate-600 hover:border-amber-400 hover:text-amber-700 dark:hover:text-amber-400' }}">
+                        @if($showPracticum ?? false)
+                            <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                            Hide
+                        @else
+                            <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+                            </svg>
+                            Show
+                        @endif
+                    </button>
+                </div>
+            @endif
         </div>
 
         {{-- FILTERS --}}
@@ -129,6 +170,7 @@
                     
                     $dotColor = $isMinor ? 'bg-green-500' : ($isMajor ? 'bg-red-500' : 'bg-gray-400');
                     $typeText = $isMinor ? 'MINOR' : ($isMajor ? 'MAJOR' : 'UNKNOWN');
+                    $isPracticum = (bool) ($subject->is_practicum ?? false);
                 @endphp
 
                 @if($remainingHours > 0)
@@ -161,6 +203,17 @@
                                 {{ $typeText }}
                             </span>
                         </div>
+
+                        {{-- PRACTICUM BADGE (no-room indicator) --}}
+                        @if($isPracticum)
+                            <div class="mb-1 flex items-center gap-1 bg-amber-100/80 dark:bg-amber-900/40 border border-amber-300 dark:border-amber-700 rounded-md px-1.5 py-0.5">
+                                <svg class="w-2.5 h-2.5 text-amber-600 dark:text-amber-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z" />
+                                </svg>
+                                <span class="text-[7px] font-black uppercase tracking-wide text-amber-700 dark:text-amber-400">Practicum / OJT — No Room Required</span>
+                            </div>
+                        @endif
 
                         {{-- SUBJECT CODE & SECTION BADGE --}}
                         <div class="flex items-start justify-between gap-1 mb-0.5 pr-20">

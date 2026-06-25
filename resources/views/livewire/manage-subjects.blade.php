@@ -255,6 +255,14 @@
                                                     {{ $subject->type }}
                                                 </span>
                                                 <span class="mt-1 text-xs font-semibold text-slate-500 dark:text-slate-400 tracking-wide">{{ $subject->units }} Units</span>
+                                                @if($subject->is_practicum)
+                                                    <span class="mt-1 inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-400 text-[9px] font-black uppercase tracking-widest border border-purple-200 dark:border-purple-700">
+                                                        <svg class="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                                                        </svg>
+                                                        Practicum
+                                                    </span>
+                                                @endif
                                             </div>
                                         </td>
 
@@ -680,6 +688,7 @@
                             </p>
                             <p class="text-[9px] text-slate-400 leading-tight mt-0.5">
                                 Override: this Major subject will be scheduled in a <strong>lecture room</strong> instead of the default lab.
+                                Checking this will automatically clear any Practicum / OJT setting.
                             </p>
                         </div>
                     </label>
@@ -717,6 +726,7 @@
                             </p>
                             <p class="text-[9px] text-slate-400 leading-tight mt-0.5">
                                 Override: this Minor subject will use the <strong>{{ strtoupper($major ?: 'department') }} lab room</strong> instead of a lecture room.
+                                Checking this will automatically clear any Practicum / OJT setting.
                             </p>
                         </div>
                     </label>
@@ -738,6 +748,60 @@
                     </div>
                 @endif
             </div>
+
+            {{-- PRACTICUM / OJT FLAG --}}
+            {{-- When checked, this subject is off-campus (OJT, Practicum, Student Teaching, etc.)
+                 and does NOT need a physical room. The auto-scheduler and block-schedule
+                 builder will skip room assignment entirely for this subject.
+
+                 Access: Admin, Registrar, Dean, OIC only.
+                 Associate Dean is explicitly excluded (Practicum = Major-type subject).
+                 Dean / OIC are further restricted to their own department. --}}
+            @php
+                $canSeePracticum = in_array(strtolower(auth()->user()->role ?? ''), ['admin', 'registrar', 'dean', 'oic']);
+            @endphp
+            @if($canSeePracticum)
+            <div class="rounded-xl border {{ $is_practicum ? 'border-purple-300 bg-purple-50 dark:border-purple-700 dark:bg-purple-900/20' : 'border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800/60' }} p-3 transition-colors">
+                <p class="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2.5">Practicum / OJT</p>
+
+                <label class="flex items-start gap-3 cursor-pointer group">
+                    <input type="checkbox"
+                        wire:model.live="is_practicum"
+                        id="is_practicum_checkbox"
+                        class="mt-0.5 w-4 h-4 shrink-0 accent-purple-600 cursor-pointer">
+                    <div class="flex-1">
+                        <p class="text-[11px] font-black uppercase tracking-wide {{ $is_practicum ? 'text-purple-700 dark:text-purple-400' : 'text-slate-600 dark:text-slate-300' }}">
+                            This is a Practicum / OJT Subject
+                        </p>
+                        <p class="text-[9px] text-slate-400 leading-tight mt-0.5">
+                            When checked, this subject is deployed off-campus (OJT, Practicum, Student Teaching, Hotel/IT deployment, COC competency, etc.) and will <strong>not be assigned a room</strong>.
+                            Checking this will automatically clear any Room Override setting.
+                        </p>
+                    </div>
+                </label>
+
+                {{-- Status badge --}}
+                <div class="mt-2.5 flex items-center gap-2">
+                    @if($is_practicum)
+                        <span class="inline-flex items-center gap-1 rounded-md bg-purple-100 dark:bg-purple-900/40 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-purple-700 dark:text-purple-400">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+                            </svg>
+                            Off-Campus — No room will be assigned
+                        </span>
+                    @else
+                        <span class="inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-700 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+                            </svg>
+                            Regular — Requires a physical room
+                        </span>
+                    @endif
+                    <p class="text-[8px] text-slate-400">Room assignment is skipped for Practicum subjects.</p>
+                </div>
+            </div>
+            @endif
+            @error('is_practicum')<span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>@enderror
 
             {{-- SUBMIT --}}
             <button type="submit"

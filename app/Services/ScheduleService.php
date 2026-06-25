@@ -57,6 +57,13 @@ class ScheduleService
         $scheduledMinutes = Schedule::activeTerm()
             ->where('room_id', $roomId)
             ->whereIn('day', $settings['active_days'])
+            // Practicum/OJT subjects have no physical room; exclude them from utilization.
+            ->whereHas('subject', function ($query) {
+                $query->where(function ($q) {
+                    $q->where('is_practicum', false)
+                      ->orWhereNull('is_practicum');
+                });
+            })
             ->get()
             ->sum(function ($schedule) {
                 $start = Carbon::parse($schedule->start_time);

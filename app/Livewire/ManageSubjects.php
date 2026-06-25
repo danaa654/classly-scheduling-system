@@ -40,6 +40,7 @@ class ManageSubjects extends Component
     public bool $requires_lab = false;
     public $preferred_room_type = '';
     public bool $room_override = false;  // true = override default room routing for this subject
+    public bool $is_practicum = false;   // true = off-campus/no-room subject (OJT, Practicum, etc.)
     public $duration_hours = 3;
     public $meetings_per_week = 1;
 
@@ -81,10 +82,30 @@ class ManageSubjects extends Component
      *   Major  + unchecked → preferred_room_type = '',       requires_lab = false  (auto/lab)
      *   Minor  + checked → preferred_room_type = 'LAB',     requires_lab = true   (dept lab)
      *   Minor  + unchecked → preferred_room_type = '',       requires_lab = false  (auto/lecture)
+     *
+     * Mutual exclusion: checking Room Override automatically unchecks Practicum / OJT.
      */
     public function updatedRoomOverride(bool $value): void
     {
+        if ($value) {
+            // Uncheck Practicum when Room Override is activated — they are mutually exclusive.
+            $this->is_practicum = false;
+        }
         $this->syncRoomFieldsFromOverride($value);
+    }
+
+    /**
+     * Mutual exclusion: checking Practicum / OJT automatically unchecks Room Override
+     * and resets the derived room fields to their auto/default state.
+     */
+    public function updatedIsPracticum(bool $value): void
+    {
+        if ($value) {
+            // Uncheck Room Override and reset all derived room fields to auto (no override).
+            $this->room_override       = false;
+            $this->preferred_room_type = '';
+            $this->requires_lab        = false;
+        }
     }
 
     /**
@@ -237,6 +258,25 @@ class ManageSubjects extends Component
             return strtoupper($dept) === strtoupper($user->department);
         }
         return false;
+    }
+
+    /**
+     * Check whether the current user can access Practicum / OJT subjects.
+     *
+     * Practicum subjects are always Major-type (off-campus deployments), so they
+     * fall under the same access tier as Major subjects. Associate Deans are
+     * explicitly excluded — they may manage Minor/elective subjects only.
+     *
+     * Allowed roles: admin, registrar, dean, oic
+     * Blocked roles: associate_dean (and any other unlisted role)
+     *
+     * Dean / OIC are further restricted to their own department (enforced
+     * separately by validateDepartmentAccess()).
+     */
+    private function canAccessPracticum(): bool
+    {
+        $role = strtolower(auth()->user()->role ?? '');
+        return in_array($role, ['admin', 'registrar', 'dean', 'oic']);
     }
 
     // ============================================================
@@ -454,6 +494,7 @@ class ManageSubjects extends Component
         $this->preferred_room_type = '';
         $this->duration_hours   = 3;
         $this->meetings_per_week = 1;
+        $this->is_practicum     = false;
         $this->major            = '';
         $this->year_level       = '';
         $this->edp_code         = '';
@@ -479,12 +520,19 @@ class ManageSubjects extends Component
         $this->reset([
             'room_override', 'requires_lab', 'preferred_room_type',
             'type', 'description', 'units', 'duration_hours', 'meetings_per_week',
+            'is_practicum',
         ]);
 
         $subject = $this->activeSubjectsQuery()->findOrFail($id);
 
         if (! $this->validateDepartmentAccess($subject->department)) {
             $this->dispatch('toast', ['type' => 'error', 'message' => 'Access Denied', 'detail' => 'You do not have permission to edit subjects in this department.']);
+            return;
+        }
+
+        // Associate Deans are not permitted to access Practicum / OJT subjects.
+        if ($subject->is_practicum && ! $this->canAccessPracticum()) {
+            $this->dispatch('toast', ['type' => 'error', 'message' => 'Access Denied', 'detail' => 'Practicum / OJT subjects are managed by Admin, Registrar, Dean, or OIC only.']);
             return;
         }
 
@@ -520,6 +568,7 @@ class ManageSubjects extends Component
         $this->major               = $subject->major ?? '';
         $this->year_level          = (int) ($subject->year_level ?? 1);
         $this->department          = $subject->department;
+        $this->is_practicum        = (bool) ($subject->is_practicum ?? false);
 
         $this->showModal = true;
     }
@@ -548,6 +597,12 @@ class ManageSubjects extends Component
         $isPowerUser = in_array($userRole, ['admin', 'registrar', 'associate_dean']);
         if (! $isPowerUser && ! $this->validateDepartmentAccess($this->department)) {
             $this->addError('department', 'You do not have permission to manage subjects in this department.');
+            return;
+        }
+
+        // Associate Deans cannot create or update Practicum / OJT subjects.
+        if ($this->is_practicum && ! $this->canAccessPracticum()) {
+            $this->addError('is_practicum', 'Practicum / OJT subjects can only be managed by Admin, Registrar, Dean, or OIC.');
             return;
         }
         $edpUpper         = strtoupper(trim($this->edp_code));
@@ -643,6 +698,7 @@ class ManageSubjects extends Component
                 'duration_hours'      => (float) $this->duration_hours,
                 'meetings_per_week'   => (int) $this->meetings_per_week,
                 'department'          => $deptUpper,
+                'is_practicum'        => (bool) $this->is_practicum,
                 'semester'            => $period['semester'],
                 'school_year'         => $period['school_year'],
                 'academic_year'       => $period['school_year'],
@@ -663,7 +719,7 @@ class ManageSubjects extends Component
 
     private function completeFormReset(): void
     {
-        $this->reset(['edp_code', 'subject_code', 'section', 'description', 'units', 'type', 'duration_hours', 'major', 'year_level', 'department', 'subjectId', 'isEditMode', 'meetings_per_week', 'requires_lab', 'preferred_room_type', 'room_override']);
+        $this->reset(['edp_code', 'subject_code', 'section', 'description', 'units', 'type', 'duration_hours', 'major', 'year_level', 'department', 'subjectId', 'isEditMode', 'meetings_per_week', 'requires_lab', 'preferred_room_type', 'room_override', 'is_practicum']);
     }
 
     private function logActivityAndNotify($subject, $user, $deptUpper): void

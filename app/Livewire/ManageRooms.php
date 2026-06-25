@@ -453,6 +453,10 @@ class ManageRooms extends Component
         ];
  
         $query = Subject::activeTerm()
+            // Practicum / OJT subjects have no physical room — never show in Manage Rooms.
+            ->where(function ($q) {
+                $q->where('is_practicum', false)->orWhereNull('is_practicum');
+            })
             ->orderBy('department')
             ->orderBy('year_level')
             ->orderBy('section')
@@ -540,6 +544,10 @@ class ManageRooms extends Component
         // ── Pre-tick subjects already bound to this room ─────────────────────
         $this->selectedSubjectIds = Subject::activeTerm()
             ->where('preferred_room_id', $roomId)
+            // Practicum subjects are excluded from room management entirely.
+            ->where(function ($q) {
+                $q->where('is_practicum', false)->orWhereNull('is_practicum');
+            })
             ->pluck('id')
             ->map(fn ($id) => (string) $id) // Livewire checkboxes store strings
             ->toArray();
@@ -569,6 +577,10 @@ class ManageRooms extends Component
 
     // Start base query with ordering
     $query = Subject::activeTerm()
+        // Practicum / OJT subjects have no physical room — never show in Manage Rooms.
+        ->where(function ($q) {
+            $q->where('is_practicum', false)->orWhereNull('is_practicum');
+        })
         ->orderBy('department')
         ->orderBy('year_level')
         ->orderBy('section')
@@ -932,9 +944,12 @@ class ManageRooms extends Component
         return view('livewire.manage-rooms', [
             // Eager-load preferred-assigned subjects (active term only) so the
             // utilisation indicator in the Blade template never fires N+1 queries.
+            // Practicum / OJT subjects are excluded — they have no room relevance.
             'rooms' => $query
                 ->orderBy('room_name', 'asc')
-                ->with(['subjects' => fn ($q) => $q->activeTerm()])
+                ->with(['subjects' => fn ($q) => $q->activeTerm()->where(function ($inner) {
+                    $inner->where('is_practicum', false)->orWhereNull('is_practicum');
+                })])
                 ->paginate(10),
             'maxWeeklyHours' => self::MAX_WEEKLY_ROOM_HOURS,
         ]);

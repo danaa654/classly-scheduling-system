@@ -35,6 +35,27 @@ class ScheduleConflictService
         $this->includeSuggestions = $includeSuggestions;
         $subject->loadMissing('faculty:id,full_name,availability');
 
+        // Practicum/OJT subjects are off-campus and must never occupy a physical room.
+        if ((bool) ($subject->is_practicum ?? false)) {
+            $this->includeSuggestions = $previousIncludeSuggestions;
+
+            return [
+                'success'        => false,
+                'status'         => false,
+                'type'           => 'practicum_conflict',
+                'toast_type'     => 'error',
+                'conflict_type'  => 'PRACTICUM_CONFLICT',
+                'title'          => 'Scheduling Unsuccessful',
+                'message'        => 'This subject is marked as Practicum/OJT and does not require a physical room assignment. Practicum/OJT subjects cannot be scheduled in the Master Grid.',
+                'details'        => [
+                    'subject_code' => $subject->subject_code,
+                    'is_practicum' => true,
+                    'suggestion'   => 'Practicum/OJT subjects are managed separately and do not appear in the room scheduling grid.',
+                ],
+                'suggestions' => [],
+            ];
+        }
+
         try {
             // Core structural checks that always apply regardless of instructor assignment
             $checks = [
@@ -506,6 +527,13 @@ class ScheduleConflictService
         return Schedule::activeTerm()
             ->where('day', $day)
             ->when($ignoreScheduleId, fn (Builder $query) => $query->whereKeyNot($ignoreScheduleId))
+            // Practicum/OJT subjects occupy no physical room; exclude them from all conflict checks.
+            ->whereHas('subject', function (Builder $subjectQuery) {
+                $subjectQuery->where(function ($q) {
+                    $q->where('is_practicum', false)
+                      ->orWhereNull('is_practicum');
+                });
+            })
             ->where(function (Builder $query) use ($startTime, $endTime) {
                 $query->where('start_time', '<', $this->normalizeTime($endTime))
                     ->where('end_time', '>', $this->normalizeTime($startTime));

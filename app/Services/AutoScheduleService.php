@@ -310,6 +310,13 @@ class AutoScheduleService
                     break;
                 }
 
+                // Hard guard: practicum/OJT subjects must never receive a room assignment.
+                if ((bool) ($subject->is_practicum ?? false)) {
+                    $result['failure_reasons'][] = "{$subject->subject_code}: Practicum/OJT subjects cannot be assigned to a room or time slot";
+                    $groupFailed = true;
+                    break;
+                }
+
                 if (!in_array($day, $activeDays, true)) {
                     $result['failure_reasons'][] = "{$subject->subject_code}: {$day} is not enabled for scheduling";
                     $groupFailed = true;
@@ -3682,6 +3689,11 @@ class AutoScheduleService
         return $this->activeSubjectQuery()
             ->select($this->subjectSelectColumns())
             ->where('meetings_per_week', '>', 0)
+            // Practicum/OJT subjects are off-campus and must never be room-scheduled.
+            ->where(function ($query) {
+                $query->where('is_practicum', false)
+                      ->orWhereNull('is_practicum');
+            })
             ->when(!empty($filters['department']), fn ($query) => $query->where('department', strtoupper($filters['department'])))
             ->when(!empty($filters['major']), fn ($query) => $query->where('major', strtoupper($filters['major'])))
             ->when(!empty($filters['year_level']), fn ($query) => $query->where('year_level', (int) $filters['year_level']))

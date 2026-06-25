@@ -42,6 +42,8 @@ class Subject extends Model
         // Legacy-tracking columns (added by migration 000010)
         'is_legacy_edp',
         'edp_version',
+        // Off-campus / no-room subjects (OJT, Practicum, Student Teaching, etc.)
+        'is_practicum',
     ];
 
     protected $casts = [
@@ -54,6 +56,7 @@ class Subject extends Model
         'archived_at'      => 'datetime',
         'is_legacy_edp'    => 'boolean',
         'edp_version'      => 'integer',
+        'is_practicum'     => 'boolean',
     ];
 
     protected static function booted(): void

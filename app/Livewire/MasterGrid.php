@@ -61,6 +61,7 @@ class MasterGrid extends Component
     public array $retryFailureDetails = [];
     public array $selectedFailedSubjects = [];
     public bool $selectAllFailedSubjects = false;
+    public bool $showPracticum = false;   // toggle to show Practicum / OJT subjects in the sidebar
     public array $bulkFailedInputs = [
         'meetings_per_week' => '',
     ];
@@ -201,6 +202,11 @@ class MasterGrid extends Component
     public function updatedSelectedType() 
     { 
         $this->resetPage(); 
+    }
+
+    public function updatedShowPracticum()
+    {
+        $this->resetPage();
     }
 
     public function updatedSelectedRoomTypeFilter() 
@@ -2232,6 +2238,16 @@ class MasterGrid extends Component
             return;
         }
 
+        // Practicum/OJT subjects are off-campus and must never be assigned to a room slot.
+        if ((bool) ($subject->is_practicum ?? false)) {
+            $this->dispatch('toast', [
+                'type'    => 'error',
+                'message' => 'Scheduling Unsuccessful',
+                'detail'  => 'This subject is marked as Practicum/OJT and does not require a physical room assignment. Practicum/OJT subjects cannot be scheduled in the Master Grid.',
+            ]);
+            return;
+        }
+
         $room = Room::find($this->selectedRoomId);
 
         if (!$room) {
@@ -2455,6 +2471,15 @@ class MasterGrid extends Component
             $query->whereRaw('1 = 0');
         }
 
+        // Practicum / OJT exclusion — hidden from the grid by default
+        // because they don't occupy a room or time slot.
+        if (! $this->showPracticum) {
+            $query->where(function ($q) {
+                $q->where('is_practicum', false)
+                  ->orWhereNull('is_practicum');
+            });
+        }
+
         // Search filter
         if (trim($this->searchSubject)) {
             $query->where(function ($q) {
@@ -2609,6 +2634,18 @@ class MasterGrid extends Component
 
     public function render()
     {
+        // Count Practicum / OJT subjects that are currently hidden
+        // so the sidebar can display the "N hidden" indicator.
+        $practicumCount = $this->showPracticum ? 0 : (function () {
+            $period = Setting::getAcademicPeriod();
+            return Subject::query()
+                ->where('semester', $period['semester'])
+                ->where('school_year', $period['school_year'])
+                ->where('is_archived', false)
+                ->where('is_practicum', true)
+                ->count();
+        })();
+
         $subjects = $this->getFilteredSubjects();
 
         $rooms = Room::query()
@@ -2676,6 +2713,7 @@ class MasterGrid extends Component
             'selectedRoomId'       => $this->selectedRoomId,
             'selectedRoomName'     => $this->selectedRoomName,
             'selectedRoomType'     => $this->selectedRoomType,
+            'practicumCount'       => $practicumCount,
             'dayStart'             => $this->dayStart,
             'dayEnd'               => $this->dayEnd,
             'schoolYear'           => $this->schoolYear,
