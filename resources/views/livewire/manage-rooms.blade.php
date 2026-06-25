@@ -95,6 +95,34 @@
                             <option value="LECTURE">Lecture</option>
                             <option value="LAB">Lab</option>
                         </select>
+
+                        @php
+                            $userRole = auth()->user()->role ?? '';
+                            $userDept = strtoupper(trim(auth()->user()->department ?? ''));
+                            $isRoleScopedUser = in_array($userRole, ['dean', 'oic', 'associate_dean']);
+                            $myRoomsLabel = match(true) {
+                                in_array($userRole, ['dean', 'oic']) => $userDept . ' Specialized Rooms',
+                                $userRole === 'associate_dean'       => 'Lecture Rooms',
+                                default                              => 'My Rooms',
+                            };
+                        @endphp
+
+                        @if($isRoleScopedUser)
+                            <button
+                                wire:click="toggleViewMode"
+                                class="inline-flex items-center gap-2 px-4 py-3 rounded-xl text-xs font-black uppercase tracking-wider border transition-all duration-200
+                                    {{ $viewMode === 'my_rooms'
+                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-md shadow-indigo-200 dark:shadow-none'
+                                        : 'bg-slate-50 dark:bg-slate-800/50 text-slate-600 dark:text-slate-300 border-slate-200 dark:border-slate-700 hover:border-indigo-400 hover:text-indigo-600 dark:hover:text-indigo-400' }}">
+                                <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-6 0a1 1 0 001-1v-4a1 1 0 011-1h2a1 1 0 011 1v4a1 1 0 001 1m-6 0h6"/>
+                                </svg>
+                                {{ $myRoomsLabel }}
+                                @if($viewMode === 'my_rooms')
+                                    <span class="ml-0.5 text-indigo-200 text-[10px]">✓</span>
+                                @endif
+                            </button>
+                        @endif
                     </div>
                 </div>
 
@@ -1224,6 +1252,25 @@
                                                            bg-purple-100 dark:bg-purple-900/40
                                                            text-purple-700 dark:text-purple-300">
                                                     LAB
+                                                </span>
+                                            @endif
+                                            @php
+                                                $roomType       = strtoupper($assigningRoomData['type'] ?? '');
+                                                $isLabRoom      = in_array($roomType, ['LAB', 'LABORATORY'], true);
+                                                $subjectIsMinor = strtolower($subject['subject_type'] ?? 'major') === 'minor';
+                                                $subjectIsMajor = !$subjectIsMinor;
+                                                $prt            = strtoupper($subject['preferred_room_type'] ?? '');
+                                                // Override: Minor in a LAB room, or Major in a LECTURE room
+                                                $isOverride = ($isLabRoom  && $prt === 'LAB'     && $subjectIsMinor)
+                                                           || (!$isLabRoom && $prt === 'LECTURE'  && $subjectIsMajor);
+                                            @endphp
+                                            @if($isOverride)
+                                                <span
+                                                    class="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider
+                                                           bg-teal-100 dark:bg-teal-900/40
+                                                           text-teal-700 dark:text-teal-300"
+                                                    title="This subject was manually set to prefer a {{ $isLabRoom ? 'Lab' : 'Lecture' }} room via the room override setting.">
+                                                    🔀 Override
                                                 </span>
                                             @endif
                                             @if(in_array((string)$subject['id'], $selectedSubjectIds))

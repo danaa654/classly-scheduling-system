@@ -39,6 +39,7 @@ class ManageSubjects extends Component
     public $type = 'Major';
     public bool $requires_lab = false;
     public $preferred_room_type = '';
+    public bool $room_override = false;  // true = override default room routing for this subject
     public $duration_hours = 3;
     public $meetings_per_week = 1;
 
@@ -69,6 +70,55 @@ class ManageSubjects extends Component
     public function updatedSelectedSection() { $this->resetPage(); }
     public function updatedCatalogMode() { $this->selectedArchiveBatch = ''; $this->selectedSubjects = []; $this->selectAll = false; $this->resetPage(); }
     public function updatedSelectedArchiveBatch() { $this->selectedSubjects = []; $this->selectAll = false; $this->resetPage(); }
+
+    // ============================================================
+    // ROOM OVERRIDE SYNC
+    // ============================================================
+
+    /**
+     * Single checkbox that means different things depending on subject type:
+     *   Major  + checked → preferred_room_type = 'LECTURE', requires_lab = false
+     *   Major  + unchecked → preferred_room_type = '',       requires_lab = false  (auto/lab)
+     *   Minor  + checked → preferred_room_type = 'LAB',     requires_lab = true   (dept lab)
+     *   Minor  + unchecked → preferred_room_type = '',       requires_lab = false  (auto/lecture)
+     */
+    public function updatedRoomOverride(bool $value): void
+    {
+        $this->syncRoomFieldsFromOverride($value);
+    }
+
+    /**
+     * When the subject type changes, re-evaluate the override state so the
+     * stored preferred_room_type always matches the current type + checkbox combination.
+     */
+    public function updatedType(string $value): void
+    {
+        $this->syncRoomFieldsFromOverride($this->room_override);
+    }
+
+    private function syncRoomFieldsFromOverride(bool $override): void
+    {
+        $isMajor = strtolower($this->type ?? 'major') === 'major';
+
+        if ($isMajor) {
+            // Major: override = use lecture instead of lab
+            $this->preferred_room_type = $override ? 'LECTURE' : '';
+            $this->requires_lab        = false;
+        } else {
+            // Minor: override = use dept lab instead of lecture
+            $this->preferred_room_type = $override ? 'LAB' : '';
+            $this->requires_lab        = $override;
+        }
+    }
+
+    /**
+     * Kept for backward-compatibility — the old dropdown may still write to this.
+     * We derive room_override from the stored preferred_room_type when loading.
+     */
+    public function updatedPreferredRoomType(string $value): void
+    {
+        $this->requires_lab = str_contains(strtoupper($value), 'LAB');
+    }
 
     private function activePeriod(): array
     {
@@ -283,6 +333,7 @@ class ManageSubjects extends Component
                 $header  = false;
                 continue;
             }
+
             $rowNumber++;
             $value = fn (string $key, $default = '') => trim((string) ($row[$indexes[$key] ?? -1] ?? $default));
             $typeColumn = array_key_exists('subject_type', $indexes) ? 'subject_type' : 'type';
@@ -317,10 +368,19 @@ class ManageSubjects extends Component
             $section       = strtoupper($value('section', 'A'));
             $normalizedType = str_contains(strtolower($rawType), 'minor') ? 'Minor' : 'Major';
             $specialization = strtoupper($value('specialization', $rowMajor));
-            $requiresLab = filter_var($value('requires_lab', false), FILTER_VALIDATE_BOOLEAN)
-                || str_contains(strtoupper($value('preferred_room_type', '')), 'LAB')
-                || str_contains(strtoupper($rawType.' '.$value('description').' '.$specialization), 'LAB');
-            $preferredRoomType = strtoupper($value('preferred_room_type', $requiresLab ? 'LAB' : 'LECTURE'));
+
+            // preferred_room_type is source of truth; derive requires_lab from it.
+            // Empty string = auto (no override) — the auto-scheduler uses its own
+            // type/major heuristics. Only write 'LAB' when the subject is explicitly
+            // a lab subject; never write 'LECTURE' as a default because that would
+            // incorrectly mark the room_override checkbox as checked on first edit.
+            $rawPreferredRoomType = strtoupper($value('preferred_room_type', ''));
+            if ($rawPreferredRoomType === '') {
+                $heuristicLab = filter_var($value('requires_lab', false), FILTER_VALIDATE_BOOLEAN)
+                    || str_contains(strtoupper($rawType . ' ' . $value('description') . ' ' . $specialization), 'LAB');
+                $rawPreferredRoomType = $heuristicLab ? 'LAB' : ''; // '' = auto, not an override
+            }
+            $requiresLab = str_contains($rawPreferredRoomType, 'LAB');
 
             Subject::create([
                 'edp_code'          => $edpCode,
@@ -336,7 +396,7 @@ class ManageSubjects extends Component
                 'type'              => $normalizedType,
                 'subject_type'      => $rawType,
                 'requires_lab'      => $requiresLab,
-                'preferred_room_type' => $preferredRoomType,
+                'preferred_room_type' => $rawPreferredRoomType,
                 'specialization'    => $specialization,
                 'semester'          => $period['semester'],
                 'school_year'       => $period['school_year'],
@@ -411,27 +471,56 @@ class ManageSubjects extends Component
             $this->dispatch('toast', ['type' => 'warning', 'message' => 'Archive is read only', 'detail' => 'Switch back to the current semester before editing subjects.']);
             return;
         }
+
+        // Clear stale validation errors AND room-related state before loading
+        // fresh data. Without this reset, a previous modal session's stale
+        // room_override / preferred_room_type can bleed into the new load.
         $this->resetValidation();
+        $this->reset([
+            'room_override', 'requires_lab', 'preferred_room_type',
+            'type', 'description', 'units', 'duration_hours', 'meetings_per_week',
+        ]);
+
         $subject = $this->activeSubjectsQuery()->findOrFail($id);
+
         if (! $this->validateDepartmentAccess($subject->department)) {
             $this->dispatch('toast', ['type' => 'error', 'message' => 'Access Denied', 'detail' => 'You do not have permission to edit subjects in this department.']);
             return;
         }
-        $this->isEditMode        = true;
-        $this->subjectId         = $subject->id;
-        $this->edp_code          = $subject->edp_code;
-        $this->subject_code      = $subject->subject_code;
-        $this->section           = $subject->section;
-        $this->description       = $subject->description;
-        $this->units             = $subject->units;
-        $this->type              = $subject->type ?? 'Major';
-        $this->requires_lab      = (bool) ($subject->requires_lab ?? false);
-        $this->preferred_room_type = $subject->preferred_room_type ?? '';
-        $this->duration_hours    = $subject->duration_hours ?? 3;
-        $this->meetings_per_week = $subject->meetings_per_week ?? 1;
-        $this->major             = $subject->major ?? '';
-        $this->year_level        = $subject->year_level ?? 1;
-        $this->department        = $subject->department;
+
+        // ── Restore room override checkbox ──────────────────────────────────────
+        // preferred_room_type is the single source of truth written by executeSave():
+        //   Major + checkbox checked   → saved as 'LECTURE'
+        //   Minor + checkbox checked   → saved as 'LAB'
+        //   Either + unchecked          → saved as '' (empty string / auto)
+        // We read it back directly — no guessing, no heuristics.
+        $subjectIsMajor = strtolower($subject->type ?? 'major') === 'major';
+        $savedRoomType  = strtoupper(trim((string) ($subject->preferred_room_type ?? '')));
+
+        // Checked only when the exact override value is stored.
+        // Empty string / null / any other legacy value → unchecked (false).
+        $roomOverride = $subjectIsMajor
+            ? ($savedRoomType === 'LECTURE')
+            : ($savedRoomType === 'LAB');
+
+        // ── Assign all properties in one clean block ────────────────────────────
+        $this->isEditMode          = true;
+        $this->subjectId           = (int) $subject->id;
+        $this->edp_code            = $subject->edp_code;
+        $this->subject_code        = $subject->subject_code;
+        $this->section             = $subject->section;
+        $this->description         = $subject->description;
+        $this->units               = (int) $subject->units;
+        $this->type                = $subject->type ?? 'Major';
+        $this->requires_lab        = ($savedRoomType === 'LAB');
+        $this->preferred_room_type = $savedRoomType;       // always the uppercased canonical value
+        $this->room_override       = (bool) $roomOverride; // explicit bool cast — no ambiguity
+        $this->duration_hours      = $subject->duration_hours ?? 3;
+        $this->meetings_per_week   = (int) ($subject->meetings_per_week ?? 1);
+        $this->major               = $subject->major ?? '';
+        $this->year_level          = (int) ($subject->year_level ?? 1);
+        $this->department          = $subject->department;
+
         $this->showModal = true;
     }
 
@@ -488,13 +577,18 @@ class ManageSubjects extends Component
         ]);
 
         $edpService = app(EdpCodeService::class);
-        if (! $edpService->isNew($edpUpper)) {
-            $this->addError('edp_code', $edpService->validationMessage($edpUpper));
-            return;
-        }
-        if (! $edpService->validateSemesterMatch($edpUpper, $period['semester'])) {
-            $this->addError('edp_code', $edpService->semesterMismatchMessage($edpUpper, $period['semester']));
-            return;
+        // EDP format / semester-match validation is only meaningful when CREATING.
+        // In edit mode the code is readonly and was already validated at creation time;
+        // re-running these checks would silently block saves (e.g. after a semester switch).
+        if (! $this->isEditMode) {
+            if (! $edpService->isNew($edpUpper)) {
+                $this->addError('edp_code', $edpService->validationMessage($edpUpper));
+                return;
+            }
+            if (! $edpService->validateSemesterMatch($edpUpper, $period['semester'])) {
+                $this->addError('edp_code', $edpService->semesterMismatchMessage($edpUpper, $period['semester']));
+                return;
+            }
         }
         if (! $this->isEditMode && $this->getSubjectCodeDuplicateProperty()) {
             $this->addError('subject_code', "Subject code '{$subjectCodeUpper}' already exists in Section {$sectionUpper} for {$majorUpper} - Year {$this->year_level}.");
@@ -516,33 +610,46 @@ class ManageSubjects extends Component
         $subjectCodeUpper = strtoupper($this->subject_code);
         $majorUpper       = strtoupper($this->major);
         $period           = $this->activePeriod();
-        $normalizedType = in_array($this->type, ['Major', 'Minor']) ? $this->type : 'Major';
+        $normalizedType   = in_array($this->type, ['Major', 'Minor']) ? $this->type : 'Major';
+        $isMajor          = $normalizedType === 'Major';
+
+        // ── Room type resolution from the single checkbox ──────────────────
+        // room_override=true on Major  → force LECTURE (bypass lab routing)
+        // room_override=true on Minor  → force LAB     (use dept lab)
+        // room_override=false on either → auto ('')    (scheduler decides per default logic)
+        if ($this->room_override) {
+            $resolvedRoomType    = $isMajor ? 'LECTURE' : 'LAB';
+            $resolvedRequiresLab = !$isMajor; // true only when minor forced to lab
+        } else {
+            $resolvedRoomType    = '';   // empty = auto; scheduler uses type/major heuristics
+            $resolvedRequiresLab = false;
+        }
 
         $subject = Subject::updateOrCreate(
             ['id' => $this->subjectId],
             [
-                'edp_code'          => $edpUpper,
-                'subject_code'      => $subjectCodeUpper,
-                'section'           => strtoupper($this->section),
-                'description'       => $this->description,
-                'major'             => $majorUpper,
-                'year_level'        => (int) $this->year_level,
-                'units'             => (int) $this->units,
-                'type'              => $normalizedType,
-                'subject_type'      => $normalizedType,
-                'requires_lab'      => (bool) $this->requires_lab,
-                'preferred_room_type' => $this->preferred_room_type ?: ((bool) $this->requires_lab ? 'LAB' : 'LECTURE'),
-                'specialization'    => $majorUpper,
-                'duration_hours'    => (float) $this->duration_hours,
-                'meetings_per_week' => (int) $this->meetings_per_week,
-                'department'        => $deptUpper,
-                'semester'          => $period['semester'],
-                'school_year'       => $period['school_year'],
-                'academic_year'     => $period['school_year'],
-                'workspace_key'     => $period['workspace_key'],
-                'is_archived'       => false,
-                'archived_at'       => null,
-                'archive_batch'     => null,
+                'edp_code'            => $edpUpper,
+                'subject_code'        => $subjectCodeUpper,
+                'section'             => strtoupper($this->section),
+                'description'         => $this->description,
+                'major'               => $majorUpper,
+                'year_level'          => (int) $this->year_level,
+                'units'               => (int) $this->units,
+                'type'                => $normalizedType,
+                'subject_type'        => $normalizedType,
+                'requires_lab'        => $resolvedRequiresLab,
+                'preferred_room_type' => $resolvedRoomType,
+                'specialization'      => $majorUpper,
+                'duration_hours'      => (float) $this->duration_hours,
+                'meetings_per_week'   => (int) $this->meetings_per_week,
+                'department'          => $deptUpper,
+                'semester'            => $period['semester'],
+                'school_year'         => $period['school_year'],
+                'academic_year'       => $period['school_year'],
+                'workspace_key'       => $period['workspace_key'],
+                'is_archived'         => false,
+                'archived_at'         => null,
+                'archive_batch'       => null,
             ]
         );
 
@@ -556,7 +663,7 @@ class ManageSubjects extends Component
 
     private function completeFormReset(): void
     {
-        $this->reset(['edp_code', 'subject_code', 'section', 'description', 'units', 'type', 'duration_hours', 'major', 'year_level', 'department', 'subjectId', 'isEditMode', 'meetings_per_week', 'requires_lab', 'preferred_room_type']);
+        $this->reset(['edp_code', 'subject_code', 'section', 'description', 'units', 'type', 'duration_hours', 'major', 'year_level', 'department', 'subjectId', 'isEditMode', 'meetings_per_week', 'requires_lab', 'preferred_room_type', 'room_override']);
     }
 
     private function logActivityAndNotify($subject, $user, $deptUpper): void
@@ -594,8 +701,34 @@ class ManageSubjects extends Component
             $subjectExistsInNextSection = $this->activeSubjectsQuery()->where('subject_code', strtoupper($original->subject_code))->where('section', $nextSection)->where('major', $original->major)->where('year_level', $original->year_level)->where('department', $original->department)->exists();
             if ($subjectExistsInNextSection) { $skippedCount++; $skippedReasons[] = "{$original->subject_code} in Section {$nextSection} already exists"; continue; }
             if (Subject::edpExistsInWorkspace($newEdp, $period['school_year'], $period['semester'])) { $skippedCount++; continue; }
+
+            // Carry over room type consistently — preferred_room_type is source of truth
+            $origRoomType   = $original->preferred_room_type ?: 'LECTURE';
+            $origRequiresLab = str_contains(strtoupper($origRoomType), 'LAB');
+
             try {
-                Subject::create(['edp_code' => $newEdp, 'subject_code' => $original->subject_code, 'section' => $nextSection, 'description' => $original->description, 'major' => $original->major, 'year_level' => $original->year_level, 'units' => $original->units, 'department' => $original->department, 'type' => $original->type ?? 'Major', 'subject_type' => $original->subject_type, 'requires_lab' => (bool) ($original->requires_lab ?? false), 'preferred_room_type' => $original->preferred_room_type, 'specialization' => $original->specialization, 'duration_hours' => $original->duration_hours, 'meetings_per_week' => $original->meetings_per_week ?? 1, 'semester' => $period['semester'], 'school_year' => $period['school_year'], 'academic_year' => $period['school_year'], 'workspace_key' => $period['workspace_key'], 'is_archived' => false]);
+                Subject::create([
+                    'edp_code'           => $newEdp,
+                    'subject_code'       => $original->subject_code,
+                    'section'            => $nextSection,
+                    'description'        => $original->description,
+                    'major'              => $original->major,
+                    'year_level'         => $original->year_level,
+                    'units'              => $original->units,
+                    'department'         => $original->department,
+                    'type'               => $original->type ?? 'Major',
+                    'subject_type'       => $original->subject_type,
+                    'requires_lab'       => $origRequiresLab,
+                    'preferred_room_type' => $origRoomType,
+                    'specialization'     => $original->specialization,
+                    'duration_hours'     => $original->duration_hours,
+                    'meetings_per_week'  => $original->meetings_per_week ?? 1,
+                    'semester'           => $period['semester'],
+                    'school_year'        => $period['school_year'],
+                    'academic_year'      => $period['school_year'],
+                    'workspace_key'      => $period['workspace_key'],
+                    'is_archived'        => false,
+                ]);
                 $duplicatedCount++;
             } catch (\Exception $e) { \Log::error("Error duplicating subject {$original->id}: " . $e->getMessage()); $skippedCount++; }
         }

@@ -157,6 +157,8 @@ class AutoScheduleService
             'failed_items' => [],
             'fallback_warnings' => [],
             'scheduled_items' => [],
+            // IMPROVED: Report subjects that were skipped because all required meetings are already scheduled.
+            'already_complete' => [],
             'filters' => [
                 'department' => strtoupper($filters['department']),
                 'major' => strtoupper($filters['major']),
@@ -173,6 +175,13 @@ class AutoScheduleService
                 $remainingMeetings = max(0, (int) $subject->meetings_per_week - (int) $subject->active_schedules_count);
 
                 if ($remainingMeetings <= 0) {
+                    // IMPROVED: Surface complete subjects instead of silently skipping them.
+                    if ((int) $subject->active_schedules_count >= (int) $subject->meetings_per_week) {
+                        $result['already_complete'][] = [
+                            'subject_code' => $this->cleanText($subject->subject_code),
+                            'edp_code' => $this->cleanText($subject->edp_code),
+                        ];
+                    }
                     continue;
                 }
 
@@ -1093,7 +1102,9 @@ class AutoScheduleService
             $result['failed'] = count($result['failed_items']);
             $result['success'] = false;
             $result['message'] = $reason;
-            $result['recommendations'] = $this->retryFailureRecommendations($subject, $rooms, $meetingsNeeded);
+            // IMPROVED: pass $existingSchedules and $bounds through — both are already
+            // computed above — so recommendations reflect real room/faculty/slot data.
+            $result['recommendations'] = $this->buildSmartRecommendations($subject, $rooms, $existingSchedules, $bounds, $meetingsNeeded);
             return $result;
         }
 
@@ -1523,11 +1534,20 @@ class AutoScheduleService
             return null;
         }
 
+        // IMPROVED: instead of returning the very first valid slot found (which packs every
+        // subject into the earliest possible time of day), gather up to one candidate per
+        // time-of-day bucket and keep whichever has the least nearby existing load. Falls back
+        // to whichever was found first if every candidate scores the same.
+        $slotCandidates = [];
+        $seenBuckets = [];
+
         foreach ($this->sectionWindowPasses($subject->section, $bounds, $allowSessionFallback) as $windows) {
             foreach ($compatibleRooms as $candidate) {
                 $room = $candidate['room'];
 
-                foreach ($this->meetingDayPatterns($meetingsNeeded) as $days) {
+                // IMPROVED: pass $existingSchedules/$subject through so day patterns can be
+                // ranked by current load instead of always trying Mon/Wed first.
+                foreach ($this->meetingDayPatterns($meetingsNeeded, [], $existingSchedules, $subject) as $days) {
                     foreach ($windows as $window) {
                         if ($window['start']->copy()->addMinutes($minutes)->gt($window['end'])) {
                             continue;
@@ -1567,15 +1587,29 @@ class AutoScheduleService
                             );
 
                             if ($placements) {
-                                return [
-                                    'pairing_key' => $this->makePairingKey($subject),
-                                    'placements' => $placements,
-                                ];
+                                $bucket = $this->slotTimeBucket($start);
+
+                                if (!isset($seenBuckets[$bucket])) {
+                                    $seenBuckets[$bucket] = true;
+                                    $slotCandidates[] = [
+                                        'pairing_key' => $this->makePairingKey($subject),
+                                        'placements' => $placements,
+                                        'days' => $days,
+                                    ];
+
+                                    if (count($slotCandidates) >= 3) {
+                                        break 5;
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+
+        if (!empty($slotCandidates)) {
+            return $this->pickBestSlotCandidate($slotCandidates, $existingSchedules);
         }
 
         return null;
@@ -1662,11 +1696,20 @@ class AutoScheduleService
             return null;
         }
 
+        // IMPROVED: instead of returning the very first valid slot found (which packs every
+        // subject into the earliest possible time of day), gather up to one candidate per
+        // time-of-day bucket and keep whichever has the least nearby existing load. Falls back
+        // to whichever was found first if every candidate scores the same.
+        $slotCandidates = [];
+        $seenBuckets = [];
+
         foreach ($this->sectionWindowPasses($subject->section, $bounds, $allowSessionFallback) as $windows) {
             foreach ($compatibleRooms as $candidate) {
                 $room = $candidate['room'];
 
-                foreach ($this->meetingDayPatterns($meetingsNeeded) as $days) {
+                // IMPROVED: pass $existingSchedules/$subject through so day patterns can be
+                // ranked by current load instead of always trying Mon/Wed first.
+                foreach ($this->meetingDayPatterns($meetingsNeeded, [], $existingSchedules, $subject) as $days) {
                     foreach ($windows as $window) {
                         if ($window['start']->copy()->addMinutes($minutes)->gt($window['end'])) {
                             continue;
@@ -1706,15 +1749,29 @@ class AutoScheduleService
                             );
 
                             if ($placements) {
-                                return [
-                                    'pairing_key' => $this->makePairingKey($subject),
-                                    'placements'  => $placements,
-                                ];
+                                $bucket = $this->slotTimeBucket($start);
+
+                                if (!isset($seenBuckets[$bucket])) {
+                                    $seenBuckets[$bucket] = true;
+                                    $slotCandidates[] = [
+                                        'pairing_key' => $this->makePairingKey($subject),
+                                        'placements'  => $placements,
+                                        'days' => $days,
+                                    ];
+
+                                    if (count($slotCandidates) >= 3) {
+                                        break 5;
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
+        }
+
+        if (!empty($slotCandidates)) {
+            return $this->pickBestSlotCandidate($slotCandidates, $existingSchedules);
         }
 
         return null;
@@ -2319,6 +2376,85 @@ class AutoScheduleService
         return $placements;
     }
 
+    // IMPROVED: buckets a start time into a coarse part-of-day so the slot search below can
+    // spread candidates across the day instead of always keeping the very first match (which
+    // is what caused every subject to pile up at the day's opening slot).
+    private function slotTimeBucket(string $start): string
+    {
+        $hour = (int) Carbon::parse($start)->format('H');
+
+        if ($hour < 10) {
+            return 'early_morning';
+        }
+
+        if ($hour < 13) {
+            return 'mid_morning';
+        }
+
+        return 'afternoon';
+    }
+
+    // IMPROVED: counts how many existing schedules already sit within a ±90-minute window of
+    // the given slot on any of the given days. Used to rank same-priority slot candidates by
+    // how congested that part of the day/room/section already is.
+    private function scoreSlotLoad(Collection $existingSchedules, array $days, string $start, string $end): int
+    {
+        $windowStart = Carbon::parse($start)->subMinutes(90);
+        $windowEnd = Carbon::parse($end)->addMinutes(90);
+
+        return $existingSchedules
+            ->filter(function (Schedule $schedule) use ($days, $windowStart, $windowEnd) {
+                if (!in_array($schedule->day, $days, true)) {
+                    return false;
+                }
+
+                $scheduleStart = Carbon::parse($schedule->start_time);
+                $scheduleEnd = Carbon::parse($schedule->end_time);
+
+                return $scheduleStart->lt($windowEnd) && $scheduleEnd->gt($windowStart);
+            })
+            ->count();
+    }
+
+    // IMPROVED: picks the lowest-load candidate out of the (up to 3) slot options gathered
+    // across the day. Ties — including the common case of only one candidate found — fall
+    // back to whichever candidate was discovered first.
+    private function pickBestSlotCandidate(array $candidates, Collection $existingSchedules): array
+    {
+        $best = collect($candidates)
+            ->map(function (array $candidate) use ($existingSchedules) {
+                $first = $candidate['placements'][0];
+                $candidate['load'] = $this->scoreSlotLoad($existingSchedules, $candidate['days'], $first['start'], $first['end']);
+
+                return $candidate;
+            })
+            ->sortBy('load')
+            ->first();
+
+        return [
+            'pairing_key' => $best['pairing_key'],
+            'placements' => $best['placements'],
+        ];
+    }
+
+    // IMPROVED: counts how many existing schedules for this subject's exact student group
+    // (department + major + year_level + section — the same grouping sectionAvailable() uses)
+    // already land on any of the given days. Used by meetingDayPatterns() to break ties so
+    // sections don't all default to the same Mon/Wed (or whichever) pairing.
+    private function dayPatternLoad(Collection $existingSchedules, Subject $subject, array $days): int
+    {
+        return $existingSchedules
+            ->filter(function (Schedule $schedule) use ($subject, $days) {
+                $sameGroup = strtoupper((string) ($schedule->department ?? $schedule->subject?->department)) === strtoupper((string) $subject->department)
+                    && strtoupper((string) ($schedule->major ?? $schedule->subject?->major)) === strtoupper((string) $subject->major)
+                    && (int) ($schedule->year_level ?? $schedule->subject?->year_level) === (int) $subject->year_level
+                    && strtoupper((string) ($schedule->section ?? $schedule->subject?->section)) === strtoupper((string) $subject->section);
+
+                return $sameGroup && in_array($schedule->day, $days, true);
+            })
+            ->count();
+    }
+
     private function buildRichFailureReason(
         Subject $subject,
         Collection $rooms,
@@ -2410,6 +2546,19 @@ class AutoScheduleService
 
         if ($subject->faculty_id) {
             return "No valid paired-day combinations found. Faculty may be unavailable or fully loaded for the required {$meetingsNeeded} meeting(s) per week.";
+        }
+
+        // IMPROVED: before falling back to a purely generic message, check whether a single
+        // conflict-free slot exists at all. If one does, tell the user exactly where instead of
+        // just listing generic actions to try.
+        $hint = $this->findFreshLinkedMeetingPattern($subject, $rooms, $existingSchedules, $bounds, 1, true);
+
+        if ($hint && !empty($hint['placements'])) {
+            $p = $hint['placements'][0];
+
+            return "No {$meetingsNeeded}-meeting pattern fits. However, a single slot is free on {$p['day']} at "
+                . Carbon::parse($p['start'])->format('h:i A')
+                . " in {$p['room']->room_name}. Reduce meetings per week to 1 or free up more room/faculty time.";
         }
 
         return "No valid {$meetingsNeeded}-meeting/week combination found for {$subject->subject_code}. Try reducing meetings per week, assigning another compatible room, opening faculty availability, or allowing evening schedules.";
@@ -2512,6 +2661,32 @@ class AutoScheduleService
         $hasCompatibleMatch = $this->hasCompatibleSpecializationMatch($subjectSpecializations, $specializations);
         $hasSpecializationMatch = $hasExactMatch || $hasCompatibleMatch;
         $isGeneral = $this->isGeneralRoom($room);
+
+        // ── EXPLICIT ROOM OVERRIDE (set via ManageSubjects checkbox) ──────────────────────
+        // When the user has explicitly overridden the room type for this subject,
+        // honour it unconditionally — before any type-based routing logic below.
+        //   Major + checkbox checked → preferred_room_type = 'LECTURE' → lecture rooms only
+        //   Minor + checkbox checked → preferred_room_type = 'LAB'     → lab rooms only
+        $explicitRoomType = strtoupper(trim((string) ($subject->preferred_room_type ?? '')));
+
+        if ($explicitRoomType === 'LECTURE') {
+            // User explicitly said "use lecture room" for this subject.
+            // Accept any room that is NOT a lab (lecture, classroom, or general-purpose).
+            return $this->roomIsLecture($room);
+        }
+
+        if ($explicitRoomType === 'LAB') {
+            // User explicitly said "use lab room" for this subject.
+            // Must be a real lab; specialization must not conflict.
+            if (!$isLab) {
+                return false;
+            }
+            if ($this->roomConflictsWithSubjectDomain($room, $subjectSpecializations)) {
+                return false;
+            }
+            return $hasSpecializationMatch || $this->isAcceptableGeneralLab($room, $subjectSpecializations);
+        }
+        // ── END EXPLICIT OVERRIDE ─────────────────────────────────────────────────────────
 
         if ($this->isTechnologyMajor($subject)) {
             return $this->roomIsTechnologyLab($room)
@@ -2747,11 +2922,17 @@ class AutoScheduleService
 
     private function subjectRequiresLab(Subject $subject): bool
     {
-        if ((bool) ($subject->requires_lab ?? false)) {
-            return true;
+        $explicitRoomType = strtoupper(trim((string) ($subject->preferred_room_type ?? '')));
+
+        // Explicit override from ManageSubjects checkbox is always authoritative.
+        if ($explicitRoomType === 'LECTURE') {
+            return false; // user said "lecture room" → never a lab subject
+        }
+        if ($explicitRoomType === 'LAB') {
+            return true;  // user said "lab room" → always a lab subject
         }
 
-        if (str_contains(strtoupper((string) ($subject->preferred_room_type ?? '')), 'LAB')) {
+        if ((bool) ($subject->requires_lab ?? false)) {
             return true;
         }
 
@@ -2763,13 +2944,17 @@ class AutoScheduleService
             (string) ($subject->specialization ?? ''),
         ])));
 
+        // IMPROVED: removed SYSTEMS / NETWORKING / DATABASE — these false-positive on purely
+        // lecture subjects (e.g. "Systems Integration And Architecture", "Database Management"),
+        // causing them to be rejected by departments that only have lecture rooms. The
+        // requires_lab column and preferred_room_type = 'LAB' remain authoritative for those
+        // subjects. PRACTICUM and WORKSHOP added as unambiguous practical-subject keywords.
         return str_contains($haystack, 'LAB')
             || str_contains($haystack, 'LABORATORY')
             || str_contains($haystack, 'COMPUTER LAB')
             || str_contains($haystack, 'PROGRAMMING')
-            || str_contains($haystack, 'NETWORKING')
-            || str_contains($haystack, 'DATABASE')
-            || str_contains($haystack, 'SYSTEMS');
+            || str_contains($haystack, 'PRACTICUM')
+            || str_contains($haystack, 'WORKSHOP');
     }
 
     private function subjectSpecialization(Subject $subject): string
@@ -3307,7 +3492,10 @@ class AutoScheduleService
             ->all();
     }
 
-    private function meetingDayPatterns(int $meetings, array $mustIncludeDays = []): array
+    // IMPROVED: optional $existingSchedules/$subject params let callers rank day patterns by
+    // how loaded each day already is for this student group, instead of always trying the
+    // same fixed Mon/Wed-first order from DAY_PAIRINGS.
+    private function meetingDayPatterns(int $meetings, array $mustIncludeDays = [], ?Collection $existingSchedules = null, ?Subject $subject = null): array
     {
         $activeDays = $this->activeDays();
         $meetings = max(1, min(count($activeDays), $meetings));
@@ -3330,19 +3518,35 @@ class AutoScheduleService
 
         $patterns = array_values($unique);
 
-        if ($mustIncludeDays) {
-            usort($patterns, function (array $a, array $b) use ($mustIncludeDays) {
-                $aContainsAll = empty(array_diff($mustIncludeDays, $a));
-                $bContainsAll = empty(array_diff($mustIncludeDays, $b));
+        // IMPROVED: a single comparator handles both the original mustIncludeDays priority and
+        // the new load-based tiebreak, so the load sort can never disturb the mustIncludeDays
+        // ordering — it only decides between patterns that already tie on that criterion.
+        if ($mustIncludeDays || ($existingSchedules && $subject)) {
+            usort($patterns, function (array $a, array $b) use ($mustIncludeDays, $existingSchedules, $subject) {
+                if ($mustIncludeDays) {
+                    $aContainsAll = empty(array_diff($mustIncludeDays, $a));
+                    $bContainsAll = empty(array_diff($mustIncludeDays, $b));
 
-                if ($aContainsAll !== $bContainsAll) {
-                    return $aContainsAll ? -1 : 1;
+                    if ($aContainsAll !== $bContainsAll) {
+                        return $aContainsAll ? -1 : 1;
+                    }
+
+                    $aMatches = count(array_intersect($mustIncludeDays, $a));
+                    $bMatches = count(array_intersect($mustIncludeDays, $b));
+
+                    if ($aMatches !== $bMatches) {
+                        return $bMatches <=> $aMatches;
+                    }
                 }
 
-                $aMatches = count(array_intersect($mustIncludeDays, $a));
-                $bMatches = count(array_intersect($mustIncludeDays, $b));
+                if ($existingSchedules && $subject) {
+                    $aLoad = $this->dayPatternLoad($existingSchedules, $subject, $a);
+                    $bLoad = $this->dayPatternLoad($existingSchedules, $subject, $b);
 
-                return $bMatches <=> $aMatches;
+                    return $aLoad <=> $bLoad;
+                }
+
+                return 0;
             });
         }
 
@@ -3589,40 +3793,178 @@ class AutoScheduleService
         ];
     }
 
-    private function retryFailureRecommendations(Subject $subject, Collection $rooms, int $meetingsNeeded): array
-    {
-        $recommendations = [
-            [
-                'label' => 'Reduce meetings per week',
-                'detail' => "Try {$subject->subject_code} with fewer than {$meetingsNeeded} meeting(s) per week.",
-                'match_label' => 'FALLBACK',
-            ],
-            [
-                'label' => 'Add faculty availability',
-                'detail' => 'Open more morning or afternoon availability for an eligible instructor.',
-                'match_label' => 'GOOD MATCH',
-            ],
-            [
-                'label' => 'Assign an additional compatible room',
-                'detail' => 'Add another room that matches the subject type, capacity, and department.',
-                'match_label' => 'GOOD MATCH',
-            ],
-            [
-                'label' => 'Allow evening schedule',
-                'detail' => 'Extend schedule hours in Global Settings if evening classes are acceptable.',
-                'match_label' => 'FALLBACK',
-            ],
-        ];
+    // IMPROVED: replaces the old static retryFailureRecommendations(), which returned the same
+    // four boilerplate suggestions regardless of what actually went wrong. This version checks
+    // real room, faculty, and slot data so the suggestions point at something the user can act
+    // on. match_label is kept so existing UI badges keep working; type/room_id/day/start_time/
+    // end_time are new fields that can be wired into the UI later but are safe to ignore for now.
+    private function buildSmartRecommendations(
+        Subject $subject,
+        Collection $rooms,
+        Collection $existingSchedules,
+        array $bounds,
+        int $meetingsNeeded
+    ): array {
+        $recommendations = [];
+        $minutes = $this->minutesPerMeeting($subject);
 
-        if ($this->compatibleRooms($rooms, $subject)->isEmpty()) {
-            array_unshift($recommendations, [
-                'label' => 'Fix room compatibility first',
-                'detail' => 'No room currently matches this subject requirement.',
+        // Check 1 — Room: does a compatible room exist at all, and if so, is it actually free anywhere?
+        $compatibleRooms = $this->compatibleRooms($rooms, $subject);
+
+        if ($compatibleRooms->isEmpty()) {
+            $requiresLab = $this->subjectRequiresLab($subject);
+            $recommendations[] = [
+                'type' => 'add_room',
+                'label' => 'No compatible room found',
+                'detail' => 'Subject needs ' . ($requiresLab ? 'LAB' : 'LECTURE') . " ({$subject->major} specialization). Add a compatible room in Manage Rooms.",
                 'match_label' => 'BEST MATCH',
-            ]);
+            ];
+        } elseif ($compatibleRooms->every(fn (array $candidate) => !$this->roomHasFreeSlot($candidate['room'], $existingSchedules, $bounds, $minutes))) {
+            $recommendations[] = [
+                'type' => 'change_time',
+                'label' => 'All compatible rooms are occupied',
+                'detail' => 'Rooms available: ' . $compatibleRooms->pluck('room.room_name')->implode(', ') . '. Try a different time slot.',
+                'match_label' => 'GOOD MATCH',
+            ];
+        }
+
+        // Check 2 — Faculty: do they have any availability set, and is any of it actually free?
+        if ($subject->faculty_id && $subject->faculty) {
+            $faculty = $subject->faculty;
+            $availability = $faculty->getAttribute('availability') ?? [];
+
+            $availableDays = collect($this->activeDays())
+                ->filter(fn (string $day) => !empty($availability[$day] ?? $availability[strtolower($day)] ?? []))
+                ->values();
+
+            if ($availableDays->isEmpty()) {
+                $recommendations[] = [
+                    'type' => 'set_faculty_availability',
+                    'label' => 'Faculty has no availability',
+                    'detail' => "{$faculty->full_name} has no availability set for any active scheduling day. Edit their availability in Manage Faculty.",
+                    'match_label' => 'GOOD MATCH',
+                ];
+            } else {
+                $freeDays = $availableDays->filter(
+                    fn (string $day) => $this->facultyHasFreeSlotOnDay($faculty, $existingSchedules, $bounds, $minutes, $day)
+                );
+
+                $recommendations[] = $freeDays->isEmpty()
+                    ? [
+                        'type' => 'change_time',
+                        'label' => 'Faculty availability is fully booked',
+                        'detail' => "{$faculty->full_name} has availability on {$availableDays->implode(', ')}, but all of it is already scheduled. Free up time on one of those days.",
+                        'match_label' => 'GOOD MATCH',
+                    ]
+                    : [
+                        'type' => 'use_faculty_day',
+                        'label' => 'Faculty still has open time',
+                        'detail' => "{$faculty->full_name} has free time on: {$freeDays->implode(', ')}.",
+                        'match_label' => 'GOOD MATCH',
+                    ];
+            }
+        }
+
+        // Check 3 — the most important one: does a conflict-free slot exist at all right now?
+        $hintPattern = $this->findFreshLinkedMeetingPattern($subject, $rooms, $existingSchedules, $bounds, $meetingsNeeded, true);
+
+        if ($hintPattern && !empty($hintPattern['placements'])) {
+            $first = $hintPattern['placements'][0];
+
+            $recommendations[] = [
+                'type' => 'use_slot',
+                'label' => 'A conflict-free slot was found',
+                'detail' => 'Try: ' . collect($hintPattern['placements'])->pluck('day')->implode(' / ')
+                    . ' at ' . Carbon::parse($first['start'])->format('h:i A')
+                    . ' in ' . $first['room']->room_name,
+                'match_label' => 'BEST MATCH',
+                'room_id' => $first['room']->id,
+                'day' => $first['day'],
+                'start_time' => $first['start'],
+                'end_time' => $first['end'],
+            ];
+        }
+
+        // Check 4 — would dropping to a single meeting per week unblock it?
+        if ($meetingsNeeded > 1) {
+            $singleMeeting = $this->findFreshLinkedMeetingPattern($subject, $rooms, $existingSchedules, $bounds, 1, true);
+
+            if ($singleMeeting && !empty($singleMeeting['placements'])) {
+                $first = $singleMeeting['placements'][0];
+
+                $recommendations[] = [
+                    'type' => 'reduce_meetings',
+                    'label' => 'Reduce to 1 meeting per week',
+                    'detail' => "No {$meetingsNeeded}-day pair is fully free. A single-meeting slot is available on {$first['day']} at "
+                        . Carbon::parse($first['start'])->format('h:i A')
+                        . " in {$first['room']->room_name}.",
+                    'match_label' => 'FALLBACK',
+                ];
+            }
         }
 
         return $recommendations;
+    }
+
+    // IMPROVED: does this room have at least one free slot of the needed duration, on any
+    // active day within $bounds? Lets buildSmartRecommendations() tell "no compatible room
+    // exists" apart from "compatible rooms exist but every one of them is already booked".
+    private function roomHasFreeSlot(Room $room, Collection $existingSchedules, array $bounds, int $minutes): bool
+    {
+        $periodEnd = Carbon::parse($bounds['end'])->subMinutes($minutes);
+
+        if ($periodEnd->lte(Carbon::parse($bounds['start']))) {
+            return false;
+        }
+
+        foreach ($this->activeDays() as $day) {
+            $period = CarbonPeriod::create(Carbon::parse($bounds['start']), self::SLOT_MINUTES . ' minutes', $periodEnd);
+
+            foreach ($period as $slotStart) {
+                $slotEnd = $slotStart->copy()->addMinutes($minutes);
+                $start = $slotStart->format('H:i:s');
+                $end = $slotEnd->format('H:i:s');
+
+                if ($this->conflicts->overlapsLunchBreak($start, $end)) {
+                    continue;
+                }
+
+                if ($this->roomAvailable($existingSchedules, $room->id, $day, $start, $end)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    // IMPROVED: does this faculty member have at least one free slot of the needed duration
+    // on a specific day within $bounds?
+    private function facultyHasFreeSlotOnDay(Faculty $faculty, Collection $existingSchedules, array $bounds, int $minutes, string $day): bool
+    {
+        $periodEnd = Carbon::parse($bounds['end'])->subMinutes($minutes);
+
+        if ($periodEnd->lte(Carbon::parse($bounds['start']))) {
+            return false;
+        }
+
+        $period = CarbonPeriod::create(Carbon::parse($bounds['start']), self::SLOT_MINUTES . ' minutes', $periodEnd);
+
+        foreach ($period as $slotStart) {
+            $slotEnd = $slotStart->copy()->addMinutes($minutes);
+            $start = $slotStart->format('H:i:s');
+            $end = $slotEnd->format('H:i:s');
+
+            if ($this->conflicts->overlapsLunchBreak($start, $end)) {
+                continue;
+            }
+
+            if ($this->facultyAvailable($existingSchedules, (int) $faculty->id, $day, $start, $end)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function retryFacultyCandidates(Subject $subject): Collection

@@ -366,12 +366,14 @@ class ScheduleConflictService
         }
 
         $group = $this->studentGroup($subject);
+        $conflictingCode = $conflict->subject?->subject_code ?? 'another subject';
+        $conflictingTime = $this->formatTimeRange($conflict->start_time, $conflict->end_time);
 
         return $this->conflictResponse(
             'section_conflict',
             'SECTION_CONFLICT',
             'Student Group Already Scheduled',
-            "{$group} already has another subject during this time.",
+            "{$group} already has {$conflictingCode} on {$day} {$conflictingTime}, which overlaps the requested {$this->formatTimeRange($startTime, $endTime)}.",
             $subject,
             $requestedRoom,
             $day,
@@ -380,6 +382,8 @@ class ScheduleConflictService
             $conflict,
             [
                 'group' => $group,
+                'conflict_reason' => "{$group} cannot take two classes at the same time. Move this subject to another available time.",
+                'suggestion' => 'Choose a different time for this same section.',
             ],
             $ignoreScheduleId
         );
@@ -740,6 +744,7 @@ class ScheduleConflictService
             'requested_start' => Carbon::parse($startTime)->format('h:i A'),
             'requested_end' => Carbon::parse($endTime)->format('h:i A'),
             'requested_time' => $this->formatTimeRange($startTime, $endTime),
+            'conflict_reason' => $this->defaultConflictReason($type),
         ], $conflictingSchedule ? $this->details($conflictingSchedule) : [], $extraDetails);
 
         $suggestions = $this->includeSuggestions
@@ -778,28 +783,15 @@ class ScheduleConflictService
             return [];
         }
 
-        $suggestions = [];
-
-        if (in_array($type, ['room_conflict', 'room_type_conflict', 'capacity_conflict'], true)) {
-            $suggestions = array_merge(
-                $suggestions,
-                $this->roomSuggestions($subject, $room, $day, $startTime, $endTime, $ignoreScheduleId)
-            );
-        }
-
-        if (in_array($type, ['room_conflict', 'faculty_conflict', 'section_conflict', 'inactive_day_conflict', 'faculty_availability_conflict', 'time_conflict'], true)) {
-            $suggestions = array_merge(
-                $suggestions,
-                $this->timeSuggestions($subject, $room, $day, $startTime, $endTime, $ignoreScheduleId)
-            );
-        }
-
-        if (in_array($type, ['faculty_conflict', 'faculty_availability_conflict', 'room_conflict', 'section_conflict'], true)) {
-            $suggestions = array_merge(
-                $suggestions,
-                $this->facultySuggestions($subject, $room, $day, $startTime, $endTime, $ignoreScheduleId)
-            );
-        }
+        $suggestions = match ($type) {
+            'room_conflict', 'room_type_conflict', 'capacity_conflict' =>
+                $this->roomSuggestions($subject, $room, $day, $startTime, $endTime, $ignoreScheduleId),
+            'faculty_conflict' =>
+                $this->facultySuggestions($subject, $room, $day, $startTime, $endTime, $ignoreScheduleId),
+            'section_conflict', 'inactive_day_conflict', 'faculty_availability_conflict', 'time_conflict' =>
+                $this->timeSuggestions($subject, $room, $day, $startTime, $endTime, $ignoreScheduleId),
+            default => $this->timeSuggestions($subject, $room, $day, $startTime, $endTime, $ignoreScheduleId),
+        };
 
         return collect($suggestions)
             ->unique(fn (array $suggestion) => ($suggestion['type'] ?? '') . '|' . ($suggestion['label'] ?? ''))
@@ -823,6 +815,20 @@ class ScheduleConflictService
             })
             ->values()
             ->all();
+    }
+
+    private function defaultConflictReason(string $type): string
+    {
+        return match ($type) {
+            'section_conflict' => 'The student section already has a class that overlaps this day and time.',
+            'faculty_conflict' => 'The assigned faculty member is already teaching another class during this time.',
+            'room_conflict' => 'The selected room is already occupied during this time.',
+            'room_type_conflict' => 'The selected room does not match this subject requirement.',
+            'capacity_conflict' => 'The selected room is too small for this class.',
+            'faculty_availability_conflict' => 'The assigned faculty member is not available during this day or time.',
+            'inactive_day_conflict' => 'This day is disabled in Global Settings.',
+            default => 'This placement violates an existing schedule rule.',
+        };
     }
 
     private function roomSuggestions(
@@ -1514,11 +1520,20 @@ class ScheduleConflictService
 
     private function subjectRequiresLab(Subject $subject): bool
     {
-        if (isset($subject->requires_lab) && (bool) $subject->requires_lab) {
-            return true;
+        $explicitRoomType = strtoupper(trim((string) ($subject->preferred_room_type ?? '')));
+
+        // Explicit override from ManageSubjects checkbox is always authoritative.
+        // Must be checked FIRST — before requires_lab and before keyword heuristics —
+        // so a user-set "Use Lecture Room" override is never defeated by a keyword
+        // match (e.g. "Systems Administration", "Database Management").
+        if ($explicitRoomType === 'LECTURE') {
+            return false; // user said "lecture room" → never a lab subject
+        }
+        if ($explicitRoomType === 'LAB') {
+            return true;  // user said "lab room" → always a lab subject
         }
 
-        if (str_contains(strtoupper((string) ($subject->preferred_room_type ?? '')), 'LAB')) {
+        if (isset($subject->requires_lab) && (bool) $subject->requires_lab) {
             return true;
         }
 
@@ -1530,13 +1545,16 @@ class ScheduleConflictService
             (string) ($subject->specialization ?? ''),
         ])));
 
+        // NETWORKING, DATABASE, SYSTEMS removed — these false-positive on purely lecture
+        // subjects (e.g. "Systems Administration", "Database Management", "Networking Fundamentals").
+        // requires_lab column and preferred_room_type = 'LAB' are the authoritative signals.
+        // PRACTICUM and WORKSHOP added as unambiguous practical-subject keywords.
         return str_contains($haystack, 'LAB')
             || str_contains($haystack, 'LABORATORY')
             || str_contains($haystack, 'COMPUTER LAB')
             || str_contains($haystack, 'PROGRAMMING')
-            || str_contains($haystack, 'NETWORKING')
-            || str_contains($haystack, 'DATABASE')
-            || str_contains($haystack, 'SYSTEMS');
+            || str_contains($haystack, 'PRACTICUM')
+            || str_contains($haystack, 'WORKSHOP');
     }
 
     private function roomIsLab(Room $room): bool

@@ -649,6 +649,12 @@
                                     <span class="block text-[10px] font-black uppercase tracking-widest text-slate-500">Conflict Type</span>
                                     <p class="mt-1 font-black text-blue-700 dark:text-blue-300">{{ $typeLabel }}</p>
                                 </div>
+                                @if(!empty($details['conflict_reason']))
+                                    <div class="rounded-lg border border-blue-100 bg-white p-3 dark:border-blue-900/50 dark:bg-slate-950/50">
+                                        <span class="block text-[10px] font-black uppercase tracking-widest text-slate-500">Why This Conflicts</span>
+                                        <p class="mt-1 text-xs font-bold leading-5 text-slate-700 dark:text-slate-200">{{ $details['conflict_reason'] }}</p>
+                                    </div>
+                                @endif
                             </div>
                         </section>
 

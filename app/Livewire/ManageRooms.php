@@ -19,6 +19,7 @@ class ManageRooms extends Component
 
     public $search = '';
     public $filterType = '';
+    public string $viewMode = 'all'; // 'all' | 'my_rooms'
     public $importFile;
     public $importPreview = []; 
     
@@ -78,6 +79,27 @@ class ManageRooms extends Component
 
     // Fix: Clear selection when searching to avoid accidental deletes
     public function updatedSearch() { $this->resetPage(); $this->selectedRooms = []; $this->selectAll = false; }
+
+    public function toggleViewMode(): void
+    {
+        $this->viewMode = $this->viewMode === 'all' ? 'my_rooms' : 'all';
+        $this->resetPage();
+    }
+
+    /**
+     * Returns the department-specific keyword list used to match specialized
+     * rooms (lab OR lecture) for dean/oic roles when the "My Rooms" filter is active.
+     */
+    private function getDeptKeywordsForDepartment(string $dept): array
+    {
+        return match ($dept) {
+            'CCS'  => ['IT', 'ACT', 'ICT', 'CCS', 'COMPUTER', 'WORKSHOP'],
+            'CTE'  => ['CTE', 'ED', 'EDUCATION', 'TEACHING'],
+            'COC'  => ['COC', 'FB', 'LD', 'QD', 'FORENSIC', 'CRIM'],
+            'SHTM' => ['SHTM', 'HM', 'TM', 'HOSPITALITY', 'KITCHEN'],
+            default => [],
+        };
+    }
 
     public function updatedSelectAll($value)
     {
@@ -409,9 +431,10 @@ class ManageRooms extends Component
     {
         $this->resetAssignModal();
  
-        $room     = Room::findOrFail($roomId);
-        $roomType = strtoupper(trim($room->type ?? ''));
-        $groupKey = $this->detectSpecializationGroupKey($room);
+        $room         = Room::findOrFail($roomId);
+        $roomType     = strtoupper(trim($room->type ?? ''));
+        $isLabRoom    = in_array($roomType, ['LAB', 'LABORATORY'], true);
+        $groupKey     = $this->detectSpecializationGroupKey($room);
         $allowedDepts = $groupKey ? self::roomSpecializationGroups()[$groupKey] : [];
  
         // ── Store room metadata for the Blade view ──────────────────────────
@@ -421,13 +444,12 @@ class ManageRooms extends Component
             'room_name'        => $room->room_name,
             'type'             => $roomType,
             'specialization'   => $room->specialization ?? '',
-            'filter_label' => $this->getFilterLabel($room),
             'department_owner' => $room->department_owner ?? '',
             'capacity'         => $room->capacity,
             // Human-readable label shown in the modal filter badge
             'filter_label'     => $allowedDepts
-                ? implode(' / ', $allowedDepts) . ' · ' . ucfirst(strtolower($roomType)) . ($roomType === 'LAB' ? ' · MAJOR' : ' · MINOR')
-                : ucfirst(strtolower($roomType)) . ($roomType === 'LAB' ? ' (All Departments) · MAJOR' : ' (All Departments) · MINOR'),
+                ? implode(' / ', $allowedDepts) . ' · ' . ucfirst(strtolower($roomType)) . ($isLabRoom ? ' · MAJOR + overrides' : ' · MINOR + overrides')
+                : ucfirst(strtolower($roomType)) . ($isLabRoom ? ' (All Departments) · MAJOR + overrides' : ' (All Departments) · MINOR + overrides'),
         ];
  
         $query = Subject::activeTerm()
@@ -436,13 +458,38 @@ class ManageRooms extends Component
             ->orderBy('section')
             ->orderBy('subject_code');
  
-        // ── TIER 1: Room-type filtering (LAB vs LECTURE) ────────────────────
-        // LAB rooms  → Major subjects only  (core departmental courses)
-        // LECTURE rooms → Minor subjects only (general ed, electives)
-        if ($roomType === 'LAB') {
-            $query->where('type', 'Major');
+        // ── TIER 1: Room-type filtering (LAB vs LECTURE) — override-aware ──
+        //
+        // Default routing:  LAB  → Major subjects | LECTURE → Minor subjects
+        // Override routing: a subject may opt OUT of the default via preferred_room_type:
+        //   Major  + preferred_room_type = 'LECTURE' → show in LECTURE rooms instead
+        //   Minor  + preferred_room_type = 'LAB'     → show in LAB rooms instead
+        //
+        // So:
+        //   LAB room   accepts: type=Major (default) OR (type=Minor AND preferred_room_type='LAB')
+        //   LECTURE room accepts: type=Minor (default) OR (type=Major AND preferred_room_type='LECTURE')
+        $isLabRoom = in_array($roomType, ['LAB', 'LABORATORY'], true);
+
+        if ($isLabRoom) {
+            $query->where(function ($q) {
+                // Default: Major subjects (go to lab by default)
+                $q->where('type', 'Major')
+                  // Override: Minor subjects that explicitly request a lab
+                  ->orWhere(function ($inner) {
+                      $inner->where('type', 'Minor')
+                            ->where('preferred_room_type', 'LAB');
+                  });
+            });
         } else {
-            $query->where('type', 'Minor');
+            $query->where(function ($q) {
+                // Default: Minor subjects (go to lecture by default)
+                $q->where('type', 'Minor')
+                  // Override: Major subjects that explicitly request a lecture room
+                  ->orWhere(function ($inner) {
+                      $inner->where('type', 'Major')
+                            ->where('preferred_room_type', 'LECTURE');
+                  });
+            });
         }
  
         if ($allowedDepts && ! empty($allowedDepts)) {
@@ -481,6 +528,8 @@ class ManageRooms extends Component
                     1
                 ),
                 'requires_lab'        => (bool) $s->requires_lab,
+                'subject_type'        => (string) ($s->type ?? 'Major'),  // 'Major' or 'Minor'
+                'preferred_room_type' => (string) ($s->preferred_room_type ?? ''),
                 // Preferred-room data — used to render the "⚠️ Prefers Room: X" badge
                 // when the subject is already bound to a *different* room.
                 'preferred_room_id'   => $s->preferred_room_id,
@@ -526,16 +575,31 @@ class ManageRooms extends Component
         ->orderBy('subject_code');
 
     // =====================================================================
-    // ROOM-TYPE FILTERING (by subject type: Major vs Minor)
+    // ROOM-TYPE FILTERING (by subject type: Major vs Minor) — override-aware
     // =====================================================================
-    // LAB rooms are designated for MAJOR subjects (core departmental courses)
-    // LECTURE rooms are designated for MINOR subjects (general ed, electives)
+    // Default routing:  LAB  → Major subjects | LECTURE → Minor subjects
+    // Override routing: a subject may opt OUT of the default via preferred_room_type:
+    //   Major  + preferred_room_type = 'LECTURE' → eligible for LECTURE rooms
+    //   Minor  + preferred_room_type = 'LAB'     → eligible for LAB rooms
+    //
+    //   LAB room   accepts: type=Major (default) OR (type=Minor AND preferred_room_type='LAB')
+    //   LECTURE room accepts: type=Minor (default) OR (type=Major AND preferred_room_type='LECTURE')
     if ($isLabRoom) {
-        // For LAB rooms: accept MAJOR subjects only
-        $query->where('type', 'Major');
+        $query->where(function ($q) {
+            $q->where('type', 'Major')
+              ->orWhere(function ($inner) {
+                  $inner->where('type', 'Minor')
+                        ->where('preferred_room_type', 'LAB');
+              });
+        });
     } else {
-        // For LECTURE rooms: accept MINOR subjects only
-        $query->where('type', 'Minor');
+        $query->where(function ($q) {
+            $q->where('type', 'Minor')
+              ->orWhere(function ($inner) {
+                  $inner->where('type', 'Major')
+                        ->where('preferred_room_type', 'LECTURE');
+              });
+        });
     }
 
     // =====================================================================
@@ -594,6 +658,8 @@ class ManageRooms extends Component
                 1
             ),
             'requires_lab'        => (bool) $s->requires_lab,
+            'subject_type'        => (string) ($s->type ?? 'Major'),  // 'Major' or 'Minor'
+            'preferred_room_type' => (string) ($s->preferred_room_type ?? ''),
             // Preferred-room data — used to render the "⚠️ Prefers Room: X" badge
             // when the subject is already bound to a *different* room.
             'preferred_room_id'   => $s->preferred_room_id,
@@ -769,11 +835,11 @@ class ManageRooms extends Component
         $groupKey     = $this->detectSpecializationGroupKey($room);
         $rawRoomType  = strtoupper(trim($room->type ?? ''));
         $isLabRoom    = in_array($rawRoomType, ['LAB', 'LABORATORY'], true);
-        // LAB → Major subjects | LECTURE → Minor subjects
-        $subjectType  = $isLabRoom ? 'MAJOR' : 'MINOR';
+        // LAB → Major subjects (+ Minor overrides) | LECTURE → Minor subjects (+ Major overrides)
+        $subjectType  = $isLabRoom ? 'MAJOR + overrides' : 'MINOR + overrides';
 
         if (! $groupKey) {
-            return ucfirst(strtolower($rawRoomType)) . " (All Departments) · {$subjectType} Subjects";
+            return ucfirst(strtolower($rawRoomType)) . " (All Departments) · {$subjectType}";
         }
 
         $groups = self::roomSpecializationGroups();
@@ -835,11 +901,33 @@ class ManageRooms extends Component
 
     public function render()
     {
+        $user = auth()->user();
+
         $query = Room::query()
             ->when($this->search, fn ($q) => $q->where('room_name', 'like', '%' . $this->search . '%')
                 ->orWhere('specialization', 'like', '%' . $this->search . '%')
                 ->orWhere('floor', 'like', '%' . $this->search . '%'))
-            ->when($this->filterType, fn ($q) => $q->whereRaw('UPPER(type) = ?', [strtoupper($this->filterType)]));
+            ->when($this->filterType, fn ($q) => $q->whereRaw('UPPER(type) = ?', [strtoupper($this->filterType)]))
+            ->when($this->viewMode === 'my_rooms', function ($q) use ($user) {
+                $role = $user->role ?? '';
+                $dept = strtoupper(trim($user->department ?? ''));
+
+                if (in_array($role, ['dean', 'oic'])) {
+                    // Dean/OIC → their department's specialized rooms (Lab OR Lecture —
+                    // e.g. CTE-ED owns lecture rooms, not laboratories, so we can't
+                    // gate this by room type the way we used to).
+                    $keywords = $this->getDeptKeywordsForDepartment($dept);
+                    $q->where(function ($inner) use ($dept, $keywords) {
+                        $inner->where('department_owner', $dept);
+                        foreach ($keywords as $kw) {
+                            $inner->orWhere('specialization', 'like', "%{$kw}%");
+                        }
+                    });
+                } elseif ($role === 'associate_dean') {
+                    // Associate Dean → LECTURE rooms only (they handle minor subjects)
+                    $q->whereRaw('UPPER(type) = ?', ['LECTURE']);
+                }
+            });
  
         return view('livewire.manage-rooms', [
             // Eager-load preferred-assigned subjects (active term only) so the

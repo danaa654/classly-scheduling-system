@@ -659,25 +659,84 @@
             </div>
             @error('units')<span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>@enderror
 
-            {{-- LAB / ROOM TYPE --}}
+            {{-- ROOM TYPE OVERRIDE — single contextual checkbox --}}
+            {{-- Major subject  → default is lab  → checkbox = "Use Lecture Room instead"   --}}
+            {{-- Minor subject  → default is lecture → checkbox = "Use Lab Room instead"    --}}
+            {{-- preferred_room_type + requires_lab are kept in sync; auto-sched reads both --}}
             <div class="rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/60">
-                <div class="grid grid-cols-2 gap-2">
-                    <label class="flex items-center gap-2 rounded-xl bg-white px-3 py-3 text-[10px] font-black uppercase tracking-widest text-slate-600 dark:bg-slate-900 dark:text-slate-300">
-                        <input type="checkbox" wire:model.live="requires_lab" class="rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-700 dark:bg-slate-900">
-                        Requires Lab
+                <p class="text-[9px] font-black uppercase tracking-widest text-slate-500 mb-2.5">Room Type Override</p>
+
+                @if(strtolower($type ?? 'major') === 'major')
+                    {{-- ── MAJOR subject: default = lab → offer "Use Lecture Room" ── --}}
+                    <label class="flex items-start gap-3 cursor-pointer group">
+                        <input type="checkbox"
+                            wire:model.live="room_override"
+                            id="room_override_checkbox"
+                            class="mt-0.5 w-4 h-4 shrink-0 accent-emerald-500 cursor-pointer">
+                        <div class="flex-1">
+                            <p class="text-[11px] font-black uppercase tracking-wide
+                                {{ $room_override ? 'text-emerald-700 dark:text-emerald-400' : 'text-slate-600 dark:text-slate-300' }}">
+                                Use Lecture Room
+                            </p>
+                            <p class="text-[9px] text-slate-400 leading-tight mt-0.5">
+                                Override: this Major subject will be scheduled in a <strong>lecture room</strong> instead of the default lab.
+                            </p>
+                        </div>
                     </label>
-                    <select wire:model.live="preferred_room_type" class="w-full bg-white dark:bg-slate-900 border-none rounded-xl p-3 font-bold text-xs uppercase text-slate-700 dark:text-slate-200 focus:ring-2 focus:ring-blue-500 transition-all">
-                        <option value="">Auto Room Type</option>
-                        <option value="LECTURE">Lecture</option>
-                        <option value="LAB">Lab</option>
-                        <option value="ICT LAB">ICT Lab</option>
-                        <option value="COMPUTER LAB">Computer Lab</option>
-                        <option value="WORKSHOP LAB">Workshop Lab</option>
-                        <option value="HRM KITCHEN">HRM Kitchen</option>
-                        <option value="HOSPITALITY LAB">Hospitality Lab</option>
-                    </select>
-                </div>
-                <p class="mt-2 text-[9px] font-bold text-slate-400">These fields guide AI room filtering without changing the scheduling workflow.</p>
+
+                    {{-- Status badge --}}
+                    <div class="mt-2.5 flex items-center gap-2">
+                        @if($room_override)
+                            <span class="inline-flex items-center gap-1 rounded-md bg-emerald-100 dark:bg-emerald-900/40 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-400">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                                Lecture Room — Major→Lab routing bypassed
+                            </span>
+                        @else
+                            <span class="inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-900/40 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-400">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+                                Default: Lab Room (Major subject)
+                            </span>
+                        @endif
+                        <p class="text-[8px] text-slate-400">Auto-scheduler respects this setting.</p>
+                    </div>
+
+                @else
+                    {{-- ── MINOR subject: default = lecture → offer "Use Lab Room (dept lab)" ── --}}
+                    <label class="flex items-start gap-3 cursor-pointer group">
+                        <input type="checkbox"
+                            wire:model.live="room_override"
+                            id="room_override_checkbox"
+                            class="mt-0.5 w-4 h-4 shrink-0 accent-amber-500 cursor-pointer">
+                        <div class="flex-1">
+                            <p class="text-[11px] font-black uppercase tracking-wide
+                                {{ $room_override ? 'text-amber-700 dark:text-amber-400' : 'text-slate-600 dark:text-slate-300' }}">
+                                Use Lab Room
+                                @if(!empty($major))
+                                    <span class="font-normal normal-case text-[9px] text-slate-400 ml-1">({{ strtoupper($major) }} lab)</span>
+                                @endif
+                            </p>
+                            <p class="text-[9px] text-slate-400 leading-tight mt-0.5">
+                                Override: this Minor subject will use the <strong>{{ strtoupper($major ?: 'department') }} lab room</strong> instead of a lecture room.
+                            </p>
+                        </div>
+                    </label>
+
+                    {{-- Status badge --}}
+                    <div class="mt-2.5 flex items-center gap-2">
+                        @if($room_override)
+                            <span class="inline-flex items-center gap-1 rounded-md bg-amber-100 dark:bg-amber-900/40 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-400">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/></svg>
+                                Lab Room — Minor→Lecture routing bypassed ({{ strtoupper($major ?: 'dept') }} lab)
+                            </span>
+                        @else
+                            <span class="inline-flex items-center gap-1 rounded-md bg-slate-100 dark:bg-slate-700 px-2 py-1 text-[9px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
+                                Default: Lecture Room (Minor subject)
+                            </span>
+                        @endif
+                        <p class="text-[8px] text-slate-400">Auto-scheduler respects this setting.</p>
+                    </div>
+                @endif
             </div>
 
             {{-- SUBMIT --}}
