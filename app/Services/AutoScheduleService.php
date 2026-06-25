@@ -428,6 +428,9 @@ class AutoScheduleService
                             'subject_id' => $subject->id,
                             'section' => $subject->section,
                             'pairing_key' => $payload['pairing_key'],
+                            'day' => $payload['day'],
+                            'start_time' => $payload['start_time'],
+                            'end_time' => $payload['end_time'],
                         ],
                         $payload
                     );
@@ -633,6 +636,9 @@ class AutoScheduleService
                         'subject_id' => $subject->id,
                         'section' => $subject->section,
                         'pairing_key' => $pairingKey,
+                        'day' => $scheduleData['day'],
+                        'start_time' => $scheduleData['start_time'],
+                        'end_time' => $scheduleData['end_time'],
                     ],
                     $scheduleData
                 );

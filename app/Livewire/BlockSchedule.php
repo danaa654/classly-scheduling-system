@@ -1914,6 +1914,9 @@ class BlockSchedule extends Component
     {
         return Schedule::activeTerm($this->semester, $this->schoolYear)
             ->where('faculty_id', $facultyId)
+            ->whereNotNull('day')
+            ->whereNotNull('start_time')
+            ->whereNotNull('end_time')
             ->whereNotIn('id', $this->modalScheduleIds)
             ->with('subject:id,units')
             ->get()
@@ -1992,7 +1995,7 @@ class BlockSchedule extends Component
                     'id' => $faculty->id,
                     'name' => $faculty->full_name,
                     'department' => $faculty->displayDepartment(),
-                    'load' => $projectedUnits,
+                    'load' => $currentUnits,
                     'max_units' => $maxUnits,
                     'match_label' => $score >= 140 ? 'BEST MATCH' : ($score >= 115 ? 'GOOD MATCH' : 'FALLBACK'),
                     'score' => $score,

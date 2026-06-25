@@ -2686,18 +2686,18 @@
                             <div class="flex-shrink-0 text-right min-w-[60px]">
                                 <div class="text-[12px] font-bold
                                             @if($wouldOverload) text-amber-600 dark:text-amber-400 @else text-slate-600 dark:text-slate-400 @endif">
-                                    {{ $projectedUnits }}/{{ $maxUnits }}u
+                                    {{ $currentUnits }}/{{ $maxUnits }}u
                                 </div>
                                 <div class="w-16 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full mt-1.5 overflow-hidden">
                                     <div class="h-full rounded-full transition-all
                                                 @if($wouldOverload)
                                                     bg-amber-400
-                                                @elseif($projectedUnits >= $maxUnits * 0.8)
+                                                @elseif($currentUnits >= $maxUnits * 0.8)
                                                     bg-yellow-400
                                                 @else
                                                     bg-emerald-500
                                                 @endif"
-                                         style="width: {{ min(100, round(($projectedUnits / max(1, $maxUnits)) * 100)) }}%">
+                                         style="width: {{ min(100, round(($currentUnits / max(1, $maxUnits)) * 100)) }}%">
                                     </div>
                                 </div>
                             </div>
