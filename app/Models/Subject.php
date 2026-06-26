@@ -28,6 +28,11 @@ class Subject extends Model
         'requires_lab',
         'preferred_room_type',
         'preferred_room_id',
+        // Eligible Faculty (only consulted when hasRoomOverride() is true —
+        // see "Refactor Room Override to Support Faculty Eligibility")
+        'allow_department_faculty',
+        'allow_gened_faculty',
+        'allow_cross_department_faculty',
         'specialization',
         'meetings_per_week',
         'faculty_id',
@@ -52,6 +57,9 @@ class Subject extends Model
         'duration_hours'   => 'float',
         'meetings_per_week'=> 'integer',
         'requires_lab'     => 'boolean',
+        'allow_department_faculty'       => 'boolean',
+        'allow_gened_faculty'             => 'boolean',
+        'allow_cross_department_faculty' => 'boolean',
         'is_archived'      => 'boolean',
         'archived_at'      => 'datetime',
         'is_legacy_edp'    => 'boolean',
@@ -525,5 +533,60 @@ public function preferredRoom(): \Illuminate\Database\Eloquent\Relations\Belongs
             ->count();
 
         return max(0, $this->meetings_per_week - $scheduled);
+    }
+
+    // ============================================================
+    // ROOM OVERRIDE → FACULTY ELIGIBILITY
+    // ============================================================
+
+    /**
+     * Whether this subject's Room Override is currently active.
+     *
+     * preferred_room_type is the single source of truth — this mirrors the
+     * exact derivation used in ManageSubjects::editSubject() / executeSave()
+     * so the checkbox state, the stored room type, and faculty eligibility
+     * can never drift out of sync:
+     *
+     *   Major + preferred_room_type === 'LECTURE' → override ON (bypass lab routing)
+     *   Minor + preferred_room_type === 'LAB'      → override ON (use dept lab)
+     *   Anything else                              → override OFF (auto)
+     *
+     * Deliberately NOT a stored column of its own — deriving it keeps one
+     * source of truth instead of two values that could disagree.
+     */
+    public function hasRoomOverride(): bool
+    {
+        $isMajor       = strtolower((string) $this->type) === 'major';
+        $savedRoomType = strtoupper(trim((string) $this->preferred_room_type));
+
+        return $isMajor
+            ? $savedRoomType === 'LECTURE'
+            : $savedRoomType === 'LAB';
+    }
+
+    /**
+     * Human-readable list of the faculty groups eligible to teach this subject
+     * while Room Override is active (e.g. "Department Faculty or General
+     * Education Faculty"). Returns an empty string when no group is checked —
+     * which means nobody can currently be assigned.
+     *
+     * Only meaningful when hasRoomOverride() is true; the default Major/Minor
+     * routing ignores these flags entirely.
+     */
+    public function eligibleFacultyGroupLabels(): string
+    {
+        $labels = [];
+
+        if ($this->allow_department_faculty) {
+            $labels[] = 'Department Faculty';
+        }
+        if ($this->allow_gened_faculty) {
+            $labels[] = 'General Education Faculty';
+        }
+        if ($this->allow_cross_department_faculty) {
+            $labels[] = 'Cross Department Faculty';
+        }
+
+        return implode(' or ', $labels);
     }
 }

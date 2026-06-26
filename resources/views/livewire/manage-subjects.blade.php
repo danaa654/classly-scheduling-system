@@ -749,6 +749,67 @@
                 @endif
             </div>
 
+            {{-- ELIGIBLE FACULTY — only shown while Room Override is active --}}
+            {{-- Room Override changes ONLY scheduling behavior — the subject's
+                 Major/Minor Academic Type is never touched. When the override is
+                 active, these three checkboxes fully replace the default Major →
+                 Department Faculty / Minor → GenEd Faculty routing: the scheduler
+                 will only ever consider faculty from the groups checked here. --}}
+            @if($room_override)
+            <div class="rounded-xl border border-indigo-200 bg-indigo-50/60 dark:border-indigo-700 dark:bg-indigo-900/15 p-3">
+                <p class="text-[9px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-300 mb-1">Eligible Faculty</p>
+                <p class="text-[9px] text-slate-400 leading-tight mb-2.5">
+                    Room Override is on, so the default Major/Minor faculty rule is ignored.
+                    Only the group(s) checked below may be scheduled to teach this subject.
+                </p>
+
+                <div class="space-y-2">
+                    <label class="flex items-center gap-3 cursor-pointer group">
+                        <input type="checkbox"
+                            wire:model.live="allow_department_faculty"
+                            id="allow_department_faculty_checkbox"
+                            class="w-4 h-4 shrink-0 accent-indigo-600 cursor-pointer">
+                        <span class="text-[10px] font-black uppercase tracking-wide
+                            {{ $allow_department_faculty ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-500 dark:text-slate-400' }}">
+                            Department Faculty
+                            @if(!empty($department))
+                                <span class="font-normal normal-case text-[9px] text-slate-400 ml-1">({{ strtoupper($department) }})</span>
+                            @endif
+                        </span>
+                    </label>
+
+                    <label class="flex items-center gap-3 cursor-pointer group">
+                        <input type="checkbox"
+                            wire:model.live="allow_gened_faculty"
+                            id="allow_gened_faculty_checkbox"
+                            class="w-4 h-4 shrink-0 accent-indigo-600 cursor-pointer">
+                        <span class="text-[10px] font-black uppercase tracking-wide
+                            {{ $allow_gened_faculty ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-500 dark:text-slate-400' }}">
+                            General Education Faculty
+                        </span>
+                    </label>
+
+                    <label class="flex items-center gap-3 cursor-pointer group">
+                        <input type="checkbox"
+                            wire:model.live="allow_cross_department_faculty"
+                            id="allow_cross_department_faculty_checkbox"
+                            class="w-4 h-4 shrink-0 accent-indigo-600 cursor-pointer">
+                        <span class="text-[10px] font-black uppercase tracking-wide
+                            {{ $allow_cross_department_faculty ? 'text-indigo-700 dark:text-indigo-300' : 'text-slate-500 dark:text-slate-400' }}">
+                            Cross Department Faculty
+                        </span>
+                    </label>
+                </div>
+
+                @if(!$allow_department_faculty && !$allow_gened_faculty && !$allow_cross_department_faculty)
+                    <p class="mt-2.5 text-[9px] font-black text-red-500 uppercase tracking-tight italic">
+                        ⚠ No group selected — this subject can't be assigned to anyone until you check at least one.
+                    </p>
+                @endif
+            </div>
+            @error('allow_department_faculty')<span class="text-[8px] font-black text-red-500 uppercase tracking-tight italic">{{ $message }}</span>@enderror
+            @endif
+
             {{-- PRACTICUM / OJT FLAG --}}
             {{-- When checked, this subject is off-campus (OJT, Practicum, Student Teaching, etc.)
                  and does NOT need a physical room. The auto-scheduler and block-schedule

@@ -252,6 +252,14 @@ class Faculty extends Model
             return false;
         }
 
+        // ── Room Override active: Eligible Faculty checkboxes are the ONLY
+        // source of truth. The subject's Major/Minor academic type is left
+        // completely untouched — only scheduling behavior changes here.
+        // See "Refactor Room Override to Support Faculty Eligibility".
+        if ($subject->hasRoomOverride()) {
+            return $this->isEligibleUnderFacultyOverride($subject);
+        }
+
         if ($this->subjectIsMinorOrGenEd($subject)) {
             return $this->canTeachMinorSubjects();
         }
@@ -261,6 +269,50 @@ class Faculty extends Model
         }
 
         return $this->canTeachDepartment($subject->department);
+    }
+
+    /**
+     * Faculty eligibility while a subject's Room Override is active.
+     *
+     * Each Eligible Faculty checkbox opens exactly one faculty pool, and the
+     * three pools are additive (OR), not exclusive:
+     *
+     *   Department Faculty        → any non-GenEd faculty whose home
+     *                                department matches the subject's own
+     *                                department — the exact same rule
+     *                                canTeachDepartment() already applies for
+     *                                the default Major routing. A faculty
+     *                                member tagged Cross-Department does NOT
+     *                                lose their home-department eligibility;
+     *                                that tag only adds extra reach, it never
+     *                                takes membership away.
+     *   General Education Faculty → faculty tagged faculty_scope = gened.
+     *   Cross Department Faculty  → faculty EXPLICITLY tagged
+     *                                faculty_scope = cross_department,
+     *                                regardless of department — this is the
+     *                                pool used to pull in faculty from
+     *                                OUTSIDE the subject's own department.
+     *
+     * The default can_teach_minor / type-based heuristics are intentionally
+     * ignored in this branch — the checkboxes fully replace them.
+     */
+    private function isEligibleUnderFacultyOverride(Subject $subject): bool
+    {
+        if ($subject->allow_department_faculty
+            && ! $this->isGenEd()
+            && $this->canTeachDepartment($subject->department)) {
+            return true;
+        }
+
+        if ($subject->allow_gened_faculty && $this->isGenEd()) {
+            return true;
+        }
+
+        if ($subject->allow_cross_department_faculty && $this->isCrossDepartment()) {
+            return true;
+        }
+
+        return false;
     }
 
     public function scopeLabel(): string

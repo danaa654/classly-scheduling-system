@@ -924,11 +924,14 @@ class GlobalSettings extends Component
                         continue;
                     }
 
-                    // Faculty + Room mode carries faculty and room but strips time —
+                    // keep_faculty_room carries faculty and room but strips time —
                     // the timetable starts fresh while assignments are preserved.
-                    $copiesTime = $this->retrieveMode !== 'faculty_room';
+                    // clone_timetable is the only mode that preserves day/time slots.
+                    $copiesTime = $this->retrieveMode === 'clone_timetable';
 
-                    $targetStatus = $this->retrieveMode === 'full_template'
+                    // clone_timetable preserves the original status so finalized
+                    // schedules remain finalized; all other modes start at PARTIAL.
+                    $targetStatus = $this->retrieveMode === 'clone_timetable'
                         ? ($sourceSchedule->status ?: Schedule::STATUS_PARTIAL)
                         : Schedule::STATUS_PARTIAL;
 
@@ -1715,12 +1718,16 @@ class GlobalSettings extends Component
 
     private function retrieveCopiesFaculty(): bool
     {
-        return in_array($this->retrieveMode, ['full_template', 'faculty_only', 'faculty_room'], true);
+        // Modes that carry faculty assignments forward into the new semester.
+        return in_array($this->retrieveMode, ['clone_timetable', 'keep_faculty', 'keep_faculty_room'], true);
     }
 
     private function retrieveCopiesSchedules(): bool
     {
-        return in_array($this->retrieveMode, ['full_template', 'room_only', 'time_only', 'faculty_room'], true);
+        // Modes that create schedule records (with or without time slots).
+        // keep_faculty_room creates records but strips day/time (copiesTime=false).
+        // clone_timetable creates records AND preserves day/time (copiesTime=true).
+        return in_array($this->retrieveMode, ['clone_timetable', 'keep_faculty_room'], true);
     }
 
     // =========================================================================
@@ -1827,8 +1834,8 @@ class GlobalSettings extends Component
         $role = auth()->user()?->role;
 
         return match ($role) {
-            'registrar' => route('registrar-dashboard'),   // ← verify route name
-            default     => route('admin-dashboard'),       // ← verify route name
+            'registrar' => route('registrar.dashboard'),
+            default     => route('admin.dashboard'),
         };
     }
 

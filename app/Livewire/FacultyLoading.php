@@ -1721,6 +1721,11 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
 
         if (! $subject) {
             $message = 'Subject data is missing.';
+        } elseif ($subject->hasRoomOverride()) {
+            $allowed = $subject->eligibleFacultyGroupLabels();
+            $message = $allowed === ''
+                ? "{$subjectCode} has Room Override enabled but no Eligible Faculty group is checked. Edit the subject and select at least one group."
+                : "{$subjectCode} has Room Override enabled — only {$allowed} may be assigned to it.";
         } elseif ($this->subjectIsMinorOrGenEd($subject) && ! $faculty->canTeachMinorSubjects()) {
             $message = "{$subjectCode} is a minor or GenEd subject. Only GenEd faculty or faculty marked Can Teach Minor can be assigned.";
         } elseif ($faculty->isGenEd() && ! $this->subjectIsMinorOrGenEd($subject)) {
@@ -2087,6 +2092,17 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
 
         if ($user->role === 'associate_dean') {
             return $this->subjectIsMinorOrGenEd($subject);
+        }
+
+        // Room Override: $faculty->isEligibleForSubject() above already resolved
+        // eligibility entirely from the subject's Eligible Faculty checkboxes,
+        // independent of its Major/Minor type. Re-checking type here would
+        // wrongly block a valid checkbox-based assignment (e.g. a Major subject
+        // overridden to allow GenEd faculty). All that's left to gate is which
+        // SUBJECTS this user is authorized to touch at all — their own department
+        // (the same boundary already used by every branch below).
+        if ($subject->hasRoomOverride()) {
+            return $this->departmentsMatch($subject->department, $user->department);
         }
 
         if (in_array($user->role, ['dean', 'oic'])) {

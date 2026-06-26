@@ -40,6 +40,11 @@ class ManageSubjects extends Component
     public bool $requires_lab = false;
     public $preferred_room_type = '';
     public bool $room_override = false;  // true = override default room routing for this subject
+    // Eligible Faculty checkboxes — only consulted by the scheduler when
+    // room_override is true. Defaults mirror the wireframe's starting state.
+    public bool $allow_department_faculty = true;
+    public bool $allow_gened_faculty = true;
+    public bool $allow_cross_department_faculty = false;
     public bool $is_practicum = false;   // true = off-campus/no-room subject (OJT, Practicum, etc.)
     public $duration_hours = 3;
     public $meetings_per_week = 1;
@@ -495,6 +500,9 @@ class ManageSubjects extends Component
         $this->duration_hours   = 3;
         $this->meetings_per_week = 1;
         $this->is_practicum     = false;
+        $this->allow_department_faculty       = true;
+        $this->allow_gened_faculty            = true;
+        $this->allow_cross_department_faculty = false;
         $this->major            = '';
         $this->year_level       = '';
         $this->edp_code         = '';
@@ -519,6 +527,7 @@ class ManageSubjects extends Component
         $this->resetValidation();
         $this->reset([
             'room_override', 'requires_lab', 'preferred_room_type',
+            'allow_department_faculty', 'allow_gened_faculty', 'allow_cross_department_faculty',
             'type', 'description', 'units', 'duration_hours', 'meetings_per_week',
             'is_practicum',
         ]);
@@ -569,6 +578,12 @@ class ManageSubjects extends Component
         $this->year_level          = (int) ($subject->year_level ?? 1);
         $this->department          = $subject->department;
         $this->is_practicum        = (bool) ($subject->is_practicum ?? false);
+        // Eligible Faculty — fall back to the wireframe defaults (Dept + GenEd
+        // checked, Cross Department unchecked) for subjects saved before this
+        // column existed, so older rows don't load with a dead-end empty pool.
+        $this->allow_department_faculty       = (bool) ($subject->allow_department_faculty ?? true);
+        $this->allow_gened_faculty            = (bool) ($subject->allow_gened_faculty ?? true);
+        $this->allow_cross_department_faculty = (bool) ($subject->allow_cross_department_faculty ?? false);
 
         $this->showModal = true;
     }
@@ -623,6 +638,9 @@ class ManageSubjects extends Component
             'type'              => 'required|in:Major,Minor',
             'requires_lab'      => 'boolean',
             'preferred_room_type' => 'nullable|string|max:80',
+            'allow_department_faculty'       => 'boolean',
+            'allow_gened_faculty'             => 'boolean',
+            'allow_cross_department_faculty' => 'boolean',
             'duration_hours'    => 'required|numeric|min:1|max:10',
             'meetings_per_week' => 'required|integer|min:1|max:5',
         ], [
@@ -651,6 +669,17 @@ class ManageSubjects extends Component
         }
         if (! $this->isEditMode && Subject::edpExistsInWorkspace($edpUpper, $period['school_year'], $period['semester'])) {
             $this->addError('edp_code', "EDP code '{$edpUpper}' already exists in {$period['semester']} {$period['school_year']}.");
+            return;
+        }
+
+        // Room Override with zero Eligible Faculty groups checked is a dead end —
+        // nobody could ever be assigned to teach the subject. Block the save and
+        // ask the user to pick at least one group instead of silently allowing it.
+        if ($this->room_override
+            && ! $this->allow_department_faculty
+            && ! $this->allow_gened_faculty
+            && ! $this->allow_cross_department_faculty) {
+            $this->addError('allow_department_faculty', 'Check at least one Eligible Faculty group — otherwise no one can be assigned to this subject.');
             return;
         }
 
@@ -694,6 +723,9 @@ class ManageSubjects extends Component
                 'subject_type'        => $normalizedType,
                 'requires_lab'        => $resolvedRequiresLab,
                 'preferred_room_type' => $resolvedRoomType,
+                'allow_department_faculty'       => (bool) $this->allow_department_faculty,
+                'allow_gened_faculty'             => (bool) $this->allow_gened_faculty,
+                'allow_cross_department_faculty' => (bool) $this->allow_cross_department_faculty,
                 'specialization'      => $majorUpper,
                 'duration_hours'      => (float) $this->duration_hours,
                 'meetings_per_week'   => (int) $this->meetings_per_week,
@@ -757,7 +789,13 @@ class ManageSubjects extends Component
 
     private function completeFormReset(): void
     {
-        $this->reset(['edp_code', 'subject_code', 'section', 'description', 'units', 'type', 'duration_hours', 'major', 'year_level', 'department', 'subjectId', 'isEditMode', 'meetings_per_week', 'requires_lab', 'preferred_room_type', 'room_override', 'is_practicum']);
+        $this->reset([
+            'edp_code', 'subject_code', 'section', 'description', 'units', 'type', 'duration_hours',
+            'major', 'year_level', 'department', 'subjectId', 'isEditMode', 'meetings_per_week',
+            'requires_lab', 'preferred_room_type', 'room_override',
+            'allow_department_faculty', 'allow_gened_faculty', 'allow_cross_department_faculty',
+            'is_practicum',
+        ]);
     }
 
     private function logActivityAndNotify($subject, $user, $deptUpper): void
@@ -814,6 +852,9 @@ class ManageSubjects extends Component
                     'subject_type'       => $original->subject_type,
                     'requires_lab'       => $origRequiresLab,
                     'preferred_room_type' => $origRoomType,
+                    'allow_department_faculty'       => (bool) $original->allow_department_faculty,
+                    'allow_gened_faculty'             => (bool) $original->allow_gened_faculty,
+                    'allow_cross_department_faculty' => (bool) $original->allow_cross_department_faculty,
                     'specialization'     => $original->specialization,
                     'duration_hours'     => $original->duration_hours,
                     'meetings_per_week'  => $original->meetings_per_week ?? 1,

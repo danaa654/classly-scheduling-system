@@ -676,20 +676,101 @@
                     </div>
                 @endif
 
-                <div class="mt-5">
-                    <label class="mb-2 block text-[10px] font-black uppercase tracking-widest text-slate-500">Retrieval Mode</label>
-                    <select
-                        wire:model.live="retrieveMode"
-                        class="w-full rounded-md border border-slate-300 bg-white px-3 py-3 text-sm font-bold outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-950 dark:focus:ring-emerald-950">
-                        <option value="subjects_only">Subjects Only</option>
-                        <option value="full_template">Subject + Faculty + Room + Time (Full Template)</option>
-                        <option value="faculty_only">Subject + Faculty</option>
-                        <option value="faculty_room">Subject + Faculty + Room</option>
-                        <option value="room_only">Subject + Room + Time</option>
-                        <option value="time_only">Subject + Time</option>
-                    </select>
-                    <p class="mt-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                        New EDP codes are always generated for all modes. Modes without time leave the scheduling board fresh for re-generation.
+                <div class="mt-5" x-data>
+                    <p class="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Retrieval Mode</p>
+                    <div class="grid gap-3 sm:grid-cols-2">
+
+                        {{-- Card 1: Subjects Only --}}
+                        <label class="relative flex cursor-pointer flex-col gap-2 rounded-xl border-2 p-4 transition
+                            {{ $retrieveMode === 'subjects_only'
+                                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30'
+                                : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950/40 dark:hover:border-slate-600' }}">
+                            <input type="radio" wire:model.live="retrieveMode" value="subjects_only" class="sr-only">
+                            <div class="flex items-center justify-between">
+                                <span class="text-lg">📋</span>
+                                @if($retrieveMode === 'subjects_only')
+                                    <span class="rounded-full bg-emerald-500 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-white">Selected</span>
+                                @endif
+                            </div>
+                            <p class="text-xs font-black uppercase tracking-wide text-slate-800 dark:text-slate-100">Subjects Only</p>
+                            <p class="text-[11px] font-semibold leading-relaxed text-slate-500 dark:text-slate-400">Imports subjects only. Faculty, rooms, and schedule slots start completely empty.</p>
+                            <div class="mt-1 flex flex-wrap gap-1">
+                                <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">✓ Subjects</span>
+                                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-400 dark:bg-slate-800 dark:text-slate-500">✗ Faculty</span>
+                                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-400 dark:bg-slate-800 dark:text-slate-500">✗ Rooms</span>
+                                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-400 dark:bg-slate-800 dark:text-slate-500">✗ Timeslots</span>
+                            </div>
+                        </label>
+
+                        {{-- Card 2: Keep Faculty Assignments --}}
+                        <label class="relative flex cursor-pointer flex-col gap-2 rounded-xl border-2 p-4 transition
+                            {{ $retrieveMode === 'keep_faculty'
+                                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30'
+                                : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950/40 dark:hover:border-slate-600' }}">
+                            <input type="radio" wire:model.live="retrieveMode" value="keep_faculty" class="sr-only">
+                            <div class="flex items-center justify-between">
+                                <span class="text-lg">👨‍🏫</span>
+                                @if($retrieveMode === 'keep_faculty')
+                                    <span class="rounded-full bg-emerald-500 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-white">Selected</span>
+                                @endif
+                            </div>
+                            <p class="text-xs font-black uppercase tracking-wide text-slate-800 dark:text-slate-100">Keep Faculty Assignments</p>
+                            <p class="text-[11px] font-semibold leading-relaxed text-slate-500 dark:text-slate-400">Subjects and instructors are carried over. Room assignments and schedule slots are rebuilt from scratch.</p>
+                            <div class="mt-1 flex flex-wrap gap-1">
+                                <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">✓ Subjects</span>
+                                <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">✓ Faculty</span>
+                                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-400 dark:bg-slate-800 dark:text-slate-500">✗ Rooms</span>
+                                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-400 dark:bg-slate-800 dark:text-slate-500">✗ Timeslots</span>
+                            </div>
+                        </label>
+
+                        {{-- Card 3: Keep Faculty & Room Assignments --}}
+                        <label class="relative flex cursor-pointer flex-col gap-2 rounded-xl border-2 p-4 transition
+                            {{ $retrieveMode === 'keep_faculty_room'
+                                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30'
+                                : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950/40 dark:hover:border-slate-600' }}">
+                            <input type="radio" wire:model.live="retrieveMode" value="keep_faculty_room" class="sr-only">
+                            <div class="flex items-center justify-between">
+                                <span class="text-lg">🏫</span>
+                                @if($retrieveMode === 'keep_faculty_room')
+                                    <span class="rounded-full bg-emerald-500 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-white">Selected</span>
+                                @endif
+                            </div>
+                            <p class="text-xs font-black uppercase tracking-wide text-slate-800 dark:text-slate-100">Keep Faculty & Room Assignments</p>
+                            <p class="text-[11px] font-semibold leading-relaxed text-slate-500 dark:text-slate-400">Subjects, instructors, and preferred rooms are preserved. Time slots are left empty for the auto-scheduler.</p>
+                            <div class="mt-1 flex flex-wrap gap-1">
+                                <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">✓ Subjects</span>
+                                <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">✓ Faculty</span>
+                                <span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-bold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">✓ Rooms</span>
+                                <span class="rounded-full bg-slate-100 px-2 py-0.5 text-[9px] font-bold text-slate-400 dark:bg-slate-800 dark:text-slate-500">✗ Timeslots</span>
+                            </div>
+                        </label>
+
+                        {{-- Card 4: Clone Previous Timetable --}}
+                        <label class="relative flex cursor-pointer flex-col gap-2 rounded-xl border-2 p-4 transition
+                            {{ $retrieveMode === 'clone_timetable'
+                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30'
+                                : 'border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-950/40 dark:hover:border-slate-600' }}">
+                            <input type="radio" wire:model.live="retrieveMode" value="clone_timetable" class="sr-only">
+                            <div class="flex items-center justify-between">
+                                <span class="text-lg">🗓️</span>
+                                @if($retrieveMode === 'clone_timetable')
+                                    <span class="rounded-full bg-blue-500 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-white">Selected</span>
+                                @endif
+                            </div>
+                            <p class="text-xs font-black uppercase tracking-wide text-slate-800 dark:text-slate-100">Clone Previous Timetable</p>
+                            <p class="text-[11px] font-semibold leading-relaxed text-slate-500 dark:text-slate-400">Creates a near-identical copy of the previous semester including faculty, rooms, days, and time slots.</p>
+                            <div class="mt-1 flex flex-wrap gap-1">
+                                <span class="rounded-full bg-blue-100 px-2 py-0.5 text-[9px] font-bold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">✓ Subjects</span>
+                                <span class="rounded-full bg-blue-100 px-2 py-0.5 text-[9px] font-bold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">✓ Faculty</span>
+                                <span class="rounded-full bg-blue-100 px-2 py-0.5 text-[9px] font-bold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">✓ Rooms</span>
+                                <span class="rounded-full bg-blue-100 px-2 py-0.5 text-[9px] font-bold text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">✓ Timeslots</span>
+                            </div>
+                        </label>
+
+                    </div>
+                    <p class="mt-3 text-[11px] font-semibold text-slate-400 dark:text-slate-500">
+                        New EDP codes are always generated regardless of mode. Modes without timeslots leave the scheduling board fresh for auto-generation.
                     </p>
                 </div>
 
@@ -746,14 +827,12 @@
                             <p class="text-xs font-semibold text-slate-600 dark:text-slate-300">
                                 Mode: @php
                                     $modeLabels = [
-                                        'subjects_only' => 'Subjects Only',
-                                        'full_template' => 'Subject + Faculty + Room + Time',
-                                        'faculty_only'  => 'Subject + Faculty',
-                                        'faculty_room'  => 'Subject + Faculty + Room',
-                                        'room_only'     => 'Subject + Room + Time',
-                                        'time_only'     => 'Subject + Time',
+                                        'subjects_only'    => 'Subjects Only',
+                                        'keep_faculty'     => 'Keep Faculty Assignments',
+                                        'keep_faculty_room'=> 'Keep Faculty & Room Assignments',
+                                        'clone_timetable'  => 'Clone Previous Timetable',
                                     ];
-                                    echo $modeLabels[$retrieveMode] ?? str_replace('_', ' ', $retrieveMode);
+                                    echo $modeLabels[$retrieveMode] ?? str_replace('_', ' ', ucwords($retrieveMode, '_'));
                                 @endphp
                             </p>
                         </div>
