@@ -8,13 +8,14 @@ use App\Models\Schedule;
 use App\Models\Setting;
 use App\Models\SettingChangeLog;
 use App\Models\Subject;
+use App\Services\Retrieve\RetrieveMode;
+use App\Services\Retrieve\RetrieveService;
 use App\Services\ScheduleConflictService;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Str;
 use Illuminate\Validation\Rule;
 use Livewire\Component;
 use RuntimeException;
@@ -48,7 +49,7 @@ class GlobalSettings extends Component
     public bool $maintenance_mode = false;
 
     // -------------------------------------------------------------------------
-    // System-ready state (NEW)
+    // System-ready state
     // -------------------------------------------------------------------------
 
     /** Whether the system has been marked ready for the current semester. */
@@ -71,22 +72,27 @@ class GlobalSettings extends Component
     // -------------------------------------------------------------------------
     public bool $confirmingReset = false;
 
-    public bool $archiveAcknowledged = false;
-
     public bool $showSemesterBlockerModal = false;
 
     public array $semesterEndBlockers = [];
 
     // -------------------------------------------------------------------------
-    // Archive retrieval
+    // Archive retrieval — wizard state
     // -------------------------------------------------------------------------
+
+    /** Step 1: mode selection modal */
     public bool $showRetrieveModal = false;
 
+    /** Step 2: compatibility report (COMPLETE_CLONE only) */
+    public bool $showCompatibilityStep = false;
+
+    /** Step 3: final confirmation */
     public bool $showRetrieveConfirmation = false;
 
     public ?string $retrieveArchiveBatch = null;
 
-    public string $retrieveMode = 'subjects_only';
+    /** One of RetrieveMode::ALL — default is Subjects Only */
+    public string $retrieveMode = RetrieveMode::SUBJECTS_ONLY;
 
     public ?string $selectedHistoricalSemester = null;
 
@@ -98,9 +104,25 @@ class GlobalSettings extends Component
 
     public array $changeHistory = [];
 
+    /** Auto-detected archive record shown in the modal header */
     public ?array $matchingArchive = null;
 
     public array $workspaceOccupancy = [];
+
+    /** CompatibilityReport serialised to array for the blade (COMPLETE_CLONE only) */
+    public ?array $compatibilityReport = null;
+
+    /**
+     * How the user resolves a compatibility conflict for COMPLETE_CLONE:
+     *   'use_archived'  → apply archived config to current semester then clone
+     *   'keep_current'  → clone but flag out-of-bounds schedules as needs_review
+     *
+     * @var string
+     */
+    public string $compatibilityResolution = 'keep_current';
+
+    /** Whether the final confirmation safeguard checkbox is acknowledged */
+    public bool $archiveAcknowledged = false;
 
     /** Whether a retrieve has already been performed for the current semester term. */
     public bool $alreadyRetrievedCurrentTerm = false;
@@ -170,11 +192,6 @@ class GlobalSettings extends Component
 
     private function loadChangeHistory(): void
     {
-        $period = Setting::getAcademicPeriod();
-
-        // Scope logs to the current semester by filtering on entries that were
-        // created on or after the most recent semester_archive log (i.e. the
-        // moment the last semester ended and a fresh one began).
         $semesterStartedAt = SettingChangeLog::where('setting_key', 'semester_archive')
             ->latest('changed_at')
             ->value('changed_at');
@@ -197,14 +214,11 @@ class GlobalSettings extends Component
         $this->config_locked = ! $this->config_locked;
         $this->persistSetting('config_locked', $this->config_locked ? '1' : '0', $this->config_locked ? 'locked' : 'unlocked');
 
-        // Unlocking the config resets the ready flag — the period is being
-        // reconfigured so other roles should not see it as live yet.
         if (! $this->config_locked) {
             Setting::markSystemNotReady(auth()->id());
             $this->system_ready = false;
         }
 
-        // Refresh checklist
         $this->setupChecklist = Setting::getSetupChecklist();
         $this->setupComplete  = Setting::isSetupComplete();
 
@@ -333,8 +347,6 @@ class GlobalSettings extends Component
 
             $this->config_locked = true;
 
-            // Refresh checklist after save — the "config_locked" step should
-            // now pass, which may make the checklist fully complete.
             $this->setupChecklist = Setting::getSetupChecklist();
             $this->setupComplete  = Setting::isSetupComplete();
 
@@ -344,29 +356,24 @@ class GlobalSettings extends Component
             $this->dispatch('notify', [
                 'type'    => 'success',
                 'message' => 'System configuration saved and locked.'
-                    .($this->setupComplete && ! $this->system_ready
+                    . ($this->setupComplete && ! $this->system_ready
                         ? ' All checklist items complete — you can now mark the system as ready.'
                         : ''),
             ]);
         } catch (Throwable $e) {
             $this->dispatch('notify', [
                 'type'    => 'error',
-                'message' => 'Save failed: '.$e->getMessage(),
+                'message' => 'Save failed: ' . $e->getMessage(),
             ]);
         }
     }
 
     // =========================================================================
-    // SYSTEM READY ACTIONS  ← NEW
+    // SYSTEM READY ACTIONS
     // =========================================================================
 
-    /**
-     * Open the "mark as ready" confirmation modal.
-     * Guards against marking ready before the checklist is fully satisfied.
-     */
     public function openMarkReadyConfirmation(): void
     {
-        // Refresh checklist first
         $this->setupChecklist = Setting::getSetupChecklist();
         $this->setupComplete  = Setting::isSetupComplete();
 
@@ -382,12 +389,8 @@ class GlobalSettings extends Component
         $this->confirmingMarkReady = true;
     }
 
-    /**
-     * Persist the "system ready" flag and broadcast to waiting dashboards.
-     */
     public function markSystemReady(): void
     {
-        // Re-validate checklist at execution time — not just at modal-open time
         $this->setupChecklist = Setting::getSetupChecklist();
         $this->setupComplete  = Setting::isSetupComplete();
 
@@ -419,7 +422,7 @@ class GlobalSettings extends Component
                 'user_id'     => auth()->id(),
                 'action'      => 'System Ready',
                 'module'      => 'Settings',
-                'description' => 'Marked system as ready for '.Setting::getAcademicPeriod()['semester_name'],
+                'description' => 'Marked system as ready for ' . Setting::getAcademicPeriod()['semester_name'],
             ]);
 
             $this->system_ready        = true;
@@ -428,8 +431,6 @@ class GlobalSettings extends Component
             $this->setupComplete       = Setting::isSetupComplete();
             $this->loadChangeHistory();
 
-            // Broadcast to all connected dashboards so the "waiting" state
-            // resolves in real time without a page refresh.
             $this->dispatch('system-ready-changed', ready: true);
 
             $this->dispatch('notify', [
@@ -441,22 +442,16 @@ class GlobalSettings extends Component
 
             $this->dispatch('notify', [
                 'type'    => 'error',
-                'message' => 'Failed to mark system ready: '.$e->getMessage(),
+                'message' => 'Failed to mark system ready: ' . $e->getMessage(),
             ]);
         }
     }
 
-    /**
-     * Open the "revert to not ready" confirmation modal.
-     */
     public function openMarkNotReadyConfirmation(): void
     {
         $this->confirmingMarkNotReady = true;
     }
 
-    /**
-     * Revert the system back to not-ready (e.g. config needs rework mid-semester).
-     */
     public function markSystemNotReady(): void
     {
         try {
@@ -476,7 +471,7 @@ class GlobalSettings extends Component
                 'user_id'     => auth()->id(),
                 'action'      => 'System Not Ready',
                 'module'      => 'Settings',
-                'description' => 'Reverted system ready status for '.Setting::getAcademicPeriod()['semester_name'],
+                'description' => 'Reverted system ready status for ' . Setting::getAcademicPeriod()['semester_name'],
             ]);
 
             $this->system_ready           = false;
@@ -494,7 +489,7 @@ class GlobalSettings extends Component
 
             $this->dispatch('notify', [
                 'type'    => 'error',
-                'message' => 'Failed to revert system ready state: '.$e->getMessage(),
+                'message' => 'Failed to revert system ready state: ' . $e->getMessage(),
             ]);
         }
     }
@@ -547,14 +542,12 @@ class GlobalSettings extends Component
                     DB::table('schedule_archives')
                         ->where('archive_batch_id', $archive['archive_batch_id'])
                         ->update([
-                            'next_semester'   => $nextPeriod['semester'],
-                            'next_school_year'=> $nextPeriod['school_year'],
-                            'updated_at'      => now(),
+                            'next_semester'    => $nextPeriod['semester'],
+                            'next_school_year' => $nextPeriod['school_year'],
+                            'updated_at'       => now(),
                         ]);
                 }
 
-                // New semester starts — system is NOT ready until Admin/Registrar
-                // completes the setup for the incoming period.
                 Setting::markSystemNotReady(auth()->id());
 
                 // Clear the retrieval guard so the new semester allows one retrieve.
@@ -578,20 +571,17 @@ class GlobalSettings extends Component
                 'message' => "Archived {$result['archive']['archive_batch_id']} and advanced to {$result['nextPeriod']['semester_name']}. Redirecting to your dashboard to begin setup.",
             ]);
 
-            // Redirect the admin/registrar to their dashboard after a short delay
-            // so the success toast is readable before navigation. Dean-level roles
-            // in other sessions already react via the system-ready-changed event.
             $this->dispatch('semester-ended', redirectTo: $this->getDashboardUrl());
         } catch (Throwable $e) {
             $this->dispatch('notify', [
                 'type'    => 'error',
-                'message' => 'End semester failed: '.$e->getMessage(),
+                'message' => 'End semester failed: ' . $e->getMessage(),
             ]);
         }
     }
 
     // =========================================================================
-    // ARCHIVE / RETRIEVAL
+    // ARCHIVE / RETRIEVAL — private archive helpers
     // =========================================================================
 
     private function archiveCurrentSemester(): array
@@ -652,8 +642,8 @@ class GlobalSettings extends Component
                 'total_schedules'  => $schedules->count(),
                 'schedule_data'    => $this->buildArchiveSnapshot($subjects, $schedules, $archiveBatchId),
                 'metadata'         => json_encode([
-                    'previous_period' => $period,
-                    'next_period'     => $nextPeriod,
+                    'previous_period'   => $period,
+                    'next_period'       => $nextPeriod,
                     'active_edp_prefix' => $period['edp_prefix'],
                 ]),
                 'archived_by'   => auth()->id(),
@@ -679,7 +669,7 @@ class GlobalSettings extends Component
             'user_id'     => auth()->id(),
             'action'      => 'Archive',
             'module'      => 'Semester',
-            'description' => 'Archived '.$period['semester_name'],
+            'description' => 'Archived ' . $period['semester_name'],
         ]);
 
         return [
@@ -704,21 +694,21 @@ class GlobalSettings extends Component
         return $next;
     }
 
-    /**
-     * Open the retrieval modal and auto-detect matching semester archive.
-     */
+    // =========================================================================
+    // RETRIEVE WIZARD — Step 1: Open modal
+    // =========================================================================
+
     public function openRetrieveModal(): void
     {
         $this->ensureLifecycleSchema();
 
-        // One-time retrieval guard: block if already retrieved for the current term
-        // and the semester has not been ended yet.
         if ($this->hasRetrievedCurrentTerm()) {
             $period = Setting::getAcademicPeriod();
             $this->dispatch('notify', [
                 'type'    => 'warning',
-                'message' => 'Already retrieved for '.$period['semester_name'].'. You can only retrieve once per semester. End the semester first to start a new term.',
+                'message' => 'Already retrieved for ' . $period['semester_name'] . '. You can only retrieve once per semester. End the semester first to start a new term.',
             ]);
+
             return;
         }
 
@@ -727,11 +717,13 @@ class GlobalSettings extends Component
         if (! $matching) {
             $this->dispatch('notify', [
                 'type'    => 'warning',
-                'message' => 'No archived '.$this->semesterLabel().' semester found.',
+                'message' => 'No archived ' . $this->semesterLabel() . ' semester found.',
             ]);
 
             return;
         }
+
+        $this->resetRetrieveState();
 
         $this->retrieveArchiveBatch = $matching['archive_batch_id'];
         $this->matchingArchive      = $matching;
@@ -739,347 +731,142 @@ class GlobalSettings extends Component
         $this->showRetrieveModal    = true;
     }
 
-    /**
-     * Validate and proceed to confirmation before actually retrieving.
-     */
+    // =========================================================================
+    // RETRIEVE WIZARD — Step 2a: Proceed (all modes)
+    // =========================================================================
+
     public function proceedToRetrieveConfirmation(): void
     {
         $this->ensureLifecycleSchema();
 
         if (! $this->retrieveArchiveBatch) {
-            $this->dispatch('notify', [
-                'type'    => 'error',
-                'message' => 'No archive selected.',
-            ]);
+            $this->dispatch('notify', ['type' => 'error', 'message' => 'No archive selected.']);
 
             return;
         }
 
-        $this->workspaceOccupancy    = $this->getWorkspaceOccupancy();
+        $mode = new RetrieveMode($this->retrieveMode);
+
+        // Close the mode-selection modal before advancing to any next step.
+        // Without this, both the mode modal and the next modal render simultaneously
+        // (both use z-40) and the compatibility step has nothing to render into.
+        $this->showRetrieveModal = false;
+
+        // COMPLETE_CLONE requires a compatibility check before the confirmation step
+        if ($mode->requiresCompatibilityCheck()) {
+            $this->runCompatibilityCheck();
+
+            return;
+        }
+
+        // All other modes go straight to confirmation
+        $this->workspaceOccupancy       = $this->getWorkspaceOccupancy();
         $this->showRetrieveConfirmation = true;
     }
 
+    // =========================================================================
+    // RETRIEVE WIZARD — Step 2b: Compatibility check (COMPLETE_CLONE only)
+    // =========================================================================
+
+    private function runCompatibilityCheck(): void
+    {
+        /** @var RetrieveService $service */
+        $service = app(RetrieveService::class);
+        $report  = $service->checkCompatibility($this->retrieveArchiveBatch);
+
+        if ($report->isCompatible()) {
+            // No differences — skip the compatibility step entirely
+            $this->workspaceOccupancy       = $this->getWorkspaceOccupancy();
+            $this->showRetrieveConfirmation = true;
+
+            return;
+        }
+
+        $this->compatibilityReport  = $report->toArray();
+        $this->showCompatibilityStep = true;
+    }
+
     /**
-     * Execute the actual retrieval after user confirmation.
+     * User chose how to resolve the compatibility conflict and clicks "Continue".
+     * $resolution: 'use_archived' | 'keep_current' | 'cancel'
      */
+    public function resolveCompatibility(string $resolution): void
+    {
+        if ($resolution === 'cancel') {
+            $this->resetRetrieveState();
+
+            return;
+        }
+
+        if (! in_array($resolution, ['use_archived', 'keep_current'], true)) {
+            return;
+        }
+
+        $this->compatibilityResolution  = $resolution;
+        $this->showCompatibilityStep    = false;
+        $this->workspaceOccupancy       = $this->getWorkspaceOccupancy();
+        $this->showRetrieveConfirmation = true;
+    }
+
+    // =========================================================================
+    // RETRIEVE WIZARD — Step 3: Execute
+    // =========================================================================
+
     public function retrieveArchivedSemester(): void
     {
         $this->ensureLifecycleSchema();
 
         if (! $this->retrieveArchiveBatch) {
-            $this->dispatch('notify', [
-                'type'    => 'error',
-                'message' => 'Select an archived semester to retrieve.',
-            ]);
+            $this->dispatch('notify', ['type' => 'error', 'message' => 'Select an archived semester to retrieve.']);
 
             return;
         }
 
+        /** @var RetrieveService $service */
+        $service = app(RetrieveService::class);
+
         try {
-            $result = DB::transaction(function () {
-                $archive = DB::table('schedule_archives')
-                    ->where('archive_batch_id', $this->retrieveArchiveBatch)
-                    ->lockForUpdate()
-                    ->first();
+            // Apply archived config BEFORE the retrieval transaction when the
+            // user chose "Use Archived Configuration" in the compatibility step.
+            if ($this->compatibilityResolution === 'use_archived') {
+                $service->applyArchivedConfig($this->retrieveArchiveBatch);
+            }
 
-                if (! $archive) {
-                    throw new RuntimeException('The selected archive batch was not found.');
-                }
+            $result = $service->retrieve(
+                $this->retrieveArchiveBatch,
+                $this->retrieveMode,
+                $this->compatibilityResolution,
+            );
 
-                $period         = Setting::getAcademicPeriod();
-                $sourceSubjects = Subject::archived()
-                    ->where('archive_batch', $this->retrieveArchiveBatch)
-                    ->orderBy('major')
-                    ->orderBy('year_level')
-                    ->orderBy('edp_code')
-                    ->lockForUpdate()
-                    ->get();
-
-                if ($sourceSubjects->isEmpty()) {
-                    throw new RuntimeException('This archive has no subjects available for retrieval.');
-                }
-
-                // Pre-scan: build a map of sourceSubjectId → room_id from archived schedules.
-                // This lets us fall back to the schedule's assigned room when the archived
-                // subject itself had no preferred_room_id (e.g. it was set by auto-scheduler
-                // directly on the schedule record rather than via Manage Rooms).
-                $archiveScheduleRoomMap = Schedule::archived()
-                    ->where('archive_batch', $this->retrieveArchiveBatch)
-                    ->whereNotNull('room_id')
-                    ->pluck('room_id', 'subject_id');   // subject_id → first room_id found
-
-                $created                   = 0;
-                $updated                   = 0;
-                $schedulesCreated          = 0;
-                $schedulesUpdated          = 0;
-                $schedulesSkipped          = 0;
-                // Maps archive source subject ID → active-term Subject model (newly created OR pre-existing).
-                // Both paths populate this map so the schedule loop always has a target to work with.
-                $subjectsBySourceId        = collect();
-                // Tracks which subject IDs in the map were pre-existing (not freshly created),
-                // so the schedule loop knows to UPDATE rather than INSERT.
-                $preExistingSubjectIds     = collect();
-
-                foreach ($sourceSubjects as $source) {
-                    // ── Case A: subject was already copied in a prior retrieval run ──────────
-                    $existingByCopy = Subject::activeTerm($period['semester'], $period['school_year'])
-                        ->where('copied_from_id', $source->id)
-                        ->first();
-
-                    if ($existingByCopy) {
-                        // Apply faculty / preferred-room updates so the user's chosen mode
-                        // is honoured even when the subject record already exists.
-                        $existingByCopy->update(array_filter([
-                            'faculty_id'        => $this->retrieveCopiesFaculty()    ? $source->faculty_id       : $existingByCopy->faculty_id,
-                            'preferred_room_id' => $this->retrieveCopiesSchedules()
-                                ? ($source->preferred_room_id ?? $archiveScheduleRoomMap->get($source->id))
-                                : $existingByCopy->preferred_room_id,
-                        ], fn ($v) => $v !== null));
-
-                        $subjectsBySourceId->put($source->id, $existingByCopy);
-                        $preExistingSubjectIds->push($existingByCopy->id);
-                        $updated++;
-                        continue;
-                    }
-
-                    // ── Case B: same offering exists but wasn't flagged as a copy ────────────
-                    $existingByOffering = Subject::activeTerm($period['semester'], $period['school_year'])
-                        ->where('subject_code', $source->subject_code)
-                        ->where('section',      $source->section)
-                        ->where('major',        $source->major)
-                        ->where('year_level',   $source->year_level)
-                        ->where('department',   $source->department)
-                        ->first();
-
-                    if ($existingByOffering) {
-                        $existingByOffering->update(array_filter([
-                            'faculty_id'        => $this->retrieveCopiesFaculty()    ? $source->faculty_id        : $existingByOffering->faculty_id,
-                            'preferred_room_id' => $this->retrieveCopiesSchedules()
-                                ? ($source->preferred_room_id ?? $archiveScheduleRoomMap->get($source->id))
-                                : $existingByOffering->preferred_room_id,
-                            'copied_from_id'    => $source->id, // back-fill the link
-                        ], fn ($v) => $v !== null));
-
-                        $subjectsBySourceId->put($source->id, $existingByOffering);
-                        $preExistingSubjectIds->push($existingByOffering->id);
-                        $updated++;
-                        continue;
-                    }
-
-                    // ── Case C: brand-new subject — create it ────────────────────────────────
-                    $newSubject = Subject::create([
-                        'edp_code'           => Subject::generateEdpCode(
-                            $source->major ?: strtok((string) $source->edp_code, '-'),
-                            (int) $source->year_level,
-                            $period['school_year'],
-                            $period['semester']
-                        ),
-                        'subject_code'        => $source->subject_code,
-                        'section'             => $source->section,
-                        'description'         => $source->description,
-                        'major'               => $source->major,
-                        'year_level'          => $source->year_level,
-                        'department'          => $source->department,
-                        'units'               => $source->units,
-                        'duration_hours'      => $source->duration_hours,
-                        'type'                => $source->type,
-                        'subject_type'        => $source->subject_type,
-                        'requires_lab'        => (bool) ($source->requires_lab ?? false),
-                        'preferred_room_type' => $source->preferred_room_type,
-                        'specialization'      => $source->specialization,
-                        'meetings_per_week'   => $source->meetings_per_week,
-                        'faculty_id'          => $this->retrieveCopiesFaculty()   ? $source->faculty_id       : null,
-                        'preferred_room_id'   => $this->retrieveCopiesSchedules()
-                            ? ($source->preferred_room_id ?? $archiveScheduleRoomMap->get($source->id))
-                            : null,
-                        'semester'            => $period['semester'],
-                        'school_year'         => $period['school_year'],
-                        'academic_year'       => $period['school_year'],
-                        'workspace_key'       => $period['workspace_key'],
-                        'is_archived'         => false,
-                        'archived_at'         => null,
-                        'copied_from_id'      => $source->id,
-                        'archive_batch'       => null,
-                    ]);
-
-                    $subjectsBySourceId->put($source->id, $newSubject);
-                    $created++;
-                }
-
-                $sourceSchedules = Schedule::archived()
-                    ->where('archive_batch', $this->retrieveArchiveBatch)
-                    ->orderBy('subject_id')
-                    ->orderBy('day')
-                    ->orderBy('start_time')
-                    ->lockForUpdate()
-                    ->get();
-
-                $pairingKeyMap = [];
-
-                foreach ($this->retrieveCopiesSchedules() ? $sourceSchedules : collect() as $sourceSchedule) {
-                    $targetSubject = $subjectsBySourceId->get($sourceSchedule->subject_id);
-
-                    if (! $targetSubject) {
-                        $schedulesSkipped++;
-                        continue;
-                    }
-
-                    // keep_faculty_room carries faculty and room but strips time —
-                    // the timetable starts fresh while assignments are preserved.
-                    // clone_timetable is the only mode that preserves day/time slots.
-                    $copiesTime = $this->retrieveMode === 'clone_timetable';
-
-                    // clone_timetable preserves the original status so finalized
-                    // schedules remain finalized; all other modes start at PARTIAL.
-                    $targetStatus = $this->retrieveMode === 'clone_timetable'
-                        ? ($sourceSchedule->status ?: Schedule::STATUS_PARTIAL)
-                        : Schedule::STATUS_PARTIAL;
-
-                    $isPreExisting = $preExistingSubjectIds->contains($targetSubject->id);
-
-                    if ($isPreExisting) {
-                        // Subject already existed — update its schedule records rather
-                        // than inserting duplicates. We match on subject_id + section
-                        // and apply faculty, room, and (optionally) time data.
-                        $existingSchedules = Schedule::activeTerm($period['semester'], $period['school_year'])
-                            ->where('subject_id', $targetSubject->id)
-                            ->get();
-
-                        if ($existingSchedules->isEmpty()) {
-                            // No schedule record at all for this subject — create one now.
-                            Schedule::create([
-                                'subject_id'        => $targetSubject->id,
-                                'room_id'           => $sourceSchedule->room_id,
-                                'faculty_id'        => $this->retrieveCopiesFaculty() ? $sourceSchedule->faculty_id : null,
-                                'user_id'           => auth()->id(),
-                                'department'        => $targetSubject->department,
-                                'major'             => $targetSubject->major,
-                                'year_level'        => $targetSubject->year_level,
-                                'section'           => $targetSubject->section,
-                                'day'               => $copiesTime ? $sourceSchedule->day : null,
-                                'start_time'        => $copiesTime ? Carbon::parse($sourceSchedule->start_time)->format('H:i:s') : null,
-                                'end_time'          => $copiesTime ? Carbon::parse($sourceSchedule->end_time)->format('H:i:s') : null,
-                                'duration_hours'    => $sourceSchedule->duration_hours,
-                                'meetings_per_week' => $sourceSchedule->meetings_per_week,
-                                'pairing_key'       => $this->retrievedPairingKey($sourceSchedule->pairing_key, $pairingKeyMap),
-                                'status'            => $targetStatus,
-                                'edp_code'          => $targetSubject->edp_code,
-                                'semester'          => $period['semester'],
-                                'school_year'       => $period['school_year'],
-                                'academic_year'     => $period['school_year'],
-                                'workspace_key'     => $period['workspace_key'],
-                                'is_archived'       => false,
-                                'archived_at'       => null,
-                                'archive_batch'     => null,
-                            ]);
-                            $schedulesCreated++;
-                        } else {
-                            // Update the first matching existing schedule with the
-                            // archived faculty/room (and time when mode includes it).
-                            // Additional meeting records beyond the first are left intact.
-                            $existingSchedule = $existingSchedules->first();
-                            $patch = [
-                                'faculty_id' => $this->retrieveCopiesFaculty() ? $sourceSchedule->faculty_id : $existingSchedule->faculty_id,
-                                'room_id'    => $sourceSchedule->room_id,
-                                'status'     => $targetStatus,
-                                'edp_code'   => $targetSubject->edp_code,
-                            ];
-                            if ($copiesTime) {
-                                $patch['day']        = $sourceSchedule->day;
-                                $patch['start_time'] = Carbon::parse($sourceSchedule->start_time)->format('H:i:s');
-                                $patch['end_time']   = Carbon::parse($sourceSchedule->end_time)->format('H:i:s');
-                            }
-                            $existingSchedule->update($patch);
-                            $schedulesUpdated++;
-                        }
-                        continue;
-                    }
-
-                    // Brand-new subject — insert a fresh schedule record.
-                    Schedule::create([
-                        'subject_id'        => $targetSubject->id,
-                        'room_id'           => $sourceSchedule->room_id,
-                        'faculty_id'        => $this->retrieveCopiesFaculty() ? $sourceSchedule->faculty_id : null,
-                        'user_id'           => auth()->id(),
-                        'department'        => $targetSubject->department,
-                        'major'             => $targetSubject->major,
-                        'year_level'        => $targetSubject->year_level,
-                        'section'           => $targetSubject->section,
-                        'day'               => $copiesTime ? $sourceSchedule->day : null,
-                        'start_time'        => $copiesTime ? Carbon::parse($sourceSchedule->start_time)->format('H:i:s') : null,
-                        'end_time'          => $copiesTime ? Carbon::parse($sourceSchedule->end_time)->format('H:i:s') : null,
-                        'duration_hours'    => $sourceSchedule->duration_hours,
-                        'meetings_per_week' => $sourceSchedule->meetings_per_week,
-                        'pairing_key'       => $this->retrievedPairingKey($sourceSchedule->pairing_key, $pairingKeyMap),
-                        'status'            => $targetStatus,
-                        'edp_code'          => $targetSubject->edp_code,
-                        'semester'          => $period['semester'],
-                        'school_year'       => $period['school_year'],
-                        'academic_year'     => $period['school_year'],
-                        'workspace_key'     => $period['workspace_key'],
-                        'is_archived'       => false,
-                        'archived_at'       => null,
-                        'archive_batch'     => null,
-                    ]);
-
-                    $schedulesCreated++;
-                }
-
-                SettingChangeLog::create([
-                    'user_id'       => auth()->id(),
-                    'setting_key'   => 'semester_retrieval',
-                    'old_value'     => $this->retrieveArchiveBatch,
-                    'new_value'     => $period['semester_name'],
-                    'action'        => 'created',
-                    'change_reason' => "Retrieved mode {$this->retrieveMode}: created {$created} subjects ({$updated} updated), {$schedulesCreated} schedules created, {$schedulesUpdated} schedules updated. {$schedulesSkipped} schedules skipped.",
-                    'changed_at'    => now(),
-                ]);
-
-                Activity::create([
-                    'user_id'     => auth()->id(),
-                    'action'      => 'Retrieve',
-                    'module'      => 'Semester',
-                    'description' => "Retrieved {$archive->semester_name} into {$period['semester_name']}.",
-                ]);
-
-                return compact('created', 'updated', 'schedulesCreated', 'schedulesUpdated', 'schedulesSkipped', 'archive', 'period');
-            });
-
-            $this->showRetrieveModal    = false;
-            $this->showRetrieveConfirmation = false;
-            $this->retrieveArchiveBatch = null;
-            $this->matchingArchive      = null;
-            $this->retrieveMode         = 'subjects_only';
-
-            // Mark that a retrieval has been performed for this semester term.
-            // This prevents the admin from retrieving again until the semester ends.
+            // ── Post-retrieval cleanup ────────────────────────────────────────
+            $this->resetRetrieveState();
             $this->markRetrievedCurrentTerm();
             $this->alreadyRetrievedCurrentTerm = true;
-
             $this->loadChangeHistory();
             $this->dispatch('subjectUpdated');
 
-            $created  = $result['created'];
-            $updated  = $result['updated'];
-            $schCreated = $result['schedulesCreated'];
-            $schUpdated = $result['schedulesUpdated'];
+            // ── Success notifications ─────────────────────────────────────────
+            $needsReviewSuffix = $result->needsReview > 0
+                ? " — {$result->needsReview} schedule(s) flagged for review."
+                : '.';
 
-            $subjectMsg  = $created > 0 && $updated > 0
-                ? "{$created} subjects created, {$updated} updated"
-                : ($created > 0 ? "{$created} subjects created" : "{$updated} subjects updated");
-            $scheduleMsg = ($schCreated + $schUpdated) > 0
-                ? "{$schCreated} schedules created, {$schUpdated} updated"
-                : 'no schedules changed';
+            $warningSuffix = count($result->warnings) > 0
+                ? ' Check Faculty Loading and Block Schedule for details.'
+                : '';
 
             $this->dispatch('notify', [
                 'type'    => 'success',
-                'message' => "Retrieved {$result['period']['semester_name']}: {$subjectMsg}.",
-                'detail'  => ucfirst($scheduleMsg) . ($result['schedulesSkipped'] > 0 ? "; {$result['schedulesSkipped']} skipped." : '.'),
+                'message' => "Retrieved {$result->targetPeriodName}: {$result->subjectSummary()}.",
+                'detail'  => ucfirst($result->scheduleSummary()) . $needsReviewSuffix . $warningSuffix,
             ]);
+
+            // Broadcast to other Livewire components on the same page
+            $this->dispatch('semesterRetrieved', result: $result->toArray());
+
         } catch (Throwable $e) {
             $this->dispatch('notify', [
                 'type'    => 'error',
-                'message' => 'Retrieval failed: '.$e->getMessage(),
+                'message' => 'Retrieval failed: ' . $e->getMessage(),
             ]);
         }
     }
@@ -1088,9 +875,6 @@ class GlobalSettings extends Component
     // ARCHIVE QUERY HELPERS
     // =========================================================================
 
-    /**
-     * Find the latest archived semester matching the current semester type.
-     */
     public function findMatchingSemesterArchive(): ?array
     {
         if (! Schema::hasTable('schedule_archives')) {
@@ -1133,9 +917,6 @@ class GlobalSettings extends Component
         ];
     }
 
-    /**
-     * Check if current workspace already contains data.
-     */
     public function getWorkspaceOccupancy(): array
     {
         $period = Setting::getAcademicPeriod();
@@ -1163,12 +944,12 @@ class GlobalSettings extends Component
             ->latest('archived_at')
             ->get()
             ->map(fn ($archive) => (object) [
-                'value'      => $archive->archive_batch_id ? 'batch:'.$archive->archive_batch_id : 'legacy:'.$archive->id,
-                'batch'      => $archive->archive_batch_id,
-                'label'      => ($archive->semester_name ?: Setting::semesterDisplayName($archive->semester, $archive->school_year)),
-                'school_year'=> $archive->school_year,
-                'badge'      => "{$archive->total_subjects} subjects / {$archive->total_schedules} schedules",
-                'date'       => $archive->archived_at,
+                'value'       => $archive->archive_batch_id ? 'batch:' . $archive->archive_batch_id : 'legacy:' . $archive->id,
+                'batch'       => $archive->archive_batch_id,
+                'label'       => ($archive->semester_name ?: Setting::semesterDisplayName($archive->semester, $archive->school_year)),
+                'school_year' => $archive->school_year,
+                'badge'       => "{$archive->total_subjects} subjects / {$archive->total_schedules} schedules",
+                'date'        => $archive->archived_at,
             ]);
     }
 
@@ -1228,6 +1009,7 @@ class GlobalSettings extends Component
         $scheduleRows = Schedule::with([
             'subject:id,edp_code,subject_code,description,units',
             'faculty:id,full_name,employee_id',
+            'room:id,room_name,type',
         ])
             ->archived()
             ->where('archive_batch', $batchId)
@@ -1241,22 +1023,27 @@ class GlobalSettings extends Component
 
         $records = $scheduleRows->map(function (Schedule $schedule) {
             return (object) [
-                'edp_code'         => $schedule->edp_code ?: $schedule->subject?->edp_code ?: 'N/A',
-                'subject_code'     => $schedule->subject?->subject_code ?: 'N/A',
-                'descriptive_title'=> $schedule->subject?->description ?: 'N/A',
-                'section'          => $schedule->section ?: 'N/A',
-                'instructor_name'  => $schedule->faculty?->full_name ?: 'Unassigned',
-                'units'            => $schedule->subject?->units ?: 'N/A',
-                'day'              => $schedule->day ?: 'N/A',
-                'start_time'       => $schedule->start_time,
-                'end_time'         => $schedule->end_time,
-                'status'           => $schedule->status ?: 'archived',
-                'department'       => $schedule->department ?: $schedule->subject?->department,
+                'edp_code'          => $schedule->edp_code ?: $schedule->subject?->edp_code ?: 'N/A',
+                'subject_code'      => $schedule->subject?->subject_code ?: 'N/A',
+                'descriptive_title' => $schedule->subject?->description ?: 'N/A',
+                'section'           => $schedule->section ?: 'N/A',
+                'instructor_name'   => $schedule->faculty?->full_name ?: 'Unassigned',
+                'units'             => $schedule->subject?->units ?: 'N/A',
+                'day'               => $schedule->day ?: 'N/A',
+                'start_time'        => $schedule->start_time,
+                'end_time'          => $schedule->end_time,
+                'status'            => $schedule->status ?: 'archived',
+                'department'        => $schedule->department ?: $schedule->subject?->department,
+                'room_name'         => $schedule->room?->room_name ?: 'Unassigned',
+                'room_type'         => $schedule->room?->type ?: 'N/A',
+                'room_id'           => $schedule->room_id,
+                'faculty_id'        => $schedule->faculty_id,
+                'schedule_id'       => $schedule->id,
             ];
         });
 
-        $scheduledSubjectIds  = $scheduleRows->pluck('subject_id')->filter()->unique();
-        $unscheduledSubjects  = Subject::archived()
+        $scheduledSubjectIds = $scheduleRows->pluck('subject_id')->filter()->unique();
+        $unscheduledSubjects = Subject::archived()
             ->where('archive_batch', $batchId)
             ->when($this->archiveFilterDepartment !== '', fn ($query) => $query->where('department', $this->archiveFilterDepartment))
             ->when($scheduledSubjectIds->isNotEmpty(), fn ($query) => $query->whereNotIn('id', $scheduledSubjectIds))
@@ -1265,17 +1052,22 @@ class GlobalSettings extends Component
 
         return $records
             ->concat($unscheduledSubjects->map(fn (Subject $subject) => (object) [
-                'edp_code'         => $subject->edp_code ?: 'N/A',
-                'subject_code'     => $subject->subject_code ?: 'N/A',
-                'descriptive_title'=> $subject->description ?: 'N/A',
-                'section'          => $subject->section ?: 'N/A',
-                'instructor_name'  => $subject->faculty_id ? (Faculty::find($subject->faculty_id)?->full_name ?: 'Assigned') : 'Unassigned',
-                'units'            => $subject->units ?: 'N/A',
-                'day'              => 'Unscheduled',
-                'start_time'       => null,
-                'end_time'         => null,
-                'status'           => 'archived',
-                'department'       => $subject->department,
+                'edp_code'          => $subject->edp_code ?: 'N/A',
+                'subject_code'      => $subject->subject_code ?: 'N/A',
+                'descriptive_title' => $subject->description ?: 'N/A',
+                'section'           => $subject->section ?: 'N/A',
+                'instructor_name'   => $subject->faculty_id ? (Faculty::find($subject->faculty_id)?->full_name ?: 'Assigned') : 'Unassigned',
+                'units'             => $subject->units ?: 'N/A',
+                'day'               => 'Unscheduled',
+                'start_time'        => null,
+                'end_time'          => null,
+                'status'            => 'archived',
+                'department'        => $subject->department,
+                'room_name'         => 'Unscheduled',
+                'room_type'         => 'N/A',
+                'room_id'           => null,
+                'faculty_id'        => $subject->faculty_id ?? null,
+                'schedule_id'       => null,
             ]))
             ->values();
     }
@@ -1364,14 +1156,12 @@ class GlobalSettings extends Component
 
         $schedules = Schedule::activeTerm($this->semester, $this->school_year)
             ->with('subject:id,subject_code,is_practicum')
-            // Practicum/OJT subjects have no day/time — skip them entirely.
             ->whereNotNull('day')
             ->whereNotNull('start_time')
             ->whereNotNull('end_time')
             ->get();
 
         foreach ($schedules as $schedule) {
-            // Extra safety: skip any schedule row that somehow has null time fields.
             if (is_null($schedule->day) || is_null($schedule->start_time) || is_null($schedule->end_time)) {
                 continue;
             }
@@ -1383,7 +1173,7 @@ class GlobalSettings extends Component
                 $conflicts[] = [
                     'subject_code' => $schedule->subject?->subject_code ?? 'Unknown',
                     'day'          => $schedule->day,
-                    'time'         => $scheduleStart->format('H:i').' - '.$scheduleEnd->format('H:i'),
+                    'time'         => $scheduleStart->format('H:i') . ' - ' . $scheduleEnd->format('H:i'),
                     'issue'        => 'is scheduled on a disabled day',
                 ];
 
@@ -1394,7 +1184,7 @@ class GlobalSettings extends Component
                 $conflicts[] = [
                     'subject_code' => $schedule->subject?->subject_code ?? 'Unknown',
                     'day'          => $schedule->day,
-                    'time'         => $scheduleStart->format('H:i').' - '.$scheduleEnd->format('H:i'),
+                    'time'         => $scheduleStart->format('H:i') . ' - ' . $scheduleEnd->format('H:i'),
                     'issue'        => 'starts before the new day start',
                 ];
             }
@@ -1403,7 +1193,7 @@ class GlobalSettings extends Component
                 $conflicts[] = [
                     'subject_code' => $schedule->subject?->subject_code ?? 'Unknown',
                     'day'          => $schedule->day,
-                    'time'         => $scheduleStart->format('H:i').' - '.$scheduleEnd->format('H:i'),
+                    'time'         => $scheduleStart->format('H:i') . ' - ' . $scheduleEnd->format('H:i'),
                     'issue'        => 'ends after the new day end',
                 ];
             }
@@ -1427,9 +1217,6 @@ class GlobalSettings extends Component
             $blockers[] = 'No active subjects exist in the current workspace.';
         }
 
-        // Practicum / OJT subjects are off-campus and intentionally have no
-        // room, day, or time. Exclude them from all scheduling completeness checks
-        // — they are considered fully handled as-is once they exist in the workspace.
         $schedulableSubjectIds = $subjects
             ->filter(fn (Subject $subject) => ! $subject->is_practicum)
             ->pluck('id');
@@ -1446,12 +1233,12 @@ class GlobalSettings extends Component
             ->filter(fn (Subject $subject) => ! $subject->is_practicum)
             ->filter(fn (Subject $subject) => (int) $subject->schedules_count < max(1, (int) $subject->meetings_per_week))
             ->take(8)
-            ->map(fn (Subject $subject) => "{$subject->subject_code} needs ".max(0, (int) $subject->meetings_per_week - (int) $subject->schedules_count).' more meeting(s).')
+            ->map(fn (Subject $subject) => "{$subject->subject_code} needs " . max(0, (int) $subject->meetings_per_week - (int) $subject->schedules_count) . ' more meeting(s).')
             ->values()
             ->all();
 
         if ($unscheduled !== []) {
-            $blockers[] = 'Required subjects are not fully scheduled: '.implode(' ', $unscheduled);
+            $blockers[] = 'Required subjects are not fully scheduled: ' . implode(' ', $unscheduled);
         }
 
         $unfinalizedCount = $schedules
@@ -1462,13 +1249,10 @@ class GlobalSettings extends Component
             $blockers[] = "{$unfinalizedCount} schedule row(s) are not finalized.";
         }
 
-        // Only run placement conflict checks against non-practicum schedules.
-        // Practicum rows have no room/day/time by design and must never be
-        // flagged as "incomplete schedule data."
         $invalidSchedules = $this->activeSchedulePlacementConflicts($nonPracticumSchedules);
 
         if ($invalidSchedules !== []) {
-            $blockers[] = 'Unresolved conflicts remain: '.implode(' ', array_slice($invalidSchedules, 0, 6));
+            $blockers[] = 'Unresolved conflicts remain: ' . implode(' ', array_slice($invalidSchedules, 0, 6));
         }
 
         return $blockers;
@@ -1481,7 +1265,7 @@ class GlobalSettings extends Component
 
         foreach ($schedules as $schedule) {
             if (! $schedule->subject || ! $schedule->room || ! $schedule->day || ! $schedule->start_time || ! $schedule->end_time) {
-                $conflicts[] = ($schedule->subject?->subject_code ?? 'Unknown subject').' has incomplete schedule data.';
+                $conflicts[] = ($schedule->subject?->subject_code ?? 'Unknown subject') . ' has incomplete schedule data.';
                 continue;
             }
 
@@ -1496,7 +1280,7 @@ class GlobalSettings extends Component
             );
 
             if (($result['status'] ?? true) === false) {
-                $conflicts[] = ($schedule->subject?->subject_code ?? 'Unknown subject').': '.($result['title'] ?? $result['message'] ?? 'conflict detected');
+                $conflicts[] = ($schedule->subject?->subject_code ?? 'Unknown subject') . ': ' . ($result['title'] ?? $result['message'] ?? 'conflict detected');
             }
         }
 
@@ -1509,9 +1293,9 @@ class GlobalSettings extends Component
         $newValue = is_array($value) ? json_encode(array_values($value)) : (string) $value;
 
         $setting = Setting::updateOrCreate(['key' => $key], [
-            'value'          => $newValue,
-            'last_updated_by'=> auth()->id(),
-            'last_updated_at'=> now(),
+            'value'           => $newValue,
+            'last_updated_by' => auth()->id(),
+            'last_updated_at' => now(),
         ]);
 
         if ($oldValue !== $newValue && auth()->id()) {
@@ -1566,15 +1350,15 @@ class GlobalSettings extends Component
             ? $matches[1]
             : (string) now()->year;
 
-        $base   = 'ARCH-'.$year.'-'.Setting::semesterCode($semester).'-';
+        $base   = 'ARCH-' . $year . '-' . Setting::semesterCode($semester) . '-';
         $latest = DB::table('schedule_archives')
-            ->where('archive_batch_id', 'like', $base.'%')
+            ->where('archive_batch_id', 'like', $base . '%')
             ->orderByDesc('archive_batch_id')
             ->value('archive_batch_id');
 
         $nextSequence = $latest ? ((int) substr((string) $latest, -3)) + 1 : 1;
 
-        return $base.str_pad((string) $nextSequence, 3, '0', STR_PAD_LEFT);
+        return $base . str_pad((string) $nextSequence, 3, '0', STR_PAD_LEFT);
     }
 
     private function buildArchiveSnapshot(Collection $subjects, Collection $schedules, string $archiveBatchId): string
@@ -1648,17 +1432,17 @@ class GlobalSettings extends Component
         $rows    = collect($payload['schedules'] ?? (array_is_list($payload) ? $payload : []));
 
         return $rows->map(fn (array $row) => (object) [
-            'edp_code'         => $row['edp_code'] ?? 'N/A',
-            'subject_code'     => $row['subject_code'] ?? 'N/A',
-            'descriptive_title'=> $row['descriptive_title'] ?? $row['description'] ?? 'N/A',
-            'section'          => $row['section'] ?? 'N/A',
-            'instructor_name'  => $row['faculty_name'] ?? 'Unassigned',
-            'units'            => $row['units'] ?? 'N/A',
-            'day'              => $row['day'] ?? 'N/A',
-            'start_time'       => $row['start_time'] ?? null,
-            'end_time'         => $row['end_time'] ?? null,
-            'status'           => $row['status'] ?? 'archived',
-            'department'       => $row['department'] ?? 'N/A',
+            'edp_code'          => $row['edp_code'] ?? 'N/A',
+            'subject_code'      => $row['subject_code'] ?? 'N/A',
+            'descriptive_title' => $row['descriptive_title'] ?? $row['description'] ?? 'N/A',
+            'section'           => $row['section'] ?? 'N/A',
+            'instructor_name'   => $row['faculty_name'] ?? 'Unassigned',
+            'units'             => $row['units'] ?? 'N/A',
+            'day'               => $row['day'] ?? 'N/A',
+            'start_time'        => $row['start_time'] ?? null,
+            'end_time'          => $row['end_time'] ?? null,
+            'status'            => $row['status'] ?? 'archived',
+            'department'        => $row['department'] ?? 'N/A',
         ])->values();
     }
 
@@ -1681,7 +1465,7 @@ class GlobalSettings extends Component
         }
 
         if ($missing !== []) {
-            throw new RuntimeException('Run the semester lifecycle migrations first. Missing: '.implode(', ', $missing));
+            throw new RuntimeException('Run the semester lifecycle migrations first. Missing: ' . implode(', ', $missing));
         }
     }
 
@@ -1707,77 +1491,51 @@ class GlobalSettings extends Component
         );
     }
 
-    private function retrievedPairingKey(?string $sourcePairingKey, array &$pairingKeyMap): ?string
-    {
-        if (blank($sourcePairingKey)) {
-            return null;
-        }
-
-        return $pairingKeyMap[$sourcePairingKey] ??= 'retrieved-'.Str::uuid();
-    }
-
-    private function retrieveCopiesFaculty(): bool
-    {
-        // Modes that carry faculty assignments forward into the new semester.
-        return in_array($this->retrieveMode, ['clone_timetable', 'keep_faculty', 'keep_faculty_room'], true);
-    }
-
-    private function retrieveCopiesSchedules(): bool
-    {
-        // Modes that create schedule records (with or without time slots).
-        // keep_faculty_room creates records but strips day/time (copiesTime=false).
-        // clone_timetable creates records AND preserves day/time (copiesTime=true).
-        return in_array($this->retrieveMode, ['clone_timetable', 'keep_faculty_room'], true);
-    }
-
     // =========================================================================
     // RETRIEVAL GUARD HELPERS
     // =========================================================================
 
-    /**
-     * Returns the Setting key used to track whether a retrieval has been
-     * performed for the current workspace (semester + school_year).
-     */
     private function retrievalGuardKey(): string
     {
-        return 'retrieved_for_'.Setting::workspaceKey();
+        return 'retrieved_for_' . Setting::workspaceKey();
     }
 
-    /**
-     * Returns true if a retrieval has already been performed for the
-     * current semester term and the semester has not yet been ended.
-     */
     private function hasRetrievedCurrentTerm(): bool
     {
         return Setting::getBoolean($this->retrievalGuardKey(), false);
     }
 
-    /**
-     * Persist the retrieval guard flag for the current term.
-     */
     private function markRetrievedCurrentTerm(): void
     {
         Setting::setValue($this->retrievalGuardKey(), '1', auth()->id());
     }
 
-    /**
-     * Clear the retrieval guard flag — called when the semester is ended so the
-     * next semester starts fresh and allows one retrieval.
-     */
     private function clearRetrievedCurrentTerm(): void
     {
-        // Clear the OLD workspace key (current term before advancing).
         Setting::setValue($this->retrievalGuardKey(), '0', auth()->id());
+    }
+
+    // =========================================================================
+    // RETRIEVE WIZARD — Reset all wizard state
+    // =========================================================================
+
+    private function resetRetrieveState(): void
+    {
+        $this->showRetrieveModal        = false;
+        $this->showCompatibilityStep    = false;
+        $this->showRetrieveConfirmation = false;
+        $this->retrieveArchiveBatch     = null;
+        $this->matchingArchive          = null;
+        $this->compatibilityReport      = null;
+        $this->compatibilityResolution  = 'keep_current';
+        $this->archiveAcknowledged      = false;
+        $this->retrieveMode             = RetrieveMode::SUBJECTS_ONLY;
     }
 
     // =========================================================================
     // AUDIT HISTORY EXCEL EXPORT
     // =========================================================================
 
-    /**
-     * Stream an Excel-compatible CSV download for the selected historical batch.
-     * We use CSV (universally opened by Excel) to avoid requiring PhpSpreadsheet.
-     */
     public function downloadAuditHistory(): \Symfony\Component\HttpFoundation\StreamedResponse
     {
         $records = $this->archivedHistoryRecords();
@@ -1785,17 +1543,115 @@ class GlobalSettings extends Component
             ? str_replace(['batch:', 'legacy:'], '', $this->selectedHistoricalSemester)
             : 'audit';
 
-        $filename = 'audit-history-'.$batch.'.csv';
+        $filename = 'audit-history-' . $batch . '.csv';
 
         return response()->streamDownload(function () use ($records) {
             $out = fopen('php://output', 'w');
 
-            // BOM for Excel UTF-8 detection
             fwrite($out, "\xEF\xBB\xBF");
 
-            fputcsv($out, ['EDP Code', 'Subject Code', 'Descriptive Title', 'Section', 'Instructor', 'Units', 'Day', 'Start Time', 'End Time', 'Status', 'Department']);
+            // ── Build conflict index ──────────────────────────────────────────
+            // Indexed by "day|start|end" → list of records for that slot.
+            // We check room conflicts, faculty conflicts, and section conflicts.
+            $roomSlotIndex    = [];  // "room_id|day|start|end"              → [edp_codes]
+            $facultySlotIndex = [];  // "faculty_id|day|start|end"            → [edp_codes]
+            $sectionSlotIndex = [];  // "year_level-section|dept|day|start|end" → [edp_codes]
+
+            /**
+             * Extract the year-level digit from an EDP code.
+             *
+             * EDP codes follow the pattern:  XX-YYYY{Y}NNN…
+             * The year-level digit sits at index 6 (0-based) — i.e. the 4th
+             * numeric digit after the dash.
+             *
+             * Examples:
+             *   IT-2611001  → index 6 = '1'  (1st Year)
+             *   IT-2612001  → index 6 = '2'  (2nd Year)
+             *   IT-2613001  → index 6 = '3'  (3rd Year)
+             *   IT-2614001  → index 6 = '4'  (4th Year)
+             *
+             * Returns the single digit string, or '' when the code is too
+             * short or the character is not a digit.
+             */
+            $extractYearLevel = static function (string $edpCode): string {
+                $digit = $edpCode[6] ?? '';
+                return ctype_digit($digit) ? $digit : '';
+            };
+
+            foreach ($records as $rec) {
+                if (! $rec->day || $rec->day === 'N/A' || $rec->day === 'Unscheduled' || ! $rec->start_time || ! $rec->end_time) {
+                    continue;
+                }
+
+                $start = \Carbon\Carbon::parse($rec->start_time)->format('H:i');
+                $end   = \Carbon\Carbon::parse($rec->end_time)->format('H:i');
+
+                if (! empty($rec->room_id)) {
+                    $roomKey = $rec->room_id . '|' . $rec->day . '|' . $start . '|' . $end;
+                    $roomSlotIndex[$roomKey][] = $rec->edp_code;
+                }
+
+                if (! empty($rec->faculty_id)) {
+                    $facultyKey = $rec->faculty_id . '|' . $rec->day . '|' . $start . '|' . $end;
+                    $facultySlotIndex[$facultyKey][] = $rec->edp_code;
+                }
+
+                if (! empty($rec->section) && $rec->section !== 'N/A') {
+                    $yearLevel  = $extractYearLevel((string) $rec->edp_code);
+                    // Combine year level + section so that "1-A" and "3-A" are
+                    // treated as entirely different student groups and never
+                    // flagged as conflicting with each other.
+                    $yearSection = $yearLevel !== '' ? $yearLevel . '-' . $rec->section : $rec->section;
+                    $sectionKey  = $yearSection . '|' . $rec->department . '|' . $rec->day . '|' . $start . '|' . $end;
+                    $sectionSlotIndex[$sectionKey][] = $rec->edp_code;
+                }
+            }
+
+            fputcsv($out, [
+                'EDP Code', 'Subject Code', 'Descriptive Title', 'Section',
+                'Instructor', 'Units', 'Day', 'Start Time', 'End Time',
+                'Room', 'Room Type', 'Status', 'Department', 'Conflicts',
+            ]);
 
             foreach ($records as $record) {
+                $conflicts = [];
+
+                if ($record->day && $record->day !== 'N/A' && $record->day !== 'Unscheduled' && $record->start_time && $record->end_time) {
+                    $start = \Carbon\Carbon::parse($record->start_time)->format('H:i');
+                    $end   = \Carbon\Carbon::parse($record->end_time)->format('H:i');
+
+                    // Room double-booking
+                    if (! empty($record->room_id)) {
+                        $roomKey     = $record->room_id . '|' . $record->day . '|' . $start . '|' . $end;
+                        $roomConflicts = array_filter($roomSlotIndex[$roomKey] ?? [], fn ($c) => $c !== $record->edp_code);
+                        if (! empty($roomConflicts)) {
+                            $conflicts[] = 'Room conflict with: ' . implode(', ', $roomConflicts);
+                        }
+                    }
+
+                    // Faculty double-booking
+                    if (! empty($record->faculty_id)) {
+                        $facultyKey      = $record->faculty_id . '|' . $record->day . '|' . $start . '|' . $end;
+                        $facultyConflicts = array_filter($facultySlotIndex[$facultyKey] ?? [], fn ($c) => $c !== $record->edp_code);
+                        if (! empty($facultyConflicts)) {
+                            $conflicts[] = 'Faculty conflict with: ' . implode(', ', $facultyConflicts);
+                        }
+                    }
+
+                    // Section time overlap — scoped to the same year level so that
+                    // e.g. 3rd-Year Section A and 1st-Year Section A are never
+                    // flagged as conflicting with each other.
+                    if (! empty($record->section) && $record->section !== 'N/A') {
+                        $yearLevel        = $extractYearLevel((string) $record->edp_code);
+                        $yearSection      = $yearLevel !== '' ? $yearLevel . '-' . $record->section : $record->section;
+                        $sectionKey       = $yearSection . '|' . $record->department . '|' . $record->day . '|' . $start . '|' . $end;
+                        $sectionConflicts = array_filter($sectionSlotIndex[$sectionKey] ?? [], fn ($c) => $c !== $record->edp_code);
+                        if (! empty($sectionConflicts)) {
+                            $conflicts[] = 'Section conflict with: ' . implode(', ', $sectionConflicts);
+                        }
+                    }
+                }
+
                 fputcsv($out, [
                     $record->edp_code,
                     $record->subject_code,
@@ -1806,15 +1662,18 @@ class GlobalSettings extends Component
                     $record->day,
                     $record->start_time ? \Carbon\Carbon::parse($record->start_time)->format('h:i A') : '',
                     $record->end_time   ? \Carbon\Carbon::parse($record->end_time)->format('h:i A') : '',
+                    $record->room_name  ?? 'Unassigned',
+                    $record->room_type  ?? 'N/A',
                     str_replace('_', ' ', $record->status),
                     $record->department,
+                    empty($conflicts) ? 'None' : implode(' | ', $conflicts),
                 ]);
             }
 
             fclose($out);
         }, $filename, [
             'Content-Type'        => 'text/csv; charset=UTF-8',
-            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
         ]);
     }
 
@@ -1822,13 +1681,6 @@ class GlobalSettings extends Component
     // DASHBOARD REDIRECT HELPER
     // =========================================================================
 
-    /**
-     * Returns the dashboard URL for the currently authenticated admin/registrar.
-     * After End Semester completes, the user is redirected here so they land on
-     * a clean slate rather than staying on the (now-stale) settings page.
-     *
-     * Adjust the route names below to match your routes/web.php definitions.
-     */
     private function getDashboardUrl(): string
     {
         $role = auth()->user()?->role;
@@ -1848,24 +1700,23 @@ class GlobalSettings extends Component
         $nextPeriod = $this->previewNextAcademicPeriod();
 
         return view('livewire.global-settings', [
-            'archiveBatches'          => $this->archiveHistoryBatches(),
-            'archivedSemesterOptions' => $this->archivedSemesterOptions(),
+            'archiveBatches'           => $this->archiveHistoryBatches(),
+            'archivedSemesterOptions'  => $this->archivedSemesterOptions(),
             'retrievableArchiveOptions'=> $this->retrievableArchiveOptions(),
-            'archivedHistoryRecords'  => $this->archivedHistoryRecords(),
-            'changeHistory'           => $this->changeHistory,
-            'brickDuration'           => self::BRICK_DURATION,
-            'lunchStart'              => self::LUNCH_START,
-            'lunchEnd'                => self::LUNCH_END,
-            'availableDays'           => Setting::ALL_SCHEDULE_DAYS,
-            'activeSubjectsCount'     => $this->activeSubjectCount(),
-            'activeSchedulesCount'    => $this->activeScheduleCount(),
-            'currentEdpPrefix'        => $this->currentEdpPrefix(),
-            'nextPeriod'              => $nextPeriod,
-            // System-ready data passed explicitly so the blade has clean access
-            'systemReady'             => $this->system_ready,
-            'setupChecklist'          => $this->setupChecklist,
-            'setupComplete'           => $this->setupComplete,
-            'systemReadyMeta'         => Setting::getSystemReadyMeta(),
+            'archivedHistoryRecords'   => $this->archivedHistoryRecords(),
+            'changeHistory'            => $this->changeHistory,
+            'brickDuration'            => self::BRICK_DURATION,
+            'lunchStart'               => self::LUNCH_START,
+            'lunchEnd'                 => self::LUNCH_END,
+            'availableDays'            => Setting::ALL_SCHEDULE_DAYS,
+            'activeSubjectsCount'      => $this->activeSubjectCount(),
+            'activeSchedulesCount'     => $this->activeScheduleCount(),
+            'currentEdpPrefix'         => $this->currentEdpPrefix(),
+            'nextPeriod'               => $nextPeriod,
+            'systemReady'              => $this->system_ready,
+            'setupChecklist'           => $this->setupChecklist,
+            'setupComplete'            => $this->setupComplete,
+            'systemReadyMeta'          => Setting::getSystemReadyMeta(),
         ])->layout('layouts.app');
     }
 }

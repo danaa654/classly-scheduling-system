@@ -12,7 +12,7 @@ class Schedule extends Model
 {
     use HasFactory;
 
-   public const STATUS_DRAFT = 'draft';
+    public const STATUS_DRAFT = 'draft';
 
     public const STATUS_PARTIAL = 'partial';
 
@@ -23,6 +23,12 @@ class Schedule extends Model
     public const STATUS_PENDING_GENERATION = 'pending_generation';
 
     public const STATUS_FINALIZED = 'finalized';
+
+    /**
+     * Imported during semester retrieval but flagged for manual review.
+     * Stored with validation_notes explaining why (inactive day, missing room, etc.).
+     */
+    public const STATUS_NEEDS_REVIEW = 'needs_review';
 
     public const SECTION_TIME_PREFERENCES = [
         'A' => 'morning',
@@ -54,86 +60,77 @@ class Schedule extends Model
         'archived_at',
         'workspace_key',
         'archive_batch',
+        'validation_notes',   // ← populated when status = needs_review
     ];
 
     protected $casts = [
-        'start_time' => 'datetime:H:i:s',
-        'end_time' => 'datetime:H:i:s',
-        'duration_hours' => 'float',
-        'meetings_per_week' => 'integer',
-        'is_archived' => 'boolean',
-        'archived_at' => 'datetime',
+        'start_time'       => 'datetime:H:i:s',
+        'end_time'         => 'datetime:H:i:s',
+        'duration_hours'   => 'float',
+        'meetings_per_week'=> 'integer',
+        'is_archived'      => 'boolean',
+        'archived_at'      => 'datetime',
+        'validation_notes' => 'array',    // ← stored as JSON, cast to PHP array
     ];
 
     protected static function booted(): void
     {
         static::saving(function (Schedule $schedule) {
             $period = Setting::getAcademicPeriod();
- 
+
             if (blank($schedule->semester)) {
                 $schedule->semester = $period['semester'];
             }
- 
+
             $schedule->semester = Setting::normalizeSemester($schedule->semester);
- 
-            $schoolYear = $schedule->school_year ?: $schedule->academic_year ?: $period['school_year'];
+
+            $schoolYear   = $schedule->school_year ?: $schedule->academic_year ?: $period['school_year'];
             $academicYear = $schedule->academic_year ?: $schoolYear;
- 
+
             if ($schedule->isDirty('academic_year') && ! $schedule->isDirty('school_year')) {
                 $schoolYear = $academicYear;
             }
- 
+
             if ($schedule->isDirty('school_year') && ! $schedule->isDirty('academic_year')) {
                 $academicYear = $schoolYear;
             }
- 
+
             if ($schoolYear !== $academicYear) {
                 $academicYear = $schoolYear;
             }
- 
-            $schedule->school_year = $schoolYear;
+
+            $schedule->school_year   = $schoolYear;
             $schedule->academic_year = $academicYear;
- 
+
             if (blank($schedule->academic_year)) {
                 $schedule->academic_year = $period['school_year'];
             }
- 
+
             if (blank($schedule->workspace_key)) {
                 $schedule->workspace_key = $period['workspace_key'];
             }
         });
     }
+
     // ============================================================
     // RELATIONSHIPS
     // ============================================================
 
-    /**
-     * A schedule belongs to a subject
-     */
     public function subject(): BelongsTo
     {
         return $this->belongsTo(Subject::class);
     }
 
-    /**
-     * A schedule belongs to a room
-     */
     public function room(): BelongsTo
     {
         return $this->belongsTo(Room::class);
     }
 
-    /**
-     * A schedule may be assigned to a faculty member after room/time scheduling.
-     */
     public function faculty(): BelongsTo
     {
         return $this->belongsTo(Faculty::class);
     }
 
-    /**
-     * A schedule belongs to a user (instructor/admin)
-     */
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
@@ -167,50 +164,32 @@ class Schedule extends Model
     // SCOPES - Filtering & Querying
     // ============================================================
 
-    /**
-     * Filter schedules by room
-     */
     public function scopeForRoom($query, $roomId)
     {
         return $query->where('room_id', $roomId);
     }
 
-    /**
-     * Filter schedules by subject
-     */
     public function scopeForSubject($query, $subjectId)
     {
         return $query->where('subject_id', $subjectId);
     }
 
-    /**
-     * Filter schedules by day
-     */
     public function scopeForDay($query, $day)
     {
         return $query->where('day', $day);
     }
 
-    /**
-     * Filter schedules for a specific user/instructor
-     */
     public function scopeForUser($query, $userId)
     {
         return $query->where('user_id', $userId);
     }
 
-    /**
-     * Get schedules within a time range
-     */
     public function scopeWithinTimeRange($query, $startTime, $endTime)
     {
         return $query->where('start_time', '<', $endTime)
             ->where('end_time', '>', $startTime);
     }
 
-    /**
-     * Get schedules for a specific section
-     */
     public function scopeForSection($query, $section)
     {
         return $query->where('section', $section);
@@ -247,33 +226,36 @@ class Schedule extends Model
     }
 
     /**
-     * Get all schedules that are unscheduled (no spacetime assigned yet)
-     * but have faculty assigned
+     * Schedules imported during semester retrieval that need manual review.
+     * Use in Faculty Loading and Block Schedule to surface flagged records.
+     *
+     *   Schedule::activeTerm($sem, $year)->needsReview()->get();
      */
+    public function scopeNeedsReview($query)
+    {
+        return $query->where('status', self::STATUS_NEEDS_REVIEW);
+    }
+
     public function scopeUnscheduled($query)
     {
         return $query->whereNull('day')
-                    ->whereNull('start_time')
-                    ->whereNull('end_time')
-                    ->whereNull('room_id')
-                    ->whereNotNull('faculty_id');
+            ->whereNull('start_time')
+            ->whereNull('end_time')
+            ->whereNull('room_id')
+            ->whereNotNull('faculty_id');
     }
 
-    /**
-     * Get all schedules awaiting faculty assignment
-     * (either completely unassigned or unscheduled)
-     */
     public function scopeAwaitingFaculty($query)
     {
         return $query->where(function ($q) {
             $q->whereNull('faculty_id')
-            ->orWhere(function ($inner) {
-                $inner->whereNull('day')
+                ->orWhere(function ($inner) {
+                    $inner->whereNull('day')
                         ->whereNull('start_time')
                         ->whereNull('end_time')
                         ->whereNull('room_id')
                         ->whereNotNull('faculty_id');
-            });
+                });
         });
     }
 
@@ -289,151 +271,30 @@ class Schedule extends Model
         return $query->forWorkspace($semester, $schoolYear);
     }
 
-    public function scopeForWorkspace($query, ?string $semester = null, ?string $schoolYear = null)
+    /**
+     * Alias for forTerm() used throughout the codebase.
+     * Keeps non-archived records scoped to the active workspace.
+     */
+    public function scopeActiveTerm($query, ?string $semester = null, ?string $schoolYear = null)
     {
-        $period = Setting::getAcademicPeriod();
-        $semester ??= $period['semester'];
-        $schoolYear ??= $period['school_year'];
-        $semester = Setting::normalizeSemester($semester);
-        $workspaceKey = Setting::workspaceKey($schoolYear, $semester);
+        if ($semester && $schoolYear) {
+            return $query->forWorkspace($semester, $schoolYear)
+                ->where('is_archived', false);
+        }
 
-        return $query->where('semester', $semester)
-            ->where(function ($query) use ($schoolYear, $workspaceKey) {
-                $query->where('workspace_key', $workspaceKey)
-                    ->orWhere('school_year', $schoolYear)
-                    ->orWhere('academic_year', $schoolYear);
-            });
-    }
-
-    public function scopeActiveWorkspace($query)
-    {
         $period = Setting::getAcademicPeriod();
 
-        return $query->activeTerm($period['semester'], $period['school_year']);
-    }
-
-    public function isPreAssignmentPlaceholder(): bool
-    {
-        return $this->faculty_id !== null
-            && (is_null($this->day) 
-                || is_null($this->start_time) 
-                || is_null($this->end_time) 
-                || is_null($this->room_id));
-    }
- 
-    /**
-     * Check if this schedule has been fully scheduled with spacetime
-     * 
-     * A fully scheduled record has ALL of these fields populated:
-     * - day (Monday, Tuesday, etc)
-     * - start_time (HH:MM:SS)
-     * - end_time (HH:MM:SS)
-     * - room_id (room assignment)
-     */
-    public function isFullyScheduled(): bool
-    {
-        return !is_null($this->day)
-            && !is_null($this->start_time)
-            && !is_null($this->end_time)
-            && !is_null($this->room_id);
-    }
- 
-    /**
-     * Get readable status for UI display
-     * 
-     * Priority:
-     * 1. If pre-assignment placeholder → "No Schedule"
-     * 2. Otherwise use the status field
-     */
-    public function getStatusDisplay(): string
-    {
-        if ($this->isPreAssignmentPlaceholder()) {
-            return 'No Schedule';
-        }
-        
-        return match($this->status) {
-            self::STATUS_DRAFT => 'Draft',
-            self::STATUS_PARTIAL => 'Partial',
-            self::STATUS_FACULTY_ASSIGNED => 'Faculty Assigned',
-            self::STATUS_FACULTY_LOCKED => 'Faculty Locked',
-            self::STATUS_PENDING_GENERATION => 'Pending Generation',
-            self::STATUS_FINALIZED => 'Finalized',
-            default => ucfirst($this->status ?? 'Draft'),
-        };
-    }
- 
-    /**
-     * Get faculty name or "Unassigned" if not available
-     */
-    public function getFacultyName(): string
-    {
-        return $this->faculty?->full_name ?? 'Unassigned';
-    }
- 
-    /**
-     * Get formatted time display for UI
-     * Returns "No Schedule" if pre-assignment placeholder
-     */
-    public function getTimeDisplay(): string
-    {
-        if ($this->isPreAssignmentPlaceholder()) {
-            return 'No Schedule';
-        }
- 
-        if (!$this->start_time || !$this->end_time) {
-            return 'TBD';
-        }
- 
-        return $this->start_time->format('h:i A') . ' - ' . $this->end_time->format('h:i A');
-    }
- 
-    /**
-     * Get formatted day display for UI
-     * Returns "Unscheduled" if pre-assignment placeholder
-     */
-    public function getDayDisplay(): string
-    {
-        if ($this->isPreAssignmentPlaceholder()) {
-            return 'Unscheduled';
-        }
- 
-        return $this->day ?? 'TBD';
-    }
- 
-    /**
-     * Get room name or "TBD" if not assigned
-     */
-    public function getRoomDisplay(): string
-    {
-        if ($this->isPreAssignmentPlaceholder()) {
-            return 'TBD';
-        }
- 
-        return $this->room?->room_name ?? 'TBD';
-    }
-
-    public function scopeActiveTerm($query, $semester = null, $schoolYear = null)
-    {
-        $period = Setting::getAcademicPeriod();
-        $semester = $semester ?? $period['semester'];
-        $schoolYear = $schoolYear ?? $period['school_year'];
- 
-        return $query
-            ->where('semester', $semester)
-            ->where('school_year', $schoolYear)
+        return $query->forWorkspace($period['semester'], $period['school_year'])
             ->where('is_archived', false);
     }
- 
-    public function scopeNotArchived($query)
-    {
-        return $query->where('is_archived', false);
-    }
 
-    public function scopeCurrentSemester($query)
+    public function scopeForWorkspace($query, string $semester, string $schoolYear)
     {
-        $period = Setting::getAcademicPeriod();
-
-        return $query->activeTerm($period['semester'], $period['school_year']);
+        return $query->where('semester', $semester)
+            ->where(function ($q) use ($schoolYear) {
+                $q->where('school_year', $schoolYear)
+                    ->orWhere('academic_year', $schoolYear);
+            });
     }
 
     public function scopeArchived($query)
@@ -441,27 +302,10 @@ class Schedule extends Model
         return $query->where('is_archived', true);
     }
 
-    public function scopeWithSubject($query)
-    {
-        return $query->with('subject');
-    }
- 
-    public function scopeWithRoom($query)
-    {
-        return $query->with('room');
-    }
- 
-    public function scopeWithFaculty($query)
-    {
-        return $query->with('faculty');
-    }
- 
-    public function scopeWithUser($query)
-    {
-        return $query->with('user');
-    }
-
-    public function scopeArchivedWorkspace($query, ?string $semester = null, ?string $schoolYear = null)
+    /**
+     * Archived records for a specific batch and semester/year.
+     */
+    public function scopeArchivedTerm($query, string $semester, string $schoolYear)
     {
         return $query->forWorkspace($semester, $schoolYear)
             ->where('is_archived', true);
@@ -472,9 +316,6 @@ class Schedule extends Model
         return self::SECTION_TIME_PREFERENCES[strtoupper((string) $section)] ?? null;
     }
 
-    /**
-     * Filter schedules by department through subject relationship
-     */
     public function scopeByDepartment($query, $department)
     {
         return $query->where(function ($query) use ($department) {
@@ -485,9 +326,6 @@ class Schedule extends Model
         });
     }
 
-    /**
-     * Filter schedules by year level through subject relationship
-     */
     public function scopeByYearLevel($query, $yearLevel)
     {
         return $query->where(function ($query) use ($yearLevel) {
@@ -498,17 +336,11 @@ class Schedule extends Model
         });
     }
 
-    /**
-     * Get morning classes (before noon)
-     */
     public function scopeMorningClasses($query)
     {
         return $query->where('start_time', '<', '12:00:00');
     }
 
-    /**
-     * Get afternoon classes
-     */
     public function scopeAfternoonClasses($query)
     {
         return $query->where('start_time', '>=', '12:00:00');
@@ -518,9 +350,6 @@ class Schedule extends Model
     // ACCESSORS & ATTRIBUTES
     // ============================================================
 
-    /**
-     * Get duration in hours
-     */
     public function durationInHours(): Attribute
     {
         return Attribute::make(
@@ -528,9 +357,6 @@ class Schedule extends Model
         )->shouldCache();
     }
 
-    /**
-     * Get formatted time display (e.g., "07:00 AM - 08:00 AM")
-     */
     public function timeDisplay(): Attribute
     {
         return Attribute::make(
@@ -538,9 +364,6 @@ class Schedule extends Model
         )->shouldCache();
     }
 
-    /**
-     * Get full schedule display (e.g., "MON: 07:00 AM - 08:00 AM")
-     */
     public function fullDisplay(): Attribute
     {
         return Attribute::make(
@@ -552,14 +375,11 @@ class Schedule extends Model
     // VALIDATION & CONSTRAINT METHODS
     // ============================================================
 
-    /**
-     * Calculate duration in hours
-     */
     private function calculateDuration(): float
     {
         try {
             $start = Carbon::parse($this->start_time);
-            $end = Carbon::parse($this->end_time);
+            $end   = Carbon::parse($this->end_time);
 
             return round($start->diffInMinutes($end) / 60, 2);
         } catch (\Exception $e) {
@@ -567,16 +387,13 @@ class Schedule extends Model
         }
     }
 
-    /**
-     * Format time display
-     */
     private function formatTimeDisplay(): string
     {
         try {
             $start = Carbon::parse($this->start_time);
-            $end = Carbon::parse($this->end_time);
+            $end   = Carbon::parse($this->end_time);
 
-            return $start->format('h:i A').' - '.$end->format('h:i A');
+            return $start->format('h:i A') . ' - ' . $end->format('h:i A');
         } catch (\Exception $e) {
             return 'Invalid time';
         }
@@ -585,26 +402,26 @@ class Schedule extends Model
     // ============================================================
     // HELPER METHODS
     // ============================================================
- 
+
     public function getDurationMinutes(): int
     {
-        if (!$this->start_time || !$this->end_time) {
+        if (! $this->start_time || ! $this->end_time) {
             return 0;
         }
- 
+
         return $this->start_time->diffInMinutes($this->end_time);
     }
- 
+
     public function hasConflict(self $other): bool
     {
         if ($this->day !== $other->day) {
             return false;
         }
- 
+
         return $this->start_time < $other->end_time
             && $this->end_time > $other->start_time;
     }
- 
+
     public function markAsArchived(): void
     {
         $this->update([
@@ -613,9 +430,6 @@ class Schedule extends Model
         ]);
     }
 
-    /**
-     * Check if subject type is compatible with room type
-     */
     public function isCompatible(): bool
     {
         if (! $this->subject || ! $this->room) {
@@ -625,32 +439,23 @@ class Schedule extends Model
         return $this->room->isCompatibleWithSubject($this->subject);
     }
 
-    /**
-     * Check if scheduled time respects hard-coded lunch break (12:00-13:00)
-     */
     public function respectsLunchBreak(): bool
     {
-        $lunchStart = Carbon::parse('12:00');
-        $lunchEnd = Carbon::parse('13:00');
-
+        $lunchStart    = Carbon::parse('12:00');
+        $lunchEnd      = Carbon::parse('13:00');
         $scheduleStart = Carbon::parse($this->start_time);
-        $scheduleEnd = Carbon::parse($this->end_time);
+        $scheduleEnd   = Carbon::parse($this->end_time);
 
-        // Check if schedule overlaps with lunch break
         return ! ($scheduleStart < $lunchEnd && $scheduleEnd > $lunchStart);
     }
 
-    /**
-     * Check if scheduled time is within operational hours (master bounds)
-     */
     public function isWithinOperationalHours(): bool
     {
-        $bounds = Setting::getDayBounds();
-        $dayStart = Carbon::parse($bounds['start']);
-        $dayEnd = Carbon::parse($bounds['end']);
-
+        $bounds        = Setting::getDayBounds();
+        $dayStart      = Carbon::parse($bounds['start']);
+        $dayEnd        = Carbon::parse($bounds['end']);
         $scheduleStart = Carbon::parse($this->start_time);
-        $scheduleEnd = Carbon::parse($this->end_time);
+        $scheduleEnd   = Carbon::parse($this->end_time);
 
         return $scheduleStart >= $dayStart && $scheduleEnd <= $dayEnd;
     }
@@ -660,9 +465,6 @@ class Schedule extends Model
         return Setting::dayIsActive((string) $this->day);
     }
 
-    /**
-     * Validate schedule before saving
-     */
     public function isValid(): bool
     {
         return $this->isOnActiveScheduleDay()
@@ -671,9 +473,6 @@ class Schedule extends Model
             && $this->isCompatible();
     }
 
-    /**
-     * Get validation errors
-     */
     public function getValidationErrors(): array
     {
         $errors = [];
@@ -697,12 +496,22 @@ class Schedule extends Model
         return $errors;
     }
 
+    /**
+     * True when this schedule was flagged during retrieval and has stored reasons.
+     * Use in Block Schedule and Faculty Loading to highlight records needing attention.
+     */
+    public function hasValidationIssues(): bool
+    {
+        return $this->status === self::STATUS_NEEDS_REVIEW
+            && ! empty($this->validation_notes);
+    }
+
     public function respectsSectionSession(): bool
     {
-        $start = Carbon::parse($this->start_time);
-        $end = Carbon::parse($this->end_time);
+        $start      = Carbon::parse($this->start_time);
+        $end        = Carbon::parse($this->end_time);
         $lunchStart = Carbon::parse('12:00:00');
-        $lunchEnd = Carbon::parse('13:00:00');
+        $lunchEnd   = Carbon::parse('13:00:00');
 
         if (strtoupper((string) $this->section) === 'A') {
             return $start->lt($lunchStart) && $end->lte($lunchStart);
@@ -732,9 +541,6 @@ class Schedule extends Model
         return ! $query->exists();
     }
 
-    /**
-     * Get all conflicts for this schedule
-     */
     public function getConflicts()
     {
         return static::where('room_id', $this->room_id)
@@ -748,5 +554,97 @@ class Schedule extends Model
             ->get();
     }
 
+    // ============================================================
+    // PRE-ASSIGNMENT / PLACEHOLDER HELPERS
+    // (used by FacultyLoading and BlockSchedule UI)
+    // ============================================================
 
+    /**
+     * True when the schedule has a faculty assigned but no timeslot or room —
+     * i.e. a "pre-assignment placeholder" created before auto-scheduling runs.
+     *
+     * Mirrors the $isUnscheduled logic already used inside FacultyLoading:
+     *   day === null && start_time === null && end_time === null
+     *
+     * Note: room_id may also be null, but the three time fields are the
+     * authoritative signal because retrieved KEEP_FACULTY_ROOM rows can
+     * carry a room while still lacking a timeslot.
+     */
+    public function isPreAssignmentPlaceholder(): bool
+    {
+        return $this->faculty_id !== null
+            && $this->day === null
+            && $this->start_time === null
+            && $this->end_time === null;
+    }
+
+    /**
+     * True when day, start_time, end_time, AND room_id are all populated.
+     */
+    public function isFullyScheduled(): bool
+    {
+        return $this->day !== null
+            && $this->start_time !== null
+            && $this->end_time !== null
+            && $this->room_id !== null;
+    }
+
+    /**
+     * Display-safe faculty name for blade/array outputs.
+     */
+    public function getFacultyName(): string
+    {
+        return $this->faculty?->full_name ?? '—';
+    }
+
+    /**
+     * Display-safe day label; shows "TBA" for placeholder rows.
+     */
+    public function getDayDisplay(): string
+    {
+        return $this->day ? ucfirst((string) $this->day) : 'TBA';
+    }
+
+    /**
+     * Display-safe time range; shows "TBA" for placeholder rows.
+     */
+    public function getTimeDisplay(): string
+    {
+        if (! $this->start_time || ! $this->end_time) {
+            return 'TBA';
+        }
+
+        try {
+            return Carbon::parse($this->start_time)->format('h:i A')
+                . ' – '
+                . Carbon::parse($this->end_time)->format('h:i A');
+        } catch (\Exception) {
+            return 'TBA';
+        }
+    }
+
+    /**
+     * Display-safe room name; shows "TBA" for placeholder rows.
+     */
+    public function getRoomDisplay(): string
+    {
+        return $this->room?->room_name ?? 'TBA';
+    }
+
+    /**
+     * Human-readable status label for the UI.
+     */
+    public function getStatusDisplay(): string
+    {
+        return match ($this->status) {
+            self::STATUS_DRAFT              => 'Draft',
+            self::STATUS_PARTIAL            => 'Partial',
+            self::STATUS_FACULTY_ASSIGNED   => 'Faculty Assigned',
+            self::STATUS_FACULTY_LOCKED     => 'Pre-Assigned',
+            self::STATUS_PENDING_GENERATION => 'Pending Generation',
+            self::STATUS_FINALIZED          => 'Finalized',
+            self::STATUS_NEEDS_REVIEW       => 'Needs Review',
+            default                         => ucfirst((string) ($this->status ?? 'Unknown')),
+        };
+    }
 }

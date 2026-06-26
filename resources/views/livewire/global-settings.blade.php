@@ -676,7 +676,7 @@
                     </div>
                 @endif
 
-                <div class="mt-5" x-data>
+                <div class="mt-5">
                     <p class="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Retrieval Mode</p>
                     <div class="grid gap-3 sm:grid-cols-2">
 
@@ -779,8 +779,12 @@
                         type="button"
                         wire:click="proceedToRetrieveConfirmation"
                         @disabled(!$matchingArchive)
+                        wire:loading.attr="disabled"
                         class="flex-1 rounded-md px-4 py-3 text-xs font-black uppercase tracking-widest text-white transition {{ $matchingArchive ? 'bg-emerald-600 hover:bg-emerald-700' : 'cursor-not-allowed bg-slate-400' }}">
-                        Review & Proceed
+                        <span wire:loading.remove wire:target="proceedToRetrieveConfirmation">
+                            {{ $retrieveMode === 'clone_timetable' ? 'Check Compatibility & Proceed' : 'Review & Proceed' }}
+                        </span>
+                        <span wire:loading wire:target="proceedToRetrieveConfirmation">Checking…</span>
                     </button>
                     <button
                         type="button"
@@ -790,6 +794,155 @@
                     </button>
                 </div>
                 @endif {{-- end @else alreadyRetrievedCurrentTerm --}}
+            </div>
+        </div>
+    @endif
+
+    {{-- ══════════════════════════════════════════════════════════════════════
+         STEP 2 — Compatibility Report (COMPLETE_CLONE only)
+    ══════════════════════════════════════════════════════════════════════════ --}}
+    @if($showCompatibilityStep && $compatibilityReport)
+        <div class="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70 px-4">
+            <div class="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-lg border border-amber-200 bg-white p-6 shadow-2xl dark:border-amber-900 dark:bg-slate-900">
+
+                <h3 class="text-lg font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">
+                    ⚠️ Compatibility Report
+                </h3>
+                <p class="mt-2 text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    Differences were found between the archived semester and the current configuration.
+                    Choose how to proceed before cloning the timetable.
+                </p>
+
+                {{-- Config Differences --}}
+                @if(!empty($compatibilityReport['config_differences']))
+                    <div class="mt-4">
+                        <p class="mb-2 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Configuration Differences</p>
+                        <table class="w-full text-xs">
+                            <thead>
+                                <tr class="border-b border-slate-200 dark:border-slate-700">
+                                    <th class="pb-1 text-left font-black text-slate-600 dark:text-slate-300">Field</th>
+                                    <th class="pb-1 text-left font-black text-slate-600 dark:text-slate-300">Archived</th>
+                                    <th class="pb-1 text-left font-black text-slate-600 dark:text-slate-300">Current</th>
+                                    <th class="pb-1 text-left font-black text-slate-600 dark:text-slate-300">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach($compatibilityReport['config_differences'] as $diff)
+                                    <tr class="border-b border-slate-100 dark:border-slate-800">
+                                        <td class="py-1.5 font-semibold text-slate-700 dark:text-slate-200">{{ $diff['label'] }}</td>
+                                        <td class="py-1.5 text-slate-600 dark:text-slate-300">{{ $diff['archived'] }}</td>
+                                        <td class="py-1.5 text-slate-600 dark:text-slate-300">{{ $diff['current'] }}</td>
+                                        <td class="py-1.5">
+                                            <span class="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-bold text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                                                {{ $diff['status'] }}
+                                            </span>
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                @endif
+
+                {{-- Inactive Days --}}
+                @if(!empty($compatibilityReport['inactive_days']))
+                    <div class="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+                        <p class="text-[10px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">Days Now Inactive</p>
+                        <p class="mt-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
+                            {{ collect($compatibilityReport['inactive_days'])->map('ucfirst')->implode(', ') }}
+                            — schedules on {{ count($compatibilityReport['inactive_days']) === 1 ? 'this day' : 'these days' }}
+                            will be flagged as <strong>Needs Review</strong>.
+                        </p>
+                    </div>
+                @endif
+
+                {{-- Missing Faculty --}}
+                @if(!empty($compatibilityReport['missing_faculty_ids']))
+                    <div class="mt-4 rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950/30">
+                        <p class="text-[10px] font-black uppercase tracking-widest text-red-700 dark:text-red-300">Missing or Inactive Faculty</p>
+                        <p class="mt-1 text-xs font-semibold text-red-800 dark:text-red-200">
+                            {{ count($compatibilityReport['missing_faculty_ids']) }} faculty member(s) from the archive no longer exist or are inactive.
+                            Their assignments will be cleared on import.
+                        </p>
+                    </div>
+                @endif
+
+                {{-- Missing Rooms --}}
+                @if(!empty($compatibilityReport['missing_room_ids']))
+                    <div class="mt-4 rounded-md border border-red-200 bg-red-50 p-3 dark:border-red-900 dark:bg-red-950/30">
+                        <p class="text-[10px] font-black uppercase tracking-widest text-red-700 dark:text-red-300">Missing Rooms</p>
+                        <p class="mt-1 text-xs font-semibold text-red-800 dark:text-red-200">
+                            {{ count($compatibilityReport['missing_room_ids']) }} room(s) from the archive no longer exist.
+                            Affected schedules will be flagged as <strong>Needs Review</strong>.
+                        </p>
+                    </div>
+                @endif
+
+                {{-- Out-of-bounds schedules --}}
+                @if(!empty($compatibilityReport['out_of_bounds']))
+                    <div class="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+                        <p class="text-[10px] font-black uppercase tracking-widest text-amber-700 dark:text-amber-300">Schedules Outside Configured Hours</p>
+                        <p class="mt-1 text-xs font-semibold text-amber-800 dark:text-amber-200">
+                            {{ count($compatibilityReport['out_of_bounds']) }} schedule(s) fall outside the current semester's time window.
+                        </p>
+                    </div>
+                @endif
+
+                {{-- Resolution options --}}
+                <div class="mt-5">
+                    <p class="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">How would you like to proceed?</p>
+                    <div class="flex flex-col gap-3">
+
+                        {{-- Option A: Use Archived Configuration --}}
+                        <label class="flex cursor-pointer items-start gap-3 rounded-xl border-2 p-4 transition
+                            {{ $compatibilityResolution === 'use_archived'
+                                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30'
+                                : 'border-slate-200 hover:border-slate-300 dark:border-slate-700 dark:hover:border-slate-600' }}">
+                            <input type="radio" wire:model.live="compatibilityResolution" value="use_archived" class="mt-0.5">
+                            <div>
+                                <p class="text-xs font-black uppercase tracking-wide text-slate-800 dark:text-slate-100">Use Archived Configuration</p>
+                                <p class="mt-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                                    Automatically update the current semester's start time, end time, and active days
+                                    to match the archived semester before cloning. The timetable will import cleanly.
+                                </p>
+                            </div>
+                        </label>
+
+                        {{-- Option B: Keep Current Configuration --}}
+                        <label class="flex cursor-pointer items-start gap-3 rounded-xl border-2 p-4 transition
+                            {{ $compatibilityResolution === 'keep_current'
+                                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-950/30'
+                                : 'border-slate-200 hover:border-slate-300 dark:border-slate-700 dark:hover:border-slate-600' }}">
+                            <input type="radio" wire:model.live="compatibilityResolution" value="keep_current" class="mt-0.5">
+                            <div>
+                                <p class="text-xs font-black uppercase tracking-wide text-slate-800 dark:text-slate-100">Keep Current Configuration</p>
+                                <p class="mt-1 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                                    Clone the timetable as-is. Schedules that conflict with the current configuration
+                                    will be imported and flagged as
+                                    <strong class="text-amber-700 dark:text-amber-300">Needs Review</strong>
+                                    — they will not be deleted or moved automatically.
+                                </p>
+                            </div>
+                        </label>
+
+                    </div>
+                </div>
+
+                <div class="mt-6 flex flex-col gap-3 sm:flex-row">
+                    <button type="button"
+                        wire:click="resolveCompatibility('{{ $compatibilityResolution }}')"
+                        wire:loading.attr="disabled"
+                        class="flex-1 rounded-md bg-emerald-600 px-4 py-3 text-xs font-black uppercase tracking-widest text-white transition hover:bg-emerald-700">
+                        <span wire:loading.remove wire:target="resolveCompatibility">Continue with This Choice</span>
+                        <span wire:loading wire:target="resolveCompatibility">Processing…</span>
+                    </button>
+                    <button type="button"
+                        wire:click="resolveCompatibility('cancel')"
+                        class="flex-1 rounded-md bg-slate-200 px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+                        Cancel Retrieval
+                    </button>
+                </div>
+
             </div>
         </div>
     @endif
@@ -835,6 +988,12 @@
                                     echo $modeLabels[$retrieveMode] ?? str_replace('_', ' ', ucwords($retrieveMode, '_'));
                                 @endphp
                             </p>
+                            @if($retrieveMode === 'clone_timetable')
+                                <p class="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                                    Conflict resolution:
+                                    {{ $compatibilityResolution === 'use_archived' ? 'Apply archived config' : 'Keep current config (flag conflicts)' }}
+                                </p>
+                            @endif
                         </div>
                     </div>
                 @endif
