@@ -709,6 +709,44 @@ class ManageSubjects extends Component
             ]
         );
 
+        // ── Practicum auto-finalize ────────────────────────────────────────────
+        // Practicum / OJT subjects need no room, time, or faculty. As soon as one
+        // is created (or re-saved as practicum), create a STATUS_FINALIZED placeholder
+        // schedule row so it appears immediately in the block schedule with the
+        // correct "Auto-Finalized" status instead of "NOT SCHEDULED".
+        if ($subject->is_practicum) {
+            $existingSchedule = \App\Models\Schedule::activeTerm($period['semester'], $period['school_year'])
+                ->where('subject_id', $subject->id)
+                ->first();
+
+            if (! $existingSchedule) {
+                \App\Models\Schedule::create([
+                    'subject_id'    => $subject->id,
+                    'section'       => $subject->section,
+                    'day'           => null,
+                    'start_time'    => null,
+                    'end_time'      => null,
+                    'room_id'       => null,
+                    'faculty_id'    => null,
+                    'status'        => \App\Models\Schedule::STATUS_FINALIZED,
+                    'semester'      => $period['semester'],
+                    'school_year'   => $period['school_year'],
+                    'academic_year' => $period['school_year'],
+                    'workspace_key' => $period['workspace_key'],
+                    'edp_code'      => $subject->edp_code,
+                ]);
+            } elseif ($existingSchedule->status !== \App\Models\Schedule::STATUS_FINALIZED) {
+                // Subject was previously a regular subject and is being converted to practicum.
+                $existingSchedule->update([
+                    'status'     => \App\Models\Schedule::STATUS_FINALIZED,
+                    'day'        => null,
+                    'start_time' => null,
+                    'end_time'   => null,
+                    'room_id'    => null,
+                ]);
+            }
+        }
+
         $this->logActivityAndNotify($subject, $user, $deptUpper);
         $this->showDuplicateConfirmModal = false;
         $this->showModal = false;

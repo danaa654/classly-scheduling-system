@@ -3,6 +3,7 @@
 namespace App\Livewire;
 
 use App\Models\Room;
+use App\Models\Schedule;
 use App\Models\Subject;  
 use App\Models\User;
 use Livewire\Component;
@@ -941,17 +942,56 @@ class ManageRooms extends Component
                 }
             });
  
-        return view('livewire.manage-rooms', [
-            // Eager-load preferred-assigned subjects (active term only) so the
-            // utilisation indicator in the Blade template never fires N+1 queries.
-            // Practicum / OJT subjects are excluded — they have no room relevance.
-            'rooms' => $query
-                ->orderBy('room_name', 'asc')
-                ->with(['subjects' => fn ($q) => $q->activeTerm()->where(function ($inner) {
+        // ── Paginate rooms with preferred-assigned subjects (via preferred_room_id) ──
+        $paginatedRooms = $query
+            ->orderBy('room_name', 'asc')
+            ->with(['subjects' => fn ($q) => $q
+                // Subjects directly assigned to this room via ManageRooms "Manage Subjects" modal.
+                // activeTerm() ensures we only show the current semester's subjects.
+                ->activeTerm()
+                ->where(function ($inner) {
                     $inner->where('is_practicum', false)->orWhereNull('is_practicum');
                 })])
-                ->paginate(10),
-            'maxWeeklyHours' => self::MAX_WEEKLY_ROOM_HOURS,
+            ->paginate(10);
+
+        // ── Also load subjects that have an active Schedule record with room_id on this page ──
+        //
+        // After a "Subject+Faculty+Room" retrieve from settings, Schedule.room_id is set
+        // but Subject.preferred_room_id may still be null.  We need to surface those
+        // subjects in the accordion too so the room card is never misleadingly empty.
+        //
+        // One bulk query for ALL rooms on the current page — zero N+1.
+        $pageRoomIds = $paginatedRooms->pluck('id')->all();
+
+        $scheduledSubjectsByRoom = collect();
+
+        if (! empty($pageRoomIds)) {
+            $scheduledSubjectsByRoom = Schedule::activeTerm()
+                ->whereIn('room_id', $pageRoomIds)
+                ->whereNotNull('room_id')
+                ->whereNotNull('subject_id')
+                ->with(['subject' => fn ($q) => $q
+                    ->activeTerm()
+                    ->where(function ($inner) {
+                        $inner->where('is_practicum', false)->orWhereNull('is_practicum');
+                    })])
+                ->get()
+                ->groupBy('room_id')
+                ->map(fn ($schedules) => $schedules
+                    ->pluck('subject')
+                    ->filter()               // drop nulls (orphaned schedule rows)
+                    ->unique('id')           // one entry per subject even if multi-day
+                    ->values()
+                );
+        }
+
+        return view('livewire.manage-rooms', [
+            'rooms'                    => $paginatedRooms,
+            // Keyed by room_id → Collection of Subject models from Schedule records.
+            // The blade merges this with $room->subjects (preferred_room_id) to show
+            // the full picture regardless of how the room assignment was made.
+            'scheduledSubjectsByRoom'  => $scheduledSubjectsByRoom,
+            'maxWeeklyHours'           => self::MAX_WEEKLY_ROOM_HOURS,
         ]);
     }
 }

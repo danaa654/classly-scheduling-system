@@ -511,7 +511,7 @@
 <div class="grid grid-cols-12 gap-4 p-5 pt-4">
 
     {{-- ─── LEFT COL: Department Progress ──────────── --}}
-    <div class="col-span-12 lg:col-span-5 flex flex-col gap-4">
+    <div class="col-span-12 lg:col-span-5 flex flex-col gap-4 min-h-0">
 
         {{-- Dept Progress Tracker --}}
         <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none">
@@ -618,7 +618,7 @@
                     'info'     => 'text-cyan-600 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-500/10',
                 ];
             @endphp
-            <div class="panel-scroll overflow-y-auto flex-1 min-h-0 pr-1">
+            <div class="panel-scroll overflow-y-auto max-h-[260px] pr-1">
                 @forelse($recentActivities as $i => $a)
                 @php $ac = $auditColors[$a['severity'] ?? 'info']; @endphp
                 <div class="fade-row border-b border-slate-100 dark:border-white/[0.04] last:border-0 py-3"
@@ -643,7 +643,7 @@
     </div>
 
     {{-- ─── CENTER COL: Approval Queue + System Status ──── --}}
-    <div class="col-span-12 lg:col-span-5 flex flex-col gap-4">
+    <div class="col-span-12 lg:col-span-5 flex flex-col gap-4 min-h-0">
 
         {{-- Approval Queue Table --}}
         <div class="bg-white dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 rounded-2xl p-5 shadow-sm dark:shadow-none flex-1 flex flex-col min-h-0">
@@ -659,7 +659,7 @@
                 </div>
                 <span class="text-[12px] text-slate-400 uppercase tracking-widest">Faculty-Assigned Schedules</span>
             </div>
-            <div class="panel-scroll overflow-y-auto flex-1 min-h-0 pr-1">
+            <div class="panel-scroll overflow-y-auto max-h-[240px] pr-1">
                 @forelse($approvalQueue as $i => $q)
                 <div class="fade-row border-b border-slate-100 dark:border-white/[0.04] last:border-0 py-3.5"
                      style="animation-delay:{{ $i * 40 }}ms">
@@ -739,7 +739,7 @@
     </div>
 
     {{-- ─── RIGHT COL: Alerts + Activity Feed ──────── --}}
-    <div class="col-span-12 lg:col-span-2 flex flex-col gap-4">
+    <div class="col-span-12 lg:col-span-2 flex flex-col gap-4 min-h-0">
 
         {{-- Critical Alerts --}}
         @if(count($conflictAlerts) > 0)
@@ -787,7 +787,7 @@
                     'info'     => 'text-cyan-600 dark:text-cyan-400 bg-cyan-100 dark:bg-cyan-500/10 border-cyan-200 dark:border-cyan-500/20',
                 ];
             @endphp
-            <div class="panel-scroll overflow-y-auto max-h-[380px] pr-1 space-y-3">
+            <div class="panel-scroll overflow-y-auto max-h-[280px] pr-1 space-y-3">
                 @forelse($recentActivities as $activity)
                 @php $sc = $sColor[$activity['severity'] ?? 'info']; @endphp
                 <div class="flex gap-2.5 group">

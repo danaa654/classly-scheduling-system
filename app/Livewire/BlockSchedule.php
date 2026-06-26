@@ -259,10 +259,24 @@ class BlockSchedule extends Component
         // ── 1. Bulk-load subjects and schedule rows once — no N+1 ──────────
         $allSubjects = Subject::activeTerm($this->semester, $this->schoolYear)->get();
 
-        // Only rows that are actually placed (have a day + start_time)
-        $scheduledRows = Schedule::activeTerm($this->semester, $this->schoolYear)
-            ->whereNotNull('day')
-            ->whereNotNull('start_time')
+        // Only rows that are actually placed (have a day + start_time) OR are practicum
+        // placeholder rows (finalized with no day/time — off-campus by design).
+        $termSemester   = $this->semester;
+        $termSchoolYear = $this->schoolYear;
+        $scheduledRows = Schedule::activeTerm($termSemester, $termSchoolYear)
+            ->where(function ($q) use ($termSemester, $termSchoolYear) {
+                // Regular scheduled rows (have a day and time)
+                $q->where(function ($inner) {
+                    $inner->whereNotNull('day')->whereNotNull('start_time');
+                })
+                // OR practicum placeholder rows (finalized, no day/time)
+                ->orWhere(function ($inner) use ($termSemester, $termSchoolYear) {
+                    $inner->where('status', Schedule::STATUS_FINALIZED)
+                          ->whereNull('day')
+                          ->whereHas('subject', fn ($sq) => $sq->where('is_practicum', true)
+                              ->forWorkspace($termSemester, $termSchoolYear));
+                });
+            })
             ->get(['subject_id', 'status', 'updated_at']);
 
         // subject_id → max(updated_at) for "last activity" display
@@ -1177,6 +1191,63 @@ class BlockSchedule extends Component
 
     private function currentBlockSchedules(): Collection
     {
+        // ── Auto-provision finalized placeholders for practicum subjects ───────
+        // Practicum / OJT subjects never get a room, time, or faculty assignment.
+        // Their schedule record is created as STATUS_FINALIZED the moment the
+        // subject is saved (ManageSubjects::executeSave). However, subjects that
+        // were created BEFORE this logic was introduced have no schedule record
+        // at all. We detect those here and insert the placeholder on-the-fly so
+        // they appear immediately in the block schedule as "Finalized" without
+        // requiring a manual re-save or a finalize click.
+        $practicumSubjects = Subject::activeTerm($this->semester, $this->schoolYear)
+            ->where('is_practicum', true)
+            ->where('section', $this->selectedSection)
+            ->where('year_level', (int) $this->selectedYear)
+            ->where(function ($q) {
+                $q->where('department', $this->selectedDepartment)
+                  ->orWhere('major', $this->selectedDepartment);
+            })
+            ->get();
+
+        if ($practicumSubjects->isNotEmpty()) {
+            $workspaceKey = \App\Models\Setting::workspaceKey($this->schoolYear, $this->semester);
+
+            foreach ($practicumSubjects as $practicum) {
+                $existing = Schedule::activeTerm($this->semester, $this->schoolYear)
+                    ->where('subject_id', $practicum->id)
+                    ->first();
+
+                if (! $existing) {
+                    // No record at all — create a finalized placeholder.
+                    Schedule::create([
+                        'subject_id'    => $practicum->id,
+                        'section'       => $practicum->section ?? $this->selectedSection,
+                        'day'           => null,
+                        'start_time'    => null,
+                        'end_time'      => null,
+                        'room_id'       => null,
+                        'faculty_id'    => null,
+                        'status'        => Schedule::STATUS_FINALIZED,
+                        'semester'      => $this->semester,
+                        'school_year'   => $this->schoolYear,
+                        'academic_year' => $this->schoolYear,
+                        'workspace_key' => $workspaceKey,
+                        'edp_code'      => $practicum->edp_code,
+                    ]);
+                } elseif ($existing->status !== Schedule::STATUS_FINALIZED) {
+                    // Record exists but isn't finalized yet — promote it now.
+                    $existing->update([
+                        'status'     => Schedule::STATUS_FINALIZED,
+                        'day'        => null,
+                        'start_time' => null,
+                        'end_time'   => null,
+                        'room_id'    => null,
+                    ]);
+                }
+            }
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         return Schedule::activeTerm($this->semester, $this->schoolYear)
             ->whereIn('status', [
                 Schedule::STATUS_PARTIAL,
@@ -1767,6 +1838,53 @@ class BlockSchedule extends Component
                 'status' => Schedule::STATUS_FINALIZED,
             ]);
 
+            // ── Auto-finalize Practicum / OJT subjects ────────────────────────
+            // These subjects are off-campus and never receive a room, time, or
+            // faculty assignment. We upsert a placeholder schedule row for each
+            // one that doesn't already have a record, immediately marking it
+            // STATUS_FINALIZED so it appears correctly in the block schedule.
+            $practicumSubjects = Subject::activeTerm($this->semester, $this->schoolYear)
+                ->where('is_practicum', true)
+                ->where('section', $this->selectedSection)
+                ->where('year_level', (int) $this->selectedYear)
+                ->where(function ($q) {
+                    $q->where('department', $this->selectedDepartment)
+                      ->orWhere('major', $this->selectedDepartment);
+                })
+                ->get();
+
+            $workspaceKey = \App\Models\Setting::workspaceKey($this->schoolYear, $this->semester);
+
+            foreach ($practicumSubjects as $practicum) {
+                $alreadyExists = Schedule::activeTerm($this->semester, $this->schoolYear)
+                    ->where('subject_id', $practicum->id)
+                    ->exists();
+
+                if (! $alreadyExists) {
+                    Schedule::create([
+                        'subject_id'   => $practicum->id,
+                        'section'      => $practicum->section ?? $this->selectedSection,
+                        'day'          => null,
+                        'start_time'   => null,
+                        'end_time'     => null,
+                        'room_id'      => null,
+                        'faculty_id'   => null,
+                        'status'       => Schedule::STATUS_FINALIZED,
+                        'semester'     => $this->semester,
+                        'school_year'  => $this->schoolYear,
+                        'academic_year'=> $this->schoolYear,
+                        'workspace_key'=> $workspaceKey,
+                        'edp_code'     => $practicum->edp_code,
+                    ]);
+                } else {
+                    // If a record exists but isn't finalized yet, finalize it now.
+                    Schedule::activeTerm($this->semester, $this->schoolYear)
+                        ->where('subject_id', $practicum->id)
+                        ->where('status', '!=', Schedule::STATUS_FINALIZED)
+                        ->update(['status' => Schedule::STATUS_FINALIZED]);
+                }
+            }
+
             PermissionLog::record(
                 action: PermissionLog::ACTION_FINALIZED,
                 performer: $user,
@@ -1808,7 +1926,7 @@ class BlockSchedule extends Component
                        ->orWhere('major', $this->selectedDepartment);
                 })->where('year_level', (int) $this->selectedYear);
             })
-            ->with(['subject:id,subject_code,units', 'faculty:id,full_name', 'room:id,room_name'])
+            ->with(['subject:id,subject_code,units,is_practicum', 'faculty:id,full_name', 'room:id,room_name'])
             ->get();
 
         if ($schedules->isEmpty()) {
@@ -1824,6 +1942,11 @@ class BlockSchedule extends Component
                 $q->where('department', $this->selectedDepartment)
                     ->orWhere('major', $this->selectedDepartment);
             })
+            // Practicum / OJT subjects have no room or time by design; they are
+            // auto-finalized separately and must not block the preflight check.
+            ->where(function ($q) {
+                $q->where('is_practicum', false)->orWhereNull('is_practicum');
+            })
             ->when($scheduledSubjectIds->isNotEmpty(), fn ($q) => $q->whereNotIn('id', $scheduledSubjectIds))
             ->get(['id', 'subject_code']);
 
@@ -1831,7 +1954,9 @@ class BlockSchedule extends Component
             $errors[] = "Not scheduled: {$subject->subject_code} has no room, time, or faculty assignment.";
         }
 
-        $unassigned = $schedules->whereNull('faculty_id');
+        // Practicum rows are finalized with no faculty — skip them in the missing-faculty check.
+        $unassigned = $schedules->whereNull('faculty_id')
+            ->filter(fn ($slot) => ! (bool) ($slot->subject?->is_practicum ?? false));
         foreach ($unassigned as $slot) {
             $errors[] = "Missing faculty: {$slot->subject?->subject_code} "
                 . "on {$slot->day} has no assigned faculty.";
@@ -2222,8 +2347,31 @@ class BlockSchedule extends Component
         $filteredSchedules = $this->currentBlockSchedules();
         $dayOrder = Setting::getActiveDays();
 
+        // Practicum placeholder rows have day = null and must never be filtered
+        // out by the whereIn('day') check below. Separate them first and build
+        // their own finalized row objects after the regular groupBy.
+        $practicumSchedules = $filteredSchedules->filter(
+            fn (Schedule $s) => (bool) ($s->subject?->is_practicum ?? false)
+        );
+
+        // "Retrieved-but-untimed" schedules: partial/faculty_assigned status, day = null,
+        // NOT practicum. These are subjects retrieved with "Subject+Faculty+Room" mode —
+        // they have faculty + room assigned but no time slot yet.
+        // They must NOT pass the whereIn('day') filter and must NOT block subjects from
+        // appearing in the "NOT SCHEDULED" section. We build their own rows below.
+        $retrievedNoTimeSchedules = $filteredSchedules->filter(
+            fn (Schedule $s) => ! (bool) ($s->subject?->is_practicum ?? false)
+                && is_null($s->day)
+                && in_array($s->status, [Schedule::STATUS_PARTIAL, Schedule::STATUS_FACULTY_ASSIGNED], true)
+        );
+
+        $regularSchedules = $filteredSchedules->filter(
+            fn (Schedule $s) => ! (bool) ($s->subject?->is_practicum ?? false)
+                && ! is_null($s->day)
+        );
+
         // UPDATED: Always detect conflicts, even in edit mode
-        $scheduleRows = $filteredSchedules
+        $scheduleRows = $regularSchedules
             ->whereIn('day', $dayOrder)
             ->groupBy(fn (Schedule $schedule) => $this->blockScheduleGroupKey($schedule))
             ->map(function ($group, $pairingKey) use ($dayOrder) {
@@ -2316,7 +2464,87 @@ class BlockSchedule extends Component
             })
             ->values();
 
-        $scheduledSubjectIds = $filteredSchedules->pluck('subject_id')->filter()->unique()->values();
+        // ── Practicum / OJT rows ──────────────────────────────────────────────
+        // These have day = null and never pass the whereIn('day') filter above,
+        // so we build their row objects directly from the placeholder schedule
+        // records and append them to $scheduleRows before the unscheduled concat.
+        $practicumRows = $practicumSchedules
+            ->unique('subject_id')                      // one row per subject
+            ->map(function (Schedule $schedule) {
+                $pairingKey = 'practicum-subject-' . $schedule->subject_id;
+                $editKey    = $this->workspaceEditKey($pairingKey);
+
+                return (object) [
+                    'pairing_key'     => $pairingKey,
+                    'edit_key'        => $editKey,
+                    'ids'             => [$schedule->id],
+                    'subject'         => $schedule->subject,
+                    'room'            => null,
+                    'faculty'         => null,
+                    'status'          => Schedule::STATUS_FINALIZED,
+                    'start_time'      => null,
+                    'end_time'        => null,
+                    'days'            => [],
+                    'day_display'     => '—',
+                    'sort_day'        => null,
+                    'has_conflict'    => false,
+                    'conflict_reason' => '',
+                    'conflict_type'   => '',
+                ];
+            })
+            ->values();
+
+        $scheduleRows = $scheduleRows->concat($practicumRows);
+
+        // ── Retrieved-without-time rows ───────────────────────────────────────
+        // Subjects retrieved with "Subject+Faculty+Room" mode have faculty + room
+        // but no day/time. Build one "UNSCHEDULED" row per subject so they're
+        // visible in the block schedule with their assigned faculty and room shown.
+        $retrievedNoTimeRows = $retrievedNoTimeSchedules
+            ->unique('subject_id')
+            ->map(function (Schedule $schedule) {
+                $pairingKey = 'retrieved-no-time-' . $schedule->subject_id;
+                $editKey    = $this->workspaceEditKey($pairingKey);
+
+                return (object) [
+                    'pairing_key'          => $pairingKey,
+                    'edit_key'             => $editKey,
+                    'ids'                  => [$schedule->id],
+                    'subject'              => $schedule->subject,
+                    'room'                 => $schedule->room,
+                    'faculty'              => $schedule->faculty,
+                    'status'               => 'not_scheduled',
+                    'is_retrieved_no_time' => true,
+                    'start_time'           => null,
+                    'end_time'             => null,
+                    'days'                 => [],
+                    'day_display'          => 'UNSCHEDULED',
+                    'sort_day'             => null,
+                    'has_conflict'         => false,
+                    'conflict_reason'      => '',
+                    'conflict_type'        => '',
+                ];
+            })
+            ->values();
+
+        $scheduleRows = $scheduleRows->concat($retrievedNoTimeRows);
+
+        // Subject IDs that already have a real timed schedule entry are "scheduled".
+        // Subjects with only retrieved-no-time records are NOT counted as scheduled
+        // so they surface correctly (either as retrievedNoTimeRows above, or — if
+        // they somehow lose that record — as "NOT SCHEDULED" below).
+        $timedScheduledSubjectIds = $filteredSchedules
+            ->filter(fn (Schedule $s) => filled($s->day))
+            ->pluck('subject_id')->filter()->unique()->values();
+        $practicumSubjectIds = $practicumSchedules->pluck('subject_id')->filter()->unique()->values();
+        $retrievedNoTimeSubjectIds = $retrievedNoTimeSchedules->pluck('subject_id')->filter()->unique()->values();
+
+        // Use filteredSchedules (which includes practicum) for the "scheduled"
+        // subject-ID set so practicum subjects are excluded from "NOT SCHEDULED".
+        $scheduledSubjectIds = $timedScheduledSubjectIds
+            ->merge($practicumSubjectIds)
+            ->merge($retrievedNoTimeSubjectIds)   // also exclude retrieved rows (they have their own display)
+            ->unique()->values();
         $unscheduledSubjects = Subject::activeTerm($this->semester, $this->schoolYear)
             ->where('section', $this->selectedSection)
             ->where('year_level', (int) $this->selectedYear)
@@ -2324,27 +2552,34 @@ class BlockSchedule extends Component
                 $query->where('department', $this->selectedDepartment)
                     ->orWhere('major', $this->selectedDepartment);
             })
+            // Practicum / OJT subjects never need a room/time assignment; they are
+            // shown as auto-finalized rows in the block schedule and must NOT appear
+            // under the "NOT SCHEDULED" section which implies a scheduling gap.
+            ->where(function ($q) {
+                $q->where('is_practicum', false)->orWhereNull('is_practicum');
+            })
             ->when($scheduledSubjectIds->isNotEmpty(), fn ($query) => $query->whereNotIn('id', $scheduledSubjectIds))
             ->orderBy('subject_code')
             ->get();
 
         $unscheduledRows = $unscheduledSubjects
             ->map(fn (Subject $subject) => (object) [
-                'pairing_key'       => 'not-scheduled-' . $subject->id,
-                'edit_key'          => 'not-scheduled-' . $subject->id,
-                'ids'               => [],
-                'subject'           => $subject,
-                'room'              => null,
-                'faculty'           => null,
-                'status'            => 'not_scheduled',
-                'start_time'        => null,
-                'end_time'          => null,
-                'days'              => [],
-                'day_display'       => 'NOT SCHEDULED',
-                'sort_day'          => null,
-                'has_conflict'      => false,
-                'conflict_reason'   => '',
-                'conflict_type'     => '',
+                'pairing_key'          => 'not-scheduled-' . $subject->id,
+                'edit_key'             => 'not-scheduled-' . $subject->id,
+                'ids'                  => [],
+                'subject'              => $subject,
+                'room'                 => null,
+                'faculty'              => null,
+                'status'               => 'not_scheduled',
+                'is_retrieved_no_time' => false,
+                'start_time'           => null,
+                'end_time'             => null,
+                'days'                 => [],
+                'day_display'          => 'NOT SCHEDULED',
+                'sort_day'             => null,
+                'has_conflict'         => false,
+                'conflict_reason'      => '',
+                'conflict_type'        => '',
             ]);
 
         $scheduleRows = $scheduleRows
@@ -2402,7 +2637,10 @@ class BlockSchedule extends Component
         $allFinalized    = $scheduleRows->isNotEmpty()
             && $scheduleRows->every(fn ($r) => $r->status === Schedule::STATUS_FINALIZED);
 
-        $unassignedCount = $scheduleRows->filter(fn ($r) => is_null($r->faculty))->count();
+        // Practicum rows have no faculty by design — exclude them from the unassigned count.
+        $unassignedCount = $scheduleRows
+            ->filter(fn ($r) => is_null($r->faculty) && ! (bool) ($r->subject?->is_practicum ?? false))
+            ->count();
         $conflictCount   = $scheduleRows->filter(fn ($r) => $r->has_conflict)->count();
 
         $modalFaculty = $this->showFacultyModal ? $this->getEligibleFacultyForModal() : collect();

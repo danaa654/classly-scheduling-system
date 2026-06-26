@@ -559,17 +559,25 @@ public function confirmRawSubjectAssignment(bool $overridden = false): void
             $year = $first->year_level ?? $subject?->year_level ?? '?';
             $section = $first->section ?? $subject?->section ?? 'N/A';
  
-            // If pre-assigned but no room yet, use fallback
+            // Build room display for pre-assigned / retrieved-without-time subjects.
+            // Priority: (1) room assigned on the schedule record, (2) subject's preferred_room_id.
+            // Never fall back to the "No room → TBA" path when the schedule carries a room.
             $displayRoom = $room?->room_name ?? 'No room';
             $preferredRoomName = null;
             if ($isPreAssigned && !$hasFullyScheduled) {
-                // Check if the subject has a room pre-assigned via ManageRooms
-                $preferredRoom = $first->subject?->preferredRoom;
-                if ($preferredRoom) {
-                    $preferredRoomName = $preferredRoom->room_name;
-                    $displayRoom = $preferredRoom->room_name;
+                if ($room) {
+                    // Schedule already has a room_id (e.g. retrieved with Subject+Faculty+Room mode).
+                    $displayRoom       = $room->room_name;
+                    $preferredRoomName = $room->room_name;
                 } else {
-                    $displayRoom = 'No room'; // Will be converted to "TBA" in blade
+                    // No room on the schedule — check the subject's preferred_room_id (Manage Rooms pin).
+                    $preferredRoom = $first->subject?->preferredRoom;
+                    if ($preferredRoom) {
+                        $preferredRoomName = $preferredRoom->room_name;
+                        $displayRoom       = $preferredRoom->room_name;
+                    } else {
+                        $displayRoom = 'No room'; // Will be converted to "TBA" in blade
+                    }
                 }
             }
  

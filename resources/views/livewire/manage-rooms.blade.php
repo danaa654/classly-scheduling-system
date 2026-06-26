@@ -183,7 +183,18 @@
                                         </span>
 
                                         @php
-                                            $roomTotalHours = $room->subjects->sum(
+                                            // Merge subjects from two sources so the utilisation
+                                            // bar is accurate regardless of how the room was assigned:
+                                            //   1. $room->subjects  → preferred_room_id (ManageRooms modal)
+                                            //   2. $scheduledSubjectsByRoom[room_id] → Schedule.room_id
+                                            //      (set during retrieve or auto-schedule)
+                                            $scheduledForRoom = $scheduledSubjectsByRoom[$room->id] ?? collect();
+                                            $allRoomSubjects  = $room->subjects
+                                                ->merge($scheduledForRoom)
+                                                ->unique('id')
+                                                ->values();
+
+                                            $roomTotalHours = $allRoomSubjects->sum(
                                                 fn ($s) => (float) $s->duration_hours
                                                          * max(1, (int) ($s->meetings_per_week ?? 1))
                                             );
@@ -363,28 +374,32 @@
                                             <span class="text-[10px] font-black uppercase tracking-widest text-blue-100 dark:text-blue-200">
                                                 📋 Allocated Subjects
                                             </span>
-                                            @if($room->subjects->isNotEmpty())
+                                            @if($allRoomSubjects->isNotEmpty())
                                                 <span class="text-[10px] font-bold text-blue-300 dark:text-blue-400 uppercase tracking-widest">
-                                                    {{ $room->subjects->count() }} subject{{ $room->subjects->count() !== 1 ? 's' : '' }}
+                                                    {{ $allRoomSubjects->count() }} subject{{ $allRoomSubjects->count() !== 1 ? 's' : '' }}
                                                     &nbsp;·&nbsp;
                                                     {{ number_format($roomTotalHours, 1) }}h / wk total
                                                 </span>
                                             @endif
                                         </div>
 
-                                        @if($room->subjects->isEmpty())
+                                        @if($allRoomSubjects->isEmpty())
                                             <div class="py-5 px-4 text-center">
                                                 <p class="text-xs font-bold text-slate-400 dark:text-slate-500 uppercase tracking-widest">
                                                     No subjects allocated to this room yet.
                                                 </p>
                                             </div>
                                         @else
-                                            @foreach($room->subjects as $subject)
+                                            @foreach($allRoomSubjects as $subject)
                                                 @php
                                                     $subjectWklyHrs = round(
                                                         (float) $subject->duration_hours * max(1, (int) ($subject->meetings_per_week ?? 1)),
                                                         1
                                                     );
+                                                    // Show a badge if this subject came from a schedule record
+                                                    // (room_id) rather than a direct preferred_room_id assignment.
+                                                    $isScheduledRoom = is_null($subject->preferred_room_id)
+                                                        || (int) $subject->preferred_room_id !== $room->id;
                                                 @endphp
                                                 <div wire:key="expand-subj-{{ $subject->id }}"
                                                      class="flex items-center gap-3 px-4 py-3
@@ -412,6 +427,19 @@
                                                             : 'bg-emerald-50 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800' }}">
                                                         {{ $subject->type }}
                                                     </span>
+
+                                                    {{-- Badge: shows how the room was assigned --}}
+                                                    @if($isScheduledRoom)
+                                                        <span class="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-sky-50 dark:bg-sky-900/20 text-sky-600 dark:text-sky-400 border border-sky-200 dark:border-sky-800 shrink-0"
+                                                              title="Room set during auto-schedule or retrieve; not yet saved as preferred room">
+                                                            SCHEDULED
+                                                        </span>
+                                                    @else
+                                                        <span class="px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest bg-violet-50 dark:bg-violet-900/20 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800 shrink-0"
+                                                              title="Room preferred-assigned via Manage Subjects">
+                                                            📌 PREFERRED
+                                                        </span>
+                                                    @endif
 
                                                     <span class="text-xs font-black text-slate-600 dark:text-slate-300 tabular-nums shrink-0 w-14 text-right">
                                                         {{ $subjectWklyHrs }}h<span class="text-slate-400 dark:text-slate-500 font-bold text-[10px]">/wk</span>

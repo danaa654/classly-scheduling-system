@@ -1422,10 +1422,16 @@
                     @endif
 
                     {{-- ── Data Row ─────────────────────────────────────────── --}}
+                    @php
+                        $isPracticum         = (bool) ($sched->subject?->is_practicum ?? false);
+                        $isRetrievedNoTime   = (bool) ($sched->is_retrieved_no_time ?? false);
+                    @endphp
                     <tr @class([
                             'transition-colors group',
                             'bg-red-50/80 dark:bg-red-950/20 hover:bg-red-50 dark:hover:bg-red-950/30 border-l-4 border-red-600'
-                                => $sched->status === 'not_scheduled',
+                                => $sched->status === 'not_scheduled' && ! $isRetrievedNoTime,
+                            'bg-amber-50/60 dark:bg-amber-900/10 hover:bg-amber-50 dark:hover:bg-amber-900/20 border-l-4 border-amber-400'
+                                => $isRetrievedNoTime,
                             'bg-red-50/70 dark:bg-red-900/10 hover:bg-red-50 dark:hover:bg-red-900/20 border-l-4 border-red-500'
                                 => $sched->has_conflict && $sched->status !== 'not_scheduled',
                             'bg-amber-50/50 dark:bg-amber-900/5 hover:bg-amber-50 dark:hover:bg-amber-900/10 border-l-4 border-amber-400'
@@ -1440,10 +1446,18 @@
 
                         {{-- ── Time ─────────────────────────────────────── --}}
                         <td class="px-3 py-3 text-center whitespace-nowrap">
-                            @if($sched->status === 'not_scheduled')
+                            @if($sched->status === 'not_scheduled' && ! $isRetrievedNoTime)
                                 <span class="inline-block rounded-md border border-red-300 bg-red-100 px-2.5 py-1.5 text-[12px] font-black uppercase tracking-tight text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
                                     NOT SCHEDULED
                                 </span>
+                            @elseif($isRetrievedNoTime)
+                                {{-- Retrieved with Subject+Faculty+Room mode: has assignments but no time yet --}}
+                                <span class="inline-block rounded-md border border-amber-300 bg-amber-50 px-2.5 py-1.5 text-[12px] font-black uppercase tracking-tight text-amber-700 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300">
+                                    UNSCHEDULED
+                                </span>
+                            @elseif($isPracticum)
+                                {{-- Practicum / OJT: no scheduled time — show a neutral dash --}}
+                                <span class="text-[13px] font-black text-slate-400 dark:text-slate-500 tracking-tight">—</span>
                             @elseif($workspaceEditMode && isset($workspaceEdits[$sched->edit_key]))
                                 @php
                                     $rtc       = $workspaceRealTimeConflicts[$sched->edit_key] ?? null;
@@ -1604,7 +1618,7 @@
 
                         {{-- ── Room ─────────────────────────────────────── --}}
                         <td class="px-3 py-3 text-center">
-                            @if($sched->status === 'not_scheduled')
+                            @if($sched->status === 'not_scheduled' && ! $isRetrievedNoTime)
                                 <span class="inline-block rounded-md border border-red-300 bg-red-100 px-2.5 py-1 text-[12px] font-black uppercase tracking-tight text-red-700 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300">
                                     UNASSIGNED
                                 </span>
@@ -1648,6 +1662,10 @@
                                     @endif
                                 </div>
                             @else
+                            @if($isPracticum)
+                                {{-- Practicum / OJT: no room needed — show a neutral dash --}}
+                                <span class="text-[13px] font-black text-slate-400 dark:text-slate-500 tracking-tight">—</span>
+                            @else
                             <span class="bg-blue-50 dark:bg-blue-900/30
                                          text-blue-600 dark:text-blue-400
                                          border border-blue-100 dark:border-blue-800/40
@@ -1655,11 +1673,15 @@
                                 {{ $sched->room?->room_name ?? 'No Room' }}
                             </span>
                             @endif
+                            @endif
                         </td>
 
                         {{-- ── Faculty Cell ─────────────────────────────────────────────────── --}}
                         <td class="px-3 py-3 text-center">
-                            @if($workspaceEditMode && isset($workspaceEdits[$sched->edit_key]))
+                            @if($isPracticum)
+                                {{-- Practicum / OJT: no faculty assigned — show a neutral dash --}}
+                                <span class="text-[13px] font-black text-slate-400 dark:text-slate-500 tracking-tight">—</span>
+                            @elseif($workspaceEditMode && isset($workspaceEdits[$sched->edit_key]))
                                 @php
                                     $rtcFac          = $workspaceRealTimeConflicts[$sched->edit_key] ?? null;
                                     $facHasConflict  = $rtcFac && collect($rtcFac['types'] ?? [])->contains(fn($t) => str_contains($t, 'FACULTY'));

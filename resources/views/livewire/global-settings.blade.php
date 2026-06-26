@@ -32,6 +32,12 @@
                 detail = payload?.detail || '';
                 setTimeout(() => show = false, 7000);
             "
+            x-on:semester-ended.window="
+                let semPayload = Array.isArray($event.detail) ? $event.detail[0] : $event.detail;
+                if (Array.isArray(semPayload)) semPayload = semPayload[0];
+                let url = semPayload?.redirectTo || '/';
+                setTimeout(() => window.location.href = url, 2500);
+            "
             x-show="show"
             x-transition
             style="display: none;">
@@ -302,15 +308,30 @@
                     <p class="mt-1 text-xs font-semibold text-slate-500">Batch ledger for completed semester archives.</p>
                 </div>
 
-                <button
-                    type="button"
-                    wire:click="openRetrieveModal"
-                    class="rounded-md bg-emerald-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white shadow-sm transition hover:bg-emerald-700">
-                    Retrieve Previous Semester
-                </button>
+                @if($alreadyRetrievedCurrentTerm)
+                    <div class="flex items-center gap-2">
+                        <span class="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-2 text-xs font-black uppercase tracking-widest text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/30 dark:text-emerald-300">
+                            ✓ Retrieved This Semester
+                        </span>
+                        <button
+                            type="button"
+                            disabled
+                            title="You have already retrieved once this semester. End the semester first to retrieve again."
+                            class="cursor-not-allowed rounded-md bg-slate-300 px-4 py-2 text-xs font-black uppercase tracking-widest text-slate-500 shadow-sm dark:bg-slate-700 dark:text-slate-400">
+                            Retrieve Previous Semester
+                        </button>
+                    </div>
+                @else
+                    <button
+                        type="button"
+                        wire:click="openRetrieveModal"
+                        class="rounded-md bg-emerald-600 px-4 py-2 text-xs font-black uppercase tracking-widest text-white shadow-sm transition hover:bg-emerald-700">
+                        Retrieve Previous Semester
+                    </button>
+                @endif
             </div>
 
-            <div class="mb-5 grid gap-3 md:grid-cols-3">
+            <div class="mb-5 grid gap-3 md:grid-cols-2">
                 <select wire:model.live="archiveFilterSemester" class="rounded-md border border-slate-300 bg-white px-3 py-3 text-xs font-bold uppercase outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:focus:ring-indigo-950">
                     <option value="">All Semesters</option>
                     <option value="1st">1st Semester</option>
@@ -318,13 +339,6 @@
                     <option value="Summer">Summer</option>
                 </select>
                 <input type="text" wire:model.live="archiveFilterSchoolYear" placeholder="School year" class="rounded-md border border-slate-300 bg-white px-3 py-3 text-xs font-bold uppercase outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:focus:ring-indigo-950">
-                <select wire:model.live="archiveFilterDepartment" class="rounded-md border border-slate-300 bg-white px-3 py-3 text-xs font-bold uppercase outline-none transition focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100 dark:border-slate-700 dark:bg-slate-950 dark:focus:ring-indigo-950">
-                    <option value="">All Departments</option>
-                    <option value="CCS">CCS</option>
-                    <option value="CTE">CTE</option>
-                    <option value="COC">COC</option>
-                    <option value="SHTM">SHTM</option>
-                </select>
             </div>
 
             <div class="overflow-x-auto rounded-md border border-slate-200 dark:border-slate-800">
@@ -339,35 +353,40 @@
                             <th class="px-4 py-3 font-black uppercase tracking-widest text-slate-500">Advanced To</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-                        @forelse($archiveBatches as $archive)
-                            <tr>
-                                <td class="px-4 py-3 font-black text-slate-800 dark:text-slate-100">{{ $archive->archive_batch_id ?? 'Legacy #' . $archive->id }}</td>
-                                <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300">
-                                    {{ $archive->semester_name ?: \App\Models\Setting::semesterDisplayName($archive->semester, $archive->school_year) }}
-                                </td>
-                                <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300">
-                                    {{ $archive->total_subjects }} subjects / {{ $archive->total_schedules }} schedules
-                                </td>
-                                <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300">{{ $archive->archived_by_name ?? 'Unknown' }}</td>
-                                <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300">
-                                    {{ $archive->archived_at ? \Carbon\Carbon::parse($archive->archived_at)->format('M d, Y h:i A') : 'N/A' }}
-                                </td>
-                                <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300">
-                                    @if($archive->next_semester && $archive->next_school_year)
-                                        {{ \App\Models\Setting::semesterLabel($archive->next_semester) }} {{ $archive->next_school_year }}
-                                    @else
-                                        N/A
-                                    @endif
-                                </td>
-                            </tr>
-                        @empty
-                            <tr>
-                                <td colspan="6" class="px-4 py-8 text-center text-xs font-bold uppercase tracking-widest text-slate-400">No archive batches yet.</td>
-                            </tr>
-                        @endforelse
-                    </tbody>
                 </table>
+                {{-- Scrollable body: 4 rows visible (~52px each), max 15 rows --}}
+                <div class="overflow-y-auto" style="max-height: 208px;">
+                    <table class="min-w-full divide-y divide-slate-200 text-left text-xs dark:divide-slate-800">
+                        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                            @forelse($archiveBatches as $archive)
+                                <tr class="hover:bg-slate-50 dark:hover:bg-slate-950/30">
+                                    <td class="px-4 py-3 font-black text-slate-800 dark:text-slate-100" style="min-width:180px">{{ $archive->archive_batch_id ?? 'Legacy #' . $archive->id }}</td>
+                                    <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300" style="min-width:200px">
+                                        {{ $archive->semester_name ?: \App\Models\Setting::semesterDisplayName($archive->semester, $archive->school_year) }}
+                                    </td>
+                                    <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300" style="min-width:180px">
+                                        {{ $archive->total_subjects }} subjects / {{ $archive->total_schedules }} schedules
+                                    </td>
+                                    <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300" style="min-width:120px">{{ $archive->archived_by_name ?? 'Unknown' }}</td>
+                                    <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300" style="min-width:160px">
+                                        {{ $archive->archived_at ? \Carbon\Carbon::parse($archive->archived_at)->format('M d, Y h:i A') : 'N/A' }}
+                                    </td>
+                                    <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300" style="min-width:160px">
+                                        @if($archive->next_semester && $archive->next_school_year)
+                                            {{ \App\Models\Setting::semesterLabel($archive->next_semester) }} {{ $archive->next_school_year }}
+                                        @else
+                                            N/A
+                                        @endif
+                                    </td>
+                                </tr>
+                            @empty
+                                <tr>
+                                    <td colspan="6" class="px-4 py-8 text-center text-xs font-bold uppercase tracking-widest text-slate-400">No archive batches yet.</td>
+                                </tr>
+                            @endforelse
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </section>
 
@@ -375,14 +394,8 @@
             <div class="mb-5 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
                     <h2 class="text-sm font-black uppercase tracking-widest">Read-only Audit History</h2>
-                    <p class="mt-1 text-xs font-semibold text-slate-500">Archived records are locked and displayed from historical batches.</p>
+                    <p class="mt-1 text-xs font-semibold text-slate-500">Archived records are locked. Select a semester batch to download the full audit as an Excel file.</p>
                 </div>
-
-                @if($selectedHistoricalSemester && $archivedHistoryRecords->isNotEmpty())
-                    <span class="rounded-md border border-indigo-200 bg-indigo-50 px-3 py-2 text-xs font-black uppercase tracking-wide text-indigo-700 dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300">
-                        {{ $archivedHistoryRecords->count() }} records
-                    </span>
-                @endif
             </div>
 
             <div class="mb-4">
@@ -401,78 +414,82 @@
 
             @if(! $selectedHistoricalSemester)
                 <div class="rounded-md border border-dashed border-slate-300 py-10 text-center dark:border-slate-700">
-                    <p class="text-xs font-black uppercase tracking-widest text-slate-400">No archive selected</p>
-                </div>
-            @elseif($archivedHistoryRecords->isEmpty())
-                <div class="rounded-md border border-dashed border-slate-300 py-10 text-center dark:border-slate-700">
-                    <p class="text-xs font-black uppercase tracking-widest text-slate-400">No records found for this archive</p>
+                    <p class="text-xs font-black uppercase tracking-widest text-slate-400">Select a semester archive above</p>
+                    <p class="mt-2 text-[11px] font-semibold text-slate-400">Each semester can contain 300+ records across all departments. Download as Excel to review them.</p>
                 </div>
             @else
-                <div class="overflow-x-auto rounded-md border border-slate-200 dark:border-slate-800">
-                    <table class="min-w-full divide-y divide-slate-200 text-left text-xs dark:divide-slate-800">
-                        <thead class="bg-slate-50 dark:bg-slate-950/60">
-                            <tr>
-                                <th class="px-4 py-3 font-black uppercase tracking-widest text-slate-500">EDP</th>
-                                <th class="px-4 py-3 font-black uppercase tracking-widest text-slate-500">Subject</th>
-                                <th class="px-4 py-3 font-black uppercase tracking-widest text-slate-500">Section</th>
-                                <th class="px-4 py-3 font-black uppercase tracking-widest text-slate-500">Instructor</th>
-                                <th class="px-4 py-3 font-black uppercase tracking-widest text-slate-500">Units</th>
-                                <th class="px-4 py-3 font-black uppercase tracking-widest text-slate-500">Schedule</th>
-                                <th class="px-4 py-3 font-black uppercase tracking-widest text-slate-500">Status</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
-                            @foreach($archivedHistoryRecords as $record)
-                                <tr>
-                                    <td class="px-4 py-3 font-black text-indigo-700 dark:text-indigo-300">{{ $record->edp_code }}</td>
-                                    <td class="px-4 py-3">
-                                        <p class="font-black text-slate-800 dark:text-slate-100">{{ $record->subject_code }}</p>
-                                        <p class="mt-1 max-w-sm truncate font-semibold text-slate-500">{{ $record->descriptive_title }}</p>
-                                    </td>
-                                    <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300">{{ $record->section }}</td>
-                                    <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300">{{ $record->instructor_name }}</td>
-                                    <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300">{{ $record->units }}</td>
-                                    <td class="px-4 py-3 font-bold text-slate-600 dark:text-slate-300">
-                                        @if($record->start_time && $record->end_time)
-                                            {{ $record->day }} {{ \Carbon\Carbon::parse($record->start_time)->format('h:i A') }} to {{ \Carbon\Carbon::parse($record->end_time)->format('h:i A') }}
-                                        @else
-                                            {{ $record->day }}
-                                        @endif
-                                    </td>
-                                    <td class="px-4 py-3">
-                                        <span class="rounded-md border border-slate-300 px-2 py-1 text-[10px] font-black uppercase tracking-wide text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                                            {{ str_replace('_', ' ', $record->status) }}
-                                        </span>
-                                    </td>
-                                </tr>
-                            @endforeach
-                        </tbody>
-                    </table>
+                <div class="rounded-md border border-indigo-200 bg-indigo-50 p-6 dark:border-indigo-900 dark:bg-indigo-950/30">
+                    <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                        <div>
+                            <p class="text-[10px] font-black uppercase tracking-widest text-indigo-700 dark:text-indigo-300">Ready to Export</p>
+                            <p class="mt-1 text-sm font-black text-slate-800 dark:text-slate-100">
+                                @foreach($archivedSemesterOptions as $opt)
+                                    @if($opt->value === $selectedHistoricalSemester)
+                                        {{ $opt->batch ?: 'Legacy' }} — {{ $opt->label }}
+                                    @endif
+                                @endforeach
+                            </p>
+                            @if($archivedHistoryRecords->isNotEmpty())
+                                <p class="mt-1 text-xs font-semibold text-indigo-700/80 dark:text-indigo-300/80">
+                                    {{ $archivedHistoryRecords->count() }} records across all departments
+                                </p>
+                            @endif
+                            <p class="mt-2 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                                The export includes EDP code, subject, section, instructor, units, schedule, status, and department columns — one row per schedule entry.
+                            </p>
+                        </div>
+
+                        <button
+                            type="button"
+                            wire:click="downloadAuditHistory"
+                            @if($archivedHistoryRecords->isEmpty()) disabled @endif
+                            class="flex shrink-0 items-center gap-2 rounded-md px-6 py-3 text-xs font-black uppercase tracking-widest text-white shadow-sm transition
+                                {{ $archivedHistoryRecords->isNotEmpty() ? 'bg-indigo-600 hover:bg-indigo-700' : 'cursor-not-allowed bg-slate-400' }}">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2M7 10l5 5 5-5M12 15V3"/>
+                            </svg>
+                            Download Excel (.csv)
+                        </button>
+                    </div>
+
+                    @if($archivedHistoryRecords->isEmpty())
+                        <p class="mt-3 text-xs font-bold uppercase tracking-widest text-amber-700 dark:text-amber-400">
+                            ⚠ No records found for this archive batch.
+                        </p>
+                    @endif
                 </div>
             @endif
         </section>
 
         <section class="rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-            <h2 class="mb-5 text-sm font-black uppercase tracking-widest">Recent Setting Changes</h2>
+            <div class="mb-5 flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <h2 class="text-sm font-black uppercase tracking-widest">Recent Setting Changes</h2>
+                <span class="text-[10px] font-black uppercase tracking-widest text-slate-400">
+                    Current semester · up to 15 entries
+                </span>
+            </div>
 
-            <div class="grid gap-3 md:grid-cols-2">
-                @forelse($changeHistory as $log)
-                    <div class="rounded-md border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
-                        <div class="flex items-start justify-between gap-3">
-                            <div>
-                                <p class="text-xs font-black uppercase tracking-wide text-slate-700 dark:text-slate-200">{{ $log['setting_key'] }}</p>
-                                <p class="mt-1 text-xs font-semibold text-slate-500">
-                                    {{ \Illuminate\Support\Str::limit((string) ($log['new_value'] ?? ''), 72) }}
-                                </p>
+            {{-- Scrollable container: 6 rows visible (each ~78px), scroll to see up to 15 --}}
+            <div class="overflow-y-auto pr-1" style="max-height: 468px;">
+                <div class="grid gap-3 md:grid-cols-2">
+                    @forelse($changeHistory as $log)
+                        <div class="rounded-md border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+                            <div class="flex items-start justify-between gap-3">
+                                <div>
+                                    <p class="text-xs font-black uppercase tracking-wide text-slate-700 dark:text-slate-200">{{ $log['setting_key'] }}</p>
+                                    <p class="mt-1 text-xs font-semibold text-slate-500">
+                                        {{ \Illuminate\Support\Str::limit((string) ($log['new_value'] ?? ''), 72) }}
+                                    </p>
+                                </div>
+                                <span class="shrink-0 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                                    {{ isset($log['changed_at']) ? \Carbon\Carbon::parse($log['changed_at'])->diffForHumans() : 'N/A' }}
+                                </span>
                             </div>
-                            <span class="shrink-0 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                                {{ isset($log['changed_at']) ? \Carbon\Carbon::parse($log['changed_at'])->diffForHumans() : 'N/A' }}
-                            </span>
                         </div>
-                    </div>
-                @empty
-                    <p class="text-xs font-bold uppercase tracking-widest text-slate-400">No changes recorded yet.</p>
-                @endforelse
+                    @empty
+                        <p class="text-xs font-bold uppercase tracking-widest text-slate-400">No changes recorded yet.</p>
+                    @endforelse
+                </div>
             </div>
         </section>
     </div>
@@ -602,8 +619,24 @@
         <div class="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/70 px-4">
             <div class="w-full max-w-2xl rounded-lg border border-emerald-200 bg-white p-6 shadow-2xl dark:border-emerald-900 dark:bg-slate-900">
                 <h3 class="text-lg font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-300">Retrieve Previous Semester</h3>
-                
-                @if($matchingArchive)
+
+                @if($alreadyRetrievedCurrentTerm)
+                    <div class="mt-4 rounded-md border border-red-200 bg-red-50 p-4 dark:border-red-900 dark:bg-red-950/30">
+                        <p class="text-xs font-bold uppercase tracking-widest text-red-700 dark:text-red-300">🚫 Already Retrieved This Semester</p>
+                        <p class="mt-1 text-xs font-semibold text-red-800 dark:text-red-200">
+                            A retrieval has already been performed for the current term. You can only retrieve once per semester. Please end the semester first before retrieving again.
+                        </p>
+                    </div>
+                    <div class="mt-6 flex">
+                        <button
+                            type="button"
+                            wire:click="$set('showRetrieveModal', false)"
+                            class="flex-1 rounded-md bg-slate-200 px-4 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-300 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+                            Close
+                        </button>
+                    </div>
+                @else
+                    @if($matchingArchive)
                     <div class="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900 dark:bg-emerald-950/30">
                         <p class="text-xs font-bold uppercase tracking-widest text-emerald-700 dark:text-emerald-300">Auto-Detected Latest Archive</p>
                         <div class="mt-3 grid gap-3 md:grid-cols-2">
@@ -649,13 +682,14 @@
                         wire:model.live="retrieveMode"
                         class="w-full rounded-md border border-slate-300 bg-white px-3 py-3 text-sm font-bold outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 dark:border-slate-700 dark:bg-slate-950 dark:focus:ring-emerald-950">
                         <option value="subjects_only">Subjects Only</option>
-                        <option value="full_template">Full Schedule Template</option>
-                        <option value="faculty_only">Faculty Only</option>
-                        <option value="room_only">Room + Time Template</option>
-                        <option value="time_only">Time Template</option>
+                        <option value="full_template">Subject + Faculty + Room + Time (Full Template)</option>
+                        <option value="faculty_only">Subject + Faculty</option>
+                        <option value="faculty_room">Subject + Faculty + Room</option>
+                        <option value="room_only">Subject + Room + Time</option>
+                        <option value="time_only">Subject + Time</option>
                     </select>
                     <p class="mt-2 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                        New EDP codes are always generated. Subject-only and faculty-only modes leave the scheduling board fresh.
+                        New EDP codes are always generated for all modes. Modes without time leave the scheduling board fresh for re-generation.
                     </p>
                 </div>
 
@@ -674,6 +708,7 @@
                         Cancel
                     </button>
                 </div>
+                @endif {{-- end @else alreadyRetrievedCurrentTerm --}}
             </div>
         </div>
     @endif
@@ -709,7 +744,17 @@
                                 EDP Prefix: {{ $currentEdpPrefix }}
                             </p>
                             <p class="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                                Mode: {{ str_replace('_', ' ', $retrieveMode) }}
+                                Mode: @php
+                                    $modeLabels = [
+                                        'subjects_only' => 'Subjects Only',
+                                        'full_template' => 'Subject + Faculty + Room + Time',
+                                        'faculty_only'  => 'Subject + Faculty',
+                                        'faculty_room'  => 'Subject + Faculty + Room',
+                                        'room_only'     => 'Subject + Room + Time',
+                                        'time_only'     => 'Subject + Time',
+                                    ];
+                                    echo $modeLabels[$retrieveMode] ?? str_replace('_', ' ', $retrieveMode);
+                                @endphp
                             </p>
                         </div>
                     </div>
