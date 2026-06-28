@@ -240,7 +240,7 @@ private function validatePreAssignmentWorkload(Faculty $faculty, Subject $subjec
 {
     $currentUnits = $faculty->calculateTotalAssignedUnits();
     $subjectUnits = (int) ($subject->units ?? 0);
-    $maxUnits = (int) ($faculty->max_units ?? 21);
+    $maxUnits = $faculty->effectiveMaxUnits();
     $newTotal = $currentUnits + $subjectUnits;
     
     return [
@@ -455,6 +455,90 @@ public function confirmRawSubjectAssignment(bool $overridden = false): void
             $this->selectFaculty($facultyId);
         }
         $this->activeTab = 'summary';
+    }
+
+    // ============================================================
+    // OVERLOAD UNIT MANAGEMENT
+    // ============================================================
+
+    /**
+     * Raise or lower a faculty member's approved unit ceiling by 3.
+     *
+     * Rules:
+     *   • Only admin / registrar / dean / oic can call this.
+     *   • Direction 'add'    → max_units += 3, blocked if result > HARD_CAP (40).
+     *   • Direction 'remove' → max_units -= 3, blocked if result < BASE_MAX (30)
+     *                          or if it would fall below current assigned units.
+     */
+    public function adjustOverloadUnits(int $facultyId, string $direction): void
+    {
+        $user = Auth::user();
+
+        if (! $user || ! in_array($user->role, ['admin', 'registrar', 'dean', 'oic'], true)) {
+            $this->toast('error', 'Only admin, registrar, dean, or OIC can adjust overload units.');
+            return;
+        }
+
+        $faculty = Faculty::find($facultyId);
+
+        if (! $faculty) {
+            $this->toast('error', 'Faculty not found.');
+            return;
+        }
+
+        $current     = $faculty->effectiveMaxUnits();
+        $baseMax     = Faculty::BASE_MAX_UNITS;   // 30
+        $hardCap     = Faculty::HARD_CAP_UNITS;   // 40
+        $assignedNow = $faculty->calculateTotalAssignedUnits();
+
+        if ($direction === 'add') {
+            $proposed = $current + 3;
+
+            if ($proposed > $hardCap) {
+                $this->toast(
+                    'error',
+                    "Cannot exceed the hard cap of {$hardCap} units. "
+                    . "Current ceiling is already {$current} units — next increment ({$proposed}) would go over."
+                );
+                return;
+            }
+
+            $faculty->update(['max_units' => $proposed]);
+            $this->toast(
+                'success',
+                "{$faculty->full_name}'s load ceiling raised from {$current} → {$proposed} units."
+                . ($proposed === $hardCap ? " (Hard cap reached.)" : "")
+            );
+
+        } elseif ($direction === 'remove') {
+            $proposed = $current - 3;
+
+            if ($proposed < $baseMax) {
+                $this->toast(
+                    'error',
+                    "Cannot go below the base load of {$baseMax} units."
+                );
+                return;
+            }
+
+            if ($proposed < $assignedNow) {
+                $this->toast(
+                    'error',
+                    "Cannot lower ceiling to {$proposed} units — {$faculty->full_name} already has {$assignedNow} units assigned. "
+                    . "Remove subjects first."
+                );
+                return;
+            }
+
+            $faculty->update(['max_units' => $proposed]);
+            $this->toast(
+                'success',
+                "{$faculty->full_name}'s load ceiling lowered from {$current} → {$proposed} units."
+            );
+
+        } else {
+            $this->toast('error', 'Invalid direction. Use "add" or "remove".');
+        }
     }
 
     // ============================================================
@@ -746,7 +830,7 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
         $faculty  = $this->selectedFaculty;
 
         $totalUnits       = $subjects->sum('units') ?? 0;
-        $maxUnits         = $faculty->max_units ?? 21;
+        $maxUnits         = $faculty->effectiveMaxUnits();
         $utilizationPercent = $maxUnits > 0 ? round(($totalUnits / $maxUnits) * 100) : 0;
 
         // For GenEd faculty: everything they teach is "minor/gened" — treat all as minor load.
@@ -771,6 +855,11 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
         return [
             'totalUnits'         => $totalUnits,
             'maxUnits'           => $maxUnits,
+            'baseMaxUnits'       => Faculty::BASE_MAX_UNITS,
+            'hardCapUnits'       => Faculty::HARD_CAP_UNITS,
+            'overloadGranted'    => max(0, $maxUnits - Faculty::BASE_MAX_UNITS),
+            'canAddOverload'     => $faculty->canReceiveOverloadGrant(),
+            'canRemoveOverload'  => $faculty->canReduceOverloadGrant(),
             'remainingUnits'     => max(0, $maxUnits - $totalUnits),
             'overloadUnits'      => max(0, $totalUnits - $maxUnits),
             'utilizationPercent' => $utilizationPercent,
@@ -1484,7 +1573,7 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
         );
         $subjectAlreadyAssigned = (bool) $duplicateSubject;
         $newTotal = $currentUnits + ($subjectAlreadyAssigned ? 0 : (int) $schedule->subject->units);
-        $maxUnits = (int) ($faculty->max_units ?? 21);
+        $maxUnits = $faculty->effectiveMaxUnits();
 
         if ($subjectAlreadyAssigned) {
             $warnings[] = [
@@ -1804,7 +1893,7 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
                     'name'            => $candidate->full_name,
                     'scope'           => $candidate->scopeLabel(),
                     'department'      => $candidate->displayDepartment(),
-                    'remaining_units' => max(0, (int) ($candidate->max_units ?? 21) - (int) $assignedUnits),
+                    'remaining_units' => max(0, $candidate->effectiveMaxUnits() - (int) $assignedUnits),
                 ];
             })
             ->sortByDesc('remaining_units')
@@ -1827,7 +1916,7 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
         $currentUnits = (int) $currentSubjects->sum('units');
         $newUnits     = $alreadyHasSubject ? 0 : (int) ($schedule->subject?->units ?? 0);
 
-        return ($currentUnits + $newUnits) > (int) ($faculty->max_units ?? 21);
+        return ($currentUnits + $newUnits) > $faculty->effectiveMaxUnits();
     }
 
     private function recommendedSlots(Faculty $faculty, Schedule $schedule): array
@@ -2186,7 +2275,7 @@ public function isScheduleUnscheduled(string $scheduleHtml): bool
         
         $currentUnits = (int) $assignedSubjects->sum('units');
         $subjectUnits = (int) ($subject->units ?? 0);
-        $maxUnits = (int) ($faculty->max_units ?? 21);
+        $maxUnits = $faculty->effectiveMaxUnits();
         $newTotal = $currentUnits + $subjectUnits;
         
         // STEP 2: Check weekly unit load (max_units constraint)

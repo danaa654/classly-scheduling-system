@@ -24,6 +24,19 @@ class Faculty extends Model
     ];
 
     /**
+     * Default maximum teaching load (units).
+     * Deans can raise this in +3 increments up to HARD_CAP_UNITS.
+     */
+    public const BASE_MAX_UNITS = 30;
+
+    /**
+     * Absolute ceiling — no faculty can exceed this regardless of overload grants.
+     * Raising the cap from 39 by 3 would yield 42 > 40, so 39 is the practical max
+     * achievable through +3 increments.
+     */
+    public const HARD_CAP_UNITS = 40;
+
+    /**
      * The attributes that are mass assignable.
      *
      * @var array<int, string>
@@ -92,9 +105,28 @@ class Faculty extends Model
         return $this->belongsTo(User::class, 'requested_by');
     }
 
+    // =========================================================================
+    // LOAD CAPACITY — BASE 30, HARD CAP 40
+    // =========================================================================
+
     /**
-     * Calculate total units assigned to this faculty, including unscheduled subjects
-     * Used for pre-assignment validation to check max_units constraint
+     * The effective unit ceiling for this faculty member.
+     *
+     * Always within [BASE_MAX_UNITS, HARD_CAP_UNITS]:
+     *   • Floors at 30 so the default "21" rows from the old migration still work.
+     *   • Ceils at 40 so no overload grant can push past the hard limit.
+     */
+    public function effectiveMaxUnits(): int
+    {
+        return min(
+            self::HARD_CAP_UNITS,
+            max(self::BASE_MAX_UNITS, (int) ($this->max_units ?? self::BASE_MAX_UNITS))
+        );
+    }
+
+    /**
+     * Calculate total units assigned to this faculty, including unscheduled subjects.
+     * Used for pre-assignment validation to check max_units constraint.
      */
     public function calculateTotalAssignedUnits(): int
     {
@@ -109,26 +141,66 @@ class Faculty extends Model
     }
 
     /**
-     * Calculate remaining units available before hitting max_units limit
+     * Calculate remaining units available before hitting the effective ceiling.
      */
     public function remainingUnitCapacity(): int
     {
-        $maxUnits = (int) ($this->max_units ?? 21);
-        $assignedUnits = $this->calculateTotalAssignedUnits();
-        return max(0, $maxUnits - $assignedUnits);
+        return max(0, $this->effectiveMaxUnits() - $this->calculateTotalAssignedUnits());
     }
 
     /**
-     * Check if adding a subject would exceed load
+     * Check if adding a subject would exceed the effective load ceiling.
      */
     public function canAccommodateSubject(?Subject $subject): bool
     {
         if (!$subject) {
             return false;
         }
-        
+
         $subjectUnits = (int) ($subject->units ?? 0);
-        return ($this->calculateTotalAssignedUnits() + $subjectUnits) <= (int) ($this->max_units ?? 21);
+        return ($this->calculateTotalAssignedUnits() + $subjectUnits) <= $this->effectiveMaxUnits();
+    }
+
+    /**
+     * Whether the dean/admin can raise this faculty's cap by 3 more units.
+     * Blocks when the next increment would exceed HARD_CAP_UNITS.
+     */
+    public function canReceiveOverloadGrant(): bool
+    {
+        return ($this->effectiveMaxUnits() + 3) <= self::HARD_CAP_UNITS;
+    }
+
+    /**
+     * Whether the dean/admin can lower this faculty's cap by 3 units.
+     * Blocks when the new cap would fall below current assigned units
+     * (can't orphan existing assignments) or below BASE_MAX_UNITS.
+     */
+    public function canReduceOverloadGrant(): bool
+    {
+        $proposed = $this->effectiveMaxUnits() - 3;
+        if ($proposed < self::BASE_MAX_UNITS) {
+            return false;
+        }
+
+        return $proposed >= $this->calculateTotalAssignedUnits();
+    }
+
+    /**
+     * Human-readable description of the overload status, e.g. "30 / 40 hard cap".
+     * Useful for tooltip / aria labels.
+     */
+    public function overloadStatusLabel(): string
+    {
+        $eff  = $this->effectiveMaxUnits();
+        $base = self::BASE_MAX_UNITS;
+        $cap  = self::HARD_CAP_UNITS;
+
+        if ($eff === $base) {
+            return "Base load ({$base} units max)";
+        }
+
+        $granted = $eff - $base;
+        return "Base {$base} + {$granted} overload = {$eff} units (hard cap {$cap})";
     }
 
     /**
@@ -153,37 +225,31 @@ class Faculty extends Model
      */
     public function getAvailabilityWindow(): ?array
     {
-        // Parse the availability JSON field if it exists and contains time-of-day constraints
         if (!$this->availability) {
             return null;
         }
-        
+
         if (is_string($this->availability)) {
             return json_decode($this->availability, true);
         }
-        
+
         return $this->availability;
     }
 
-    /**
-     * Scope to get all approved faculties
-     */
+    // =========================================================================
+    // SCOPES
+    // =========================================================================
+
     public function scopeApproved($query)
     {
         return $query->where('status', 'approved');
     }
 
-    /**
-     * Scope to get all pending requests
-     */
     public function scopePending($query)
     {
         return $query->where('status', 'pending');
     }
 
-    /**
-     * Scope to get all rejected faculties
-     */
     public function scopeRejected($query)
     {
         return $query->where('status', 'rejected');
@@ -216,6 +282,10 @@ class Faculty extends Model
                 ->orWhere('can_teach_minor', true);
         });
     }
+
+    // =========================================================================
+    // IDENTITY & ELIGIBILITY
+    // =========================================================================
 
     public function isGenEd(): bool
     {
@@ -252,10 +322,6 @@ class Faculty extends Model
             return false;
         }
 
-        // ── Room Override active: Eligible Faculty checkboxes are the ONLY
-        // source of truth. The subject's Major/Minor academic type is left
-        // completely untouched — only scheduling behavior changes here.
-        // See "Refactor Room Override to Support Faculty Eligibility".
         if ($subject->hasRoomOverride()) {
             return $this->isEligibleUnderFacultyOverride($subject);
         }
@@ -279,22 +345,10 @@ class Faculty extends Model
      *
      *   Department Faculty        → any non-GenEd faculty whose home
      *                                department matches the subject's own
-     *                                department — the exact same rule
-     *                                canTeachDepartment() already applies for
-     *                                the default Major routing. A faculty
-     *                                member tagged Cross-Department does NOT
-     *                                lose their home-department eligibility;
-     *                                that tag only adds extra reach, it never
-     *                                takes membership away.
+     *                                department.
      *   General Education Faculty → faculty tagged faculty_scope = gened.
      *   Cross Department Faculty  → faculty EXPLICITLY tagged
-     *                                faculty_scope = cross_department,
-     *                                regardless of department — this is the
-     *                                pool used to pull in faculty from
-     *                                OUTSIDE the subject's own department.
-     *
-     * The default can_teach_minor / type-based heuristics are intentionally
-     * ignored in this branch — the checkboxes fully replace them.
+     *                                faculty_scope = cross_department.
      */
     private function isEligibleUnderFacultyOverride(Subject $subject): bool
     {
@@ -345,5 +399,4 @@ class Faculty extends Model
             || str_contains(strtoupper((string) $subject->subject_code), 'NSTP')
             || str_contains(strtoupper((string) $subject->subject_code), 'PATHFIT');
     }
-
 }

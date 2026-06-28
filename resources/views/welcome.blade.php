@@ -365,9 +365,9 @@
         .logo-img { transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
         .logo-img:hover { transform: scale(1.09) rotate(-3deg); }
 
-        /* ══════════════════════════════════════════════════════
+        /* ════════════════════════════════════════
            CLASSLY WORDMARK
-        ══════════════════════════════════════════════════════ */
+        ════════════════════════════════════════ */
         .brand-class {
             background: linear-gradient(135deg, #bfdbfe 0%, #60a5fa 30%, #3b82f6 60%, #1d4ed8 100%);
             -webkit-background-clip: text;
@@ -380,34 +380,12 @@
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
-        @keyframes shimmer-sweep {
-            0%   { background-position: -400% center; }
-            100% { background-position:  400% center; }
+        .brand-shimmer { display: inline-block; }
+        @keyframes classly-glow-dark {
+            0%, 100% { filter: drop-shadow(0 0 12px rgba(59,130,246,0.4)); }
+            50%       { filter: drop-shadow(0 0 28px rgba(59,130,246,0.7)); }
         }
-        .brand-shimmer { position: relative; display: inline-block; }
-        .brand-shimmer::after {
-            content: attr(data-text);
-            position: absolute;
-            inset: 0;
-            background: linear-gradient(108deg, transparent 25%, rgba(255,255,255,0.72) 50%, transparent 75%);
-            background-size: 400% 100%;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            animation: shimmer-sweep 4s linear infinite;
-            pointer-events: none;
-        }
-        @keyframes wordmark-glow-dark {
-            0%, 100% { filter: drop-shadow(0 0 14px rgba(59,130,246,0.40)) drop-shadow(0 0 5px rgba(239,68,68,0.20)); }
-            50%       { filter: drop-shadow(0 0 34px rgba(59,130,246,0.72)) drop-shadow(0 0 16px rgba(239,68,68,0.42)); }
-        }
-        @keyframes wordmark-glow-light {
-            0%, 100% { filter: drop-shadow(0 2px 10px rgba(30,64,175,0.20)); }
-            50%       { filter: drop-shadow(0 2px 24px rgba(30,64,175,0.45)); }
-        }
-        .classly-glow-dark  { animation: wordmark-glow-dark  3.5s ease-in-out infinite; }
-        .classly-glow-light { animation: wordmark-glow-light 3.5s ease-in-out infinite; }
-
+        .classly-glow-dark { animation: classly-glow-dark 3.5s ease-in-out infinite; }
         /* ══════════════════════════════════════════════════════
            SECTION DIVIDER GLOW
         ══════════════════════════════════════════════════════ */

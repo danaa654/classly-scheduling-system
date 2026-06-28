@@ -1,8 +1,8 @@
 @php
     $summary = $facultySummary ?? [
         'totalUnits'         => 0,
-        'maxUnits'           => 21,
-        'remainingUnits'     => 21,
+        'maxUnits'           => 30,
+        'remainingUnits'     => 30,
         'overloadUnits'      => 0,
         'utilizationPercent' => 0,
         'majorCount'         => 0,
@@ -79,7 +79,7 @@
                 @forelse($faculties as $faculty)
                     @php
                         $units            = (int) ($faculty->assigned_units ?? 0);
-                        $max              = max(1, (int) ($faculty->max_units ?? 21));
+                        $max              = max(1, $faculty->effectiveMaxUnits());
                         $percent          = min(100, round(($units / $max) * 100));
                         $ringColor        = $percent >= 100 ? '#f43f5e' : ($percent >= 85 ? '#f59e0b' : '#38bdf8');
                         $circumference    = 2 * 3.14159 * 18;
@@ -179,6 +179,40 @@
                             <button type="button" x-on:click.stop="$wire.preparePrintLoad({{ $faculty->id }}).then(() => window.print()); open = false" class="w-full rounded-lg px-3 py-2 text-left text-xs font-black uppercase tracking-wider text-slate-700 transition hover:bg-sky-50 hover:text-sky-700 dark:text-slate-200 dark:hover:bg-sky-400/15 dark:hover:text-white">
                                 Print Load Summary
                             </button>
+                            {{-- Overload Unit Controls (admin / registrar / dean / oic only) --}}
+                            @if(in_array(auth()->user()?->role, ['admin', 'registrar', 'dean', 'oic']))
+                                <div class="my-1 border-t border-slate-100 dark:border-white/10"></div>
+                                <div class="px-3 py-1">
+                                    <p class="text-[9px] font-black uppercase tracking-[0.18em] text-slate-400 dark:text-slate-500">Overload Units</p>
+                                    <p class="mt-0.5 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                                        Cap: <span class="font-black text-slate-700 dark:text-slate-200">{{ $faculty->effectiveMaxUnits() }} / {{ \App\Models\Faculty::HARD_CAP_UNITS }}</span>
+                                    </p>
+                                </div>
+                                <div class="flex gap-1 px-2 pb-1">
+                                    <button
+                                        type="button"
+                                        wire:click="adjustOverloadUnits({{ $faculty->id }}, 'remove')"
+                                        x-on:click="open = false"
+                                        @disabled(!$faculty->canReduceOverloadGrant())
+                                        class="flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-200 bg-red-50 px-2 py-1.5 text-[10px] font-black uppercase text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-red-400/30 dark:bg-red-500/10 dark:text-red-300 dark:hover:bg-red-500/20"
+                                        title="{{ $faculty->canReduceOverloadGrant() ? 'Remove 3 overload units' : 'Cannot reduce — at base or below assigned units' }}"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M3 10a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1z" clip-rule="evenodd"/></svg>
+                                        −3
+                                    </button>
+                                    <button
+                                        type="button"
+                                        wire:click="adjustOverloadUnits({{ $faculty->id }}, 'add')"
+                                        x-on:click="open = false"
+                                        @disabled(!$faculty->canReceiveOverloadGrant())
+                                        class="flex flex-1 items-center justify-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[10px] font-black uppercase text-emerald-700 transition hover:bg-emerald-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-300 dark:hover:bg-emerald-500/20"
+                                        title="{{ $faculty->canReceiveOverloadGrant() ? 'Add 3 overload units' : 'Hard cap of ' . \App\Models\Faculty::HARD_CAP_UNITS . ' units reached' }}"
+                                    >
+                                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clip-rule="evenodd"/></svg>
+                                        +3
+                                    </button>
+                                </div>
+                            @endif
                         </div>
                     </div>
                 @empty
@@ -391,6 +425,14 @@
                             <p class="text-sm font-black uppercase tracking-wider text-red-700 dark:text-red-100">Overload Warning</p>
                             <p class="mt-1 text-sm font-medium text-red-600 dark:text-red-100/80">
                                 This faculty load is {{ $summary['overloadUnits'] }} unit(s) over the configured maximum of {{ $summary['maxUnits'] }} units.
+                            </p>
+                        </div>
+                    @elseif(isset($summary['overloadGranted']) && $summary['overloadGranted'] > 0)
+                        <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50 p-4 dark:border-amber-400/30 dark:bg-amber-500/10">
+                            <p class="text-sm font-black uppercase tracking-wider text-amber-700 dark:text-amber-200">Overload Approved</p>
+                            <p class="mt-1 text-sm font-medium text-amber-600 dark:text-amber-100/80">
+                                Base load is {{ $summary['baseMaxUnits'] ?? 30 }} units + {{ $summary['overloadGranted'] }} granted = <strong>{{ $summary['maxUnits'] }} unit ceiling</strong>.
+                                Hard cap: {{ $summary['hardCapUnits'] ?? 40 }} units.
                             </p>
                         </div>
                     @endif

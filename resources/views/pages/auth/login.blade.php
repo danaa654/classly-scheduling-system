@@ -71,22 +71,7 @@
             -webkit-text-fill-color: transparent;
             background-clip: text;
         }
-        @keyframes shimmer {
-            0%   { background-position: -400% center; }
-            100% { background-position:  400% center; }
-        }
-        .brand-shimmer { position: relative; display: inline-block; }
-        .brand-shimmer::after {
-            content: attr(data-text);
-            position: absolute; inset: 0;
-            background: linear-gradient(108deg, transparent 25%, rgba(255,255,255,0.7) 50%, transparent 75%);
-            background-size: 400% 100%;
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            animation: shimmer 4s linear infinite;
-            pointer-events: none;
-        }
+        .brand-shimmer { display: inline-block; }
         @keyframes classly-glow-dark {
             0%, 100% { filter: drop-shadow(0 0 12px rgba(59,130,246,0.4)); }
             50%       { filter: drop-shadow(0 0 28px rgba(59,130,246,0.7)); }
@@ -429,115 +414,35 @@
             box-shadow: 0 0 24px rgba(239,68,68,0.12), 0 0 48px rgba(239,68,68,0.06);
         }
 
-        /* ════════════════════════════════════════════════════════════
-           ★ HOVER EXPAND — LEFT PANEL  (desktop only, md+)
-           ─────────────────────────────────────────────────────────
-           Default state  : panel collapses to a 7px indigo stripe.
-           Hover state    : panel smoothly springs open to 45% width.
-           Inner content  : slides in + fades after the panel opens.
-        ════════════════════════════════════════════════════════════ */
+        /* ════════════════════════════════════════
+           LEFT PANEL — always visible on desktop
+        ════════════════════════════════════════ */
         @media (min-width: 768px) {
-
-            /* ── The card itself shifts to slightly wider on expand ── */
-            .split-card {
-                transition: box-shadow 0.5s ease;
-            }
-            .split-card:hover {
-                box-shadow: 0 30px 80px rgba(59,130,246,0.18), 0 0 0 1px rgba(99,102,241,0.12);
-            }
-
-            /* ── Left panel: collapses to a thin indigo stripe ── */
             .left-panel {
-                width: 7px;
-                min-width: 7px;
-                flex-shrink: 0;
-                overflow: hidden;
-                /* Spring-easing cubic-bezier for a satisfying snap */
-                transition:
-                    width     0.70s cubic-bezier(0.34, 1.20, 0.64, 1),
-                    min-width 0.70s cubic-bezier(0.34, 1.20, 0.64, 1);
-                cursor: e-resize;
-            }
-
-            /* ── On hover: spring-expand to full width ── */
-            .split-card:hover .left-panel {
                 width: 45%;
                 min-width: 45%;
-                cursor: default;
+                flex-shrink: 0;
+                overflow: hidden;
             }
-
-            /* ── Stripe pulse: draws attention to the closed state ── */
-            @keyframes stripe-breathe {
-                0%,100% { box-shadow: inset 0 0 0px 0px rgba(99,102,241,0);    }
-                50%      { box-shadow: inset 0 0 18px 2px rgba(99,102,241,0.25); }
-            }
-            .left-panel { animation: stripe-breathe 2.8s ease-in-out infinite; }
-            .split-card:hover .left-panel { animation: none; }
-
-            /* ── The expand-hint chevron on the stripe ── */
-            .stripe-hint {
-                position: absolute;
-                top: 50%; left: 50%;
-                transform: translate(-50%, -50%);
-                display: flex; flex-direction: column;
-                align-items: center; gap: 4px;
-                transition: opacity 0.3s ease 0.1s;
-                opacity: 1;
-                pointer-events: none;
-            }
-            .split-card:hover .stripe-hint {
-                opacity: 0;
-                transition: opacity 0.15s ease;
-            }
-            @keyframes chevron-nudge {
-                0%,100% { transform: translate(-50%,-50%) translateX(0); }
-                50%      { transform: translate(-50%,-50%) translateX(3px); }
-            }
-            .stripe-hint { animation: chevron-nudge 1.4s ease-in-out infinite; }
-
-            /* ── Panel inner content: hidden/slid left when closed ── */
             .left-panel-inner {
-                min-width: 360px; /* prevents content squishing during transition */
-                opacity: 0;
-                transform: translateX(-22px);
-                transition:
-                    opacity   0.40s ease 0.40s,
-                    transform 0.40s cubic-bezier(0.34, 1.20, 0.64, 1) 0.38s;
-                pointer-events: none;
-            }
-            .split-card:hover .left-panel-inner {
+                min-width: 360px;
                 opacity: 1;
                 transform: translateX(0);
-                pointer-events: auto;
             }
-
-            /* ── Right panel: subtle rightward nudge when panel opens ── */
-            .right-panel {
-                transition: padding-left 0.70s cubic-bezier(0.34, 1.20, 0.64, 1);
-            }
-            .split-card:hover .right-panel {
-                /* no padding change needed — flex naturally handles the reflow */
-            }
+            .stripe-hint { display: none; }
         }
 
-        /* ── Mobile: hide left panel entirely, no stripe ── */
+        /* ── Mobile: hide left panel entirely ── */
         @media (max-width: 767px) {
             .left-panel { display: none !important; }
         }
 
         /* ════════════════════════════════════════
            SPLIT CARD outer wrapper
-           (max-width widens slightly on expand for breathing room)
         ════════════════════════════════════════ */
         .card-wrapper {
             width: 100%;
-            max-width: 520px;
-            transition: max-width 0.70s cubic-bezier(0.34, 1.20, 0.64, 1);
-        }
-        @media (min-width: 768px) {
-            .card-wrapper:hover {
-                max-width: 960px;
-            }
+            max-width: 960px;
         }
 
     </style>
@@ -767,21 +672,8 @@
                     <div class="geo-shape-a absolute bottom-10 right-8 w-10 h-10 bg-white/5  rounded-full z-0" style="animation-delay:-3s;"></div>
                     <div class="geo-shape-b absolute top-20 left-1/2  w-6  h-6  bg-indigo-300/10 rounded-full z-0" style="animation-delay:-6s;"></div>
 
-                    <!-- ── Stripe hint: visible only when panel is collapsed ── -->
-                    <div class="stripe-hint z-20">
-                        <!-- Three right-pointing chevrons stacked -->
-                        <svg class="w-3 h-3 text-white/60" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
-                        </svg>
-                        <svg class="w-3 h-3 text-white/35" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
-                        </svg>
-                        <svg class="w-3 h-3 text-white/18" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
-                        </svg>
-                    </div>
 
-                    <!-- ── All panel content (fades in after panel springs open) ── -->
+                    <!-- ── All panel content ── -->
                     <div class="left-panel-inner relative z-10 w-full h-full flex flex-col items-center justify-between">
 
                         <!-- Top: Branding -->
@@ -802,11 +694,11 @@
                             <div class="mt-3 mb-2 mx-auto w-12 h-px bg-gradient-to-r from-transparent via-blue-300/50 to-transparent"></div>
                             <!-- Headline -->
                             <h2 class="text-white font-extrabold text-2xl leading-tight tracking-tight">
-                                Automated<br>Scheduling Hub
+                                Your Friendly<br>Class Scheduler
                             </h2>
                             <!-- Descriptor -->
                             <p class="mt-3 text-blue-200/65 text-[11px] font-semibold tracking-wide leading-relaxed max-w-[230px] mx-auto">
-                                Streamline academic calendars, faculty loads, and room assignments — all in one intelligent platform.
+                                Simplify class scheduling, faculty assignments, and room management with one centralized system.
                             </p>
                         </div>
 

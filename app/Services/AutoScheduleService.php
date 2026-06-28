@@ -2033,7 +2033,7 @@ class AutoScheduleService
         }
 
         $subjectUnits = (int) ($subject->units ?? 0);
-        $maxUnits = (int) ($faculty->max_units ?? 21);
+        $maxUnits = max(36, (int) ($faculty->max_units ?? 36));
 
         $assignedUnits = $schedules
             ->where('faculty_id', $facultyId)

@@ -1206,7 +1206,7 @@ class ScheduleConflictService
             ->unique('id')
             ->sum(fn (Subject $assignedSubject) => (int) ($assignedSubject->units ?? 0));
 
-        return ($currentUnits + (int) ($subject->units ?? 0)) <= (int) ($faculty->max_units ?? 21);
+        return ($currentUnits + (int) ($subject->units ?? 0)) <= max(36, (int) ($faculty->max_units ?? 36));
     }
 
     private function facultyDailyHoursValid(Subject $subject, string $day, string $startTime, string $endTime, ?int $ignoreScheduleId, ?int $facultyId = null): bool
