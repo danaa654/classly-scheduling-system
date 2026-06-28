@@ -2575,19 +2575,24 @@ class MasterGrid extends Component
             return [];
         }
 
+        // Normalize slot bounds to H:i:s strings to ensure correct time-only
+        // comparison (Schedule start_time/end_time are TIME columns in MySQL).
+        $slotStartStr = $slotStart instanceof Carbon
+            ? $slotStart->format('H:i:s')
+            : Carbon::parse($slotStart)->format('H:i:s');
+
+        $slotEndStr = $slotEnd instanceof Carbon
+            ? $slotEnd->format('H:i:s')
+            : Carbon::parse($slotEnd)->format('H:i:s');
+
         $schedules = $this->activeScheduleQuery()
             ->where('room_id', $this->selectedRoomId)
             ->where('day', $day)
+            ->whereNotNull('start_time')
+            ->whereNotNull('end_time')
+            ->whereRaw('TIME(start_time) < ? AND TIME(end_time) > ?', [$slotEndStr, $slotStartStr])
             ->with('subject')
             ->get()
-            ->filter(function ($schedule) use ($slotStart, $slotEnd) {
-                $schedStart = Carbon::parse($schedule->start_time);
-                $schedEnd = Carbon::parse($schedule->end_time);
-                $slotStartCarbon = Carbon::parse($slotStart);
-                $slotEndCarbon = Carbon::parse($slotEnd);
-                
-                return $schedStart < $slotEndCarbon && $schedEnd > $slotStartCarbon;
-            })
             ->values();
 
         $result = [];
@@ -2612,11 +2617,24 @@ class MasterGrid extends Component
             return [];
         }
 
+        // Always pass plain H:i:s strings — Carbon datetime objects bound into
+        // whereRaw produce full datetime strings (e.g. "2025-06-27 08:00:00")
+        // which MySQL cannot compare correctly against TIME columns.
+        $slotStartStr = $slotStart instanceof \Carbon\Carbon
+            ? $slotStart->format('H:i:s')
+            : Carbon::parse($slotStart)->format('H:i:s');
+
+        $slotEndStr = $slotEnd instanceof \Carbon\Carbon
+            ? $slotEnd->format('H:i:s')
+            : Carbon::parse($slotEnd)->format('H:i:s');
+
         return $this->activeScheduleQuery()
             ->where('room_id', $this->selectedRoomId)
             ->where('day', $day)
+            ->whereNotNull('start_time')
+            ->whereNotNull('end_time')
             ->with('subject')
-            ->whereRaw('start_time < ? AND end_time > ?', [$slotEnd, $slotStart])
+            ->whereRaw('TIME(start_time) < ? AND TIME(end_time) > ?', [$slotEndStr, $slotStartStr])
             ->get()
             ->toArray();
     }
@@ -2668,13 +2686,17 @@ class MasterGrid extends Component
         $schedules = $this->selectedRoomId
             ? $this->activeScheduleQuery()
                 ->where('room_id', $this->selectedRoomId)
-                ->where(function ($q) {
-                    $q->whereIn('day', $this->days)
-                    ->orWhereNull('day');
-                })
+                // Only fetch fully-placed schedules (non-null day + times).
+                // Pre-assignment placeholders (day=null) are not renderable on
+                // the grid and were silently skipped in the blade after fetch.
+                ->whereIn('day', $this->days)
+                ->whereNotNull('start_time')
+                ->whereNotNull('end_time')
                 ->with(['subject' => function ($query) {
+                    // NOTE: 'section' is on the Schedule row, not Subject,
+                    // so it is not needed in this select.
                     $query->select(
-                        'id', 'subject_code', 'description', 'edp_code', 
+                        'id', 'subject_code', 'description', 'edp_code',
                         'duration_hours', 'department', 'type', 'major', 'year_level', 'faculty_id'
                     );
                 }, 'faculty:id,full_name', 'room:id,room_name'])

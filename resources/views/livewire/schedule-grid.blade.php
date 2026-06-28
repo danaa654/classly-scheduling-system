@@ -160,7 +160,12 @@
                         $heightPx = max(40, $heightPx);
 
                         // 4. Day Index for Horizontal placement
-                        $dayFull = $schedule->day;
+                        // Normalize the day to Title Case to guard against any
+                        // case inconsistency stored in the database (e.g. 'monday'
+                        // vs 'Monday'). array_search() is strict, so a mismatch
+                        // would silently drop the card from the grid.
+                        $dayRaw  = (string) ($schedule->day ?? '');
+                        $dayFull = ucfirst(strtolower(trim($dayRaw)));
                         $dayIndex = array_search($dayFull, $activeDays, true);
                         if ($dayIndex === false) continue;
                         

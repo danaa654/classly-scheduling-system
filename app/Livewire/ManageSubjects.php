@@ -834,8 +834,12 @@ class ManageSubjects extends Component
             if ($subjectExistsInNextSection) { $skippedCount++; $skippedReasons[] = "{$original->subject_code} in Section {$nextSection} already exists"; continue; }
             if (Subject::edpExistsInWorkspace($newEdp, $period['school_year'], $period['semester'])) { $skippedCount++; continue; }
 
-            // Carry over room type consistently — preferred_room_type is source of truth
-            $origRoomType   = $original->preferred_room_type ?: 'LECTURE';
+            // Carry over room type consistently — preferred_room_type is source of truth.
+            // Use ?? '' (not ?: 'LECTURE') so that an empty string (= "no override, use
+            // default room routing") is preserved as-is. The old ?: 'LECTURE' fallback
+            // was incorrectly activating the Room Override checkbox on every duplicate
+            // of a subject whose preferred_room_type was empty.
+            $origRoomType    = $original->preferred_room_type ?? '';
             $origRequiresLab = str_contains(strtoupper($origRoomType), 'LAB');
 
             try {

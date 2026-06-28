@@ -51,6 +51,19 @@
                         <span class="mr-2 text-base">📥</span> Bulk Import
                     </button>
 
+                    {{-- Preliminary Schedule report wizard --}}
+                    <button
+                        x-on:click="$dispatch('open-preliminary-schedule')"
+                        class="flex items-center px-4 py-2 bg-violet-600 dark:bg-violet-700 text-white
+                            rounded-xl font-black shadow-md shadow-violet-500/40 dark:shadow-none
+                            text-sm hover:scale-105 active:scale-95 transition-all">
+                        <svg class="w-4 h-4 mr-1.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                  d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                        </svg>
+                        Prelim Schedule
+                    </button>
+
                     <button wire:click="openModal"
                             class="flex items-center px-4 py-2 bg-blue-700 dark:bg-indigo-700 text-white 
                                 rounded-xl font-black shadow-md shadow-blue-600/40 dark:shadow-none 
@@ -903,4 +916,8 @@
 }
 .dark nav[role="navigation"] button:hover { background-color: #1e293b !important; color: #818cf8 !important; }
 </style>
+
+{{-- Preliminary Schedule report modal (standalone Livewire component) --}}
+@livewire('reports.preliminary-schedule-modal')
+
 </div>
