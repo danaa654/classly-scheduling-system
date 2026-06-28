@@ -8,6 +8,7 @@ use App\Models\Setting;
 use App\Models\Subject;
 use App\Models\Faculty;
 use App\Models\Department;
+use App\Services\RoomCapacityService;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Support\Collection;
@@ -337,6 +338,26 @@ class AutoScheduleService
 
                 if (!$this->isRoomCompatible($room, $subject, allowMinorLabFallback: true)) {
                     $result['failure_reasons'][] = "{$subject->subject_code}: room is no longer compatible";
+                    $groupFailed = true;
+                    break;
+                }
+
+                // ── WEEKLY CAPACITY GUARD ───────────────────────────────────
+                // Prevent saving a schedule that would push a room over its
+                // maximum weekly available hours.
+                if (!RoomCapacityService::canScheduleSubjectInRoom($room, $subject, $existingSchedules->concat($validatedSchedules))) {
+                    $maxCap    = RoomCapacityService::getWeeklyCapacity();
+                    $curLoad   = RoomCapacityService::getCurrentScheduledRoomLoad($room, $existingSchedules->concat($validatedSchedules));
+                    $remaining = max(0, $maxCap - $curLoad);
+                    $result['failure_reasons'][] = sprintf(
+                        '%s: room %s is at capacity (%sh/wk max, %sh used, %sh remaining, subject needs %sh)',
+                        $subject->subject_code,
+                        $room->room_name,
+                        RoomCapacityService::formatHours($maxCap),
+                        RoomCapacityService::formatHours($curLoad),
+                        RoomCapacityService::formatHours($remaining),
+                        RoomCapacityService::formatHours((float) $subject->duration_hours)
+                    );
                     $groupFailed = true;
                     break;
                 }
@@ -2762,8 +2783,23 @@ class AutoScheduleService
             ? (int) $subject->preferred_room_id
             : null;
 
+        // ── Weekly capacity: maximum hours per room per semester week ─────────
+        // We filter BEFORE scoring so over-capacity rooms never appear in the
+        // candidate list at all — not even as a last-resort fallback.
+        $maxWeeklyCapacity = RoomCapacityService::getWeeklyCapacity();
+        $subjectWeeklyHours = (float) $subject->duration_hours;
+
         $strictRooms = $rooms
             ->filter(fn (Room $room) => $this->isRoomCompatible($room, $subject, allowMinorLabFallback: false))
+            // ── CAPACITY GUARD ──────────────────────────────────────────────
+            // Skip any room whose current scheduled load + this subject's weekly
+            // hours would exceed the semester's maximum.
+            // Uses the in-memory $existingSchedules when available (fast path);
+            // falls back to a DB query when called outside the batch generator.
+            ->filter(function (Room $room) use ($existingSchedules, $maxWeeklyCapacity, $subjectWeeklyHours) {
+                $currentLoad = RoomCapacityService::getCurrentScheduledRoomLoad($room, $existingSchedules);
+                return ($currentLoad + $subjectWeeklyHours) <= $maxWeeklyCapacity;
+            })
             ->map(fn (Room $room) => [
                 'room' => $room,
                 'score' => $this->compatibilityScore($room, $subject),
@@ -2787,6 +2823,11 @@ class AutoScheduleService
                     
                     return $isLecture && $isGeneral;
                 })
+                // Capacity guard on fallback CTE rooms too
+                ->filter(function (Room $room) use ($existingSchedules, $maxWeeklyCapacity, $subjectWeeklyHours) {
+                    $currentLoad = RoomCapacityService::getCurrentScheduledRoomLoad($room, $existingSchedules);
+                    return ($currentLoad + $subjectWeeklyHours) <= $maxWeeklyCapacity;
+                })
                 ->map(fn (Room $room) => [
                     'room' => $room,
                     'score' => 50, // Give it a safe baseline compatibility score
@@ -2799,6 +2840,11 @@ class AutoScheduleService
         if ($candidateRooms->isEmpty() && strtoupper((string) $subject->type) === 'MINOR') {
             $candidateRooms = $rooms
                 ->filter(fn (Room $room) => $this->isRoomCompatible($room, $subject, allowMinorLabFallback: true))
+                // Capacity guard on minor fallback rooms too
+                ->filter(function (Room $room) use ($existingSchedules, $maxWeeklyCapacity, $subjectWeeklyHours) {
+                    $currentLoad = RoomCapacityService::getCurrentScheduledRoomLoad($room, $existingSchedules);
+                    return ($currentLoad + $subjectWeeklyHours) <= $maxWeeklyCapacity;
+                })
                 ->map(fn (Room $room) => [
                     'room' => $room,
                     'score' => max(1, $this->compatibilityScore($room, $subject) - 100),

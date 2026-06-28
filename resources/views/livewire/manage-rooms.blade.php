@@ -194,13 +194,14 @@
                                                 ->unique('id')
                                                 ->values();
 
+                                            // Room load = SUM(duration_hours). meetings_per_week
+                                            // only splits the block across days, never multiplies it.
                                             $roomTotalHours = $allRoomSubjects->sum(
                                                 fn ($s) => (float) $s->duration_hours
-                                                         * max(1, (int) ($s->meetings_per_week ?? 1))
                                             );
 
-                                            $roomUtilPct    = min(100, (int) round(($roomTotalHours / 60) * 100));
-                                            $roomOverCap    = $roomTotalHours > 60;
+                                            $roomUtilPct    = min(100, (int) round((\App\Services\RoomCapacityService::getWeeklyCapacity() > 0 ? ($roomTotalHours / \App\Services\RoomCapacityService::getWeeklyCapacity()) : 0) * 100));
+                                            $roomOverCap    = $roomTotalHours > \App\Services\RoomCapacityService::getWeeklyCapacity();
 
                                             $roomDotClass   = match (true) {
                                                 $roomOverCap            => 'bg-red-500 animate-pulse',
@@ -230,7 +231,7 @@
                                             <div class="flex items-center gap-1.5">
                                                 <span class="inline-block w-2 h-2 rounded-full shrink-0 {{ $roomDotClass }}"></span>
                                                 <span class="text-[10px] font-black uppercase tracking-widest {{ $roomTextClass }}">
-                                                    {{ number_format($roomTotalHours, 1) }}&nbsp;/ 60 hrs
+                                                    {{ number_format($roomTotalHours, 1) }}&nbsp;/ {{ \App\Services\RoomCapacityService::getFormattedCapacity() }}
                                                     @if ($roomOverCap)
                                                         &middot; OVER CAPACITY
                                                     @else
@@ -392,10 +393,9 @@
                                         @else
                                             @foreach($allRoomSubjects as $subject)
                                                 @php
-                                                    $subjectWklyHrs = round(
-                                                        (float) $subject->duration_hours * max(1, (int) ($subject->meetings_per_week ?? 1)),
-                                                        1
-                                                    );
+                                                    // Per-subject room usage = duration_hours only.
+                                                    // meetings_per_week is for schedule splitting, not multiplication.
+                                                    $subjectWklyHrs = round((float) $subject->duration_hours, 1);
                                                     // Show a badge if this subject came from a schedule record
                                                     // (room_id) rather than a direct preferred_room_id assignment.
                                                     $isScheduledRoom = is_null($subject->preferred_room_id)
@@ -1032,41 +1032,90 @@
                         </div>
                     @endif
 
-                    <div class="pt-2">
-                        <div class="flex items-center justify-between mb-2">
-                            <span
-                                class="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                    <div class="pt-2 space-y-3">
+
+                        {{-- ── Capacity header row ───────────────────────── --}}
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">
                                 Weekly Room Load
                             </span>
-                            <span
-                                class="text-sm font-black tabular-nums
+                            <span class="text-sm font-black tabular-nums
                                        {{ $selectedWeeklyHours > $maxWeeklyHours ? 'text-red-600 dark:text-red-400' : 'text-slate-700 dark:text-slate-300' }}">
                                 {{ number_format($selectedWeeklyHours, 1) }}h
-                                <span class="text-slate-400 dark:text-slate-600">
-                                    / {{ $maxWeeklyHours }}h
+                                <span class="text-slate-400 dark:text-slate-600 font-medium">
+                                    / {{ $maxWeeklyHours }}h max
                                 </span>
                             </span>
                         </div>
-                        <div class="h-3 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                            @php
-                                $pct = $maxWeeklyHours > 0 ? min(100, ($selectedWeeklyHours / $maxWeeklyHours) * 100) : 0;
-                                $barColor = $selectedWeeklyHours > $maxWeeklyHours
-                                    ? 'bg-red-500'
-                                    : ($selectedWeeklyHours > $maxWeeklyHours * 0.8 ? 'bg-amber-400' : 'bg-indigo-500');
-                            @endphp
-                            <div
-                                class="h-full rounded-full transition-all duration-500 {{ $barColor }}"
-                                style="width: {{ $pct }}%">
+
+                        {{-- ── Progress bar ───────────────────────────────── --}}
+                        @php
+                            $maxCap   = $maxWeeklyHours;
+                            // "Saved" portion = hidden load + pre-selected visible load
+                            $savedPct   = $maxCap > 0 ? min(100, ($currentRoomHiddenLoad + $currentRoomVisibleLoad) / $maxCap * 100) : 0;
+                            // "Projected" portion = full selected total
+                            $projPct    = $maxCap > 0 ? min(100, $selectedWeeklyHours / $maxCap * 100) : 0;
+                            $isOverCap  = $selectedWeeklyHours > $maxCap;
+                            $savedBar   = $isOverCap ? 'bg-red-400' : 'bg-indigo-400 dark:bg-indigo-500';
+                            $addedBar   = $isOverCap ? 'bg-red-600' : 'bg-indigo-600 dark:bg-indigo-400';
+                        @endphp
+                        <div class="relative h-4 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                            {{-- Existing saved load (darker) --}}
+                            <div class="absolute inset-y-0 left-0 rounded-full transition-all duration-500 {{ $savedBar }}"
+                                 style="width: {{ $savedPct }}%"></div>
+                            {{-- Projected total incl. pending selection (lighter overlay) --}}
+                            <div class="absolute inset-y-0 left-0 rounded-full transition-all duration-500 opacity-60 {{ $addedBar }}"
+                                 style="width: {{ $projPct }}%"></div>
+                        </div>
+
+                        {{-- ── Three-stat breakdown pills ─────────────────── --}}
+                        @php
+                            $curLoad    = $currentRoomHiddenLoad + $currentRoomVisibleLoad;
+                            $remaining  = max(0, $maxCap - $curLoad);
+                            // Net new hours being added (pending = selected − already-saved)
+                            $pendingHrs = max(0, $selectedWeeklyHours - $curLoad);
+                        @endphp
+                        <div class="grid grid-cols-3 gap-2 text-center text-[11px] font-bold">
+                            <div class="bg-slate-100 dark:bg-slate-800 rounded-xl py-2 px-1">
+                                <div class="text-slate-500 dark:text-slate-400 uppercase tracking-wide text-[9px] mb-0.5">Current</div>
+                                <div class="text-slate-700 dark:text-slate-200 tabular-nums">{{ number_format($curLoad, 1) }}h</div>
+                            </div>
+                            <div class="{{ $pendingHrs > $remaining ? 'bg-red-50 dark:bg-red-900/20' : 'bg-indigo-50 dark:bg-indigo-900/20' }} rounded-xl py-2 px-1">
+                                <div class="{{ $pendingHrs > $remaining ? 'text-red-500' : 'text-indigo-500 dark:text-indigo-400' }} uppercase tracking-wide text-[9px] mb-0.5">Adding</div>
+                                <div class="{{ $pendingHrs > $remaining ? 'text-red-600 dark:text-red-400' : 'text-indigo-700 dark:text-indigo-300' }} tabular-nums">
+                                    {{ $pendingHrs > 0 ? '+' : '' }}{{ number_format($pendingHrs, 1) }}h
+                                </div>
+                            </div>
+                            <div class="{{ $remaining <= 0 ? 'bg-red-50 dark:bg-red-900/20' : ($remaining < $maxCap * 0.2 ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-emerald-50 dark:bg-emerald-900/20') }} rounded-xl py-2 px-1">
+                                <div class="{{ $remaining <= 0 ? 'text-red-500' : ($remaining < $maxCap * 0.2 ? 'text-amber-500' : 'text-emerald-500') }} uppercase tracking-wide text-[9px] mb-0.5">Remaining</div>
+                                <div class="{{ $remaining <= 0 ? 'text-red-600 dark:text-red-400' : ($remaining < $maxCap * 0.2 ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-700 dark:text-emerald-300') }} tabular-nums">
+                                    {{ number_format($remaining, 1) }}h
+                                </div>
                             </div>
                         </div>
                     </div>
 
-                    @if($capacityWarning)
-                        <div
-                            class="flex items-start gap-3 px-5 py-4 bg-amber-50 dark:bg-amber-900/20
-                                   border border-amber-200 dark:border-amber-700 rounded-xl mt-2">
-                            <span
-                                class="text-amber-500 dark:text-amber-400 text-xl flex-shrink-0">⚠️</span>
+                    {{-- ── Hard capacity error (blocks save) ───────────────── --}}
+                    @if($capacityError)
+                        <div class="flex items-start gap-3 px-5 py-4 bg-red-50 dark:bg-red-900/20
+                                   border border-red-200 dark:border-red-700 rounded-xl">
+                            <span class="text-red-500 dark:text-red-400 text-xl flex-shrink-0">🚫</span>
+                            <div>
+                                <p class="text-sm font-black text-red-800 dark:text-red-200 leading-snug">
+                                    Room Capacity Exceeded
+                                </p>
+                                <p class="text-xs text-red-700 dark:text-red-300 mt-1 leading-relaxed">
+                                    {{ $capacityError }}
+                                </p>
+                            </div>
+                        </div>
+                    @endif
+
+                    {{-- ── Soft advisory warning ────────────────────────────── --}}
+                    @if($capacityWarning && !$capacityError)
+                        <div class="flex items-start gap-3 px-5 py-4 bg-amber-50 dark:bg-amber-900/20
+                                   border border-amber-200 dark:border-amber-700 rounded-xl">
+                            <span class="text-amber-500 dark:text-amber-400 text-xl flex-shrink-0">⚠️</span>
                             <p class="text-sm font-bold text-amber-800 dark:text-amber-200 leading-snug">
                                 {{ $capacityWarning }}
                             </p>
@@ -1417,7 +1466,10 @@
                                 {{ number_format($selectedWeeklyHours, 1) }}h / wk
                             </span>
                         @endif
-                        @if($capacityWarning)
+                        @if($capacityError)
+                            <span class="mx-2 opacity-50">|</span>
+                            <span class="text-red-600 dark:text-red-400 font-black text-xs uppercase tracking-widest bg-red-100 dark:bg-red-900/30 px-2 py-1 rounded-md">🚫 Exceeds capacity</span>
+                        @elseif($capacityWarning)
                             <span class="mx-2 opacity-50">|</span>
                             <span class="text-amber-600 dark:text-amber-400 font-black text-xs uppercase tracking-widest bg-amber-100 dark:bg-amber-900/30 px-2 py-1 rounded-md">⚠️ Over capacity</span>
                         @endif
@@ -1433,16 +1485,20 @@
                             Cancel
                         </button>
 
+                        {{-- Save button: disabled when over capacity OR Livewire is loading --}}
                         <button
                             type="button"
                             wire:click="saveRoomAssignments"
                             wire:loading.attr="disabled"
                             wire:loading.class="opacity-70 cursor-not-allowed transform-none"
                             wire:target="saveRoomAssignments"
-                            class="flex items-center gap-2 px-8 py-3.5 bg-indigo-600 dark:bg-indigo-700 text-white
-                                   rounded-xl font-black shadow-lg shadow-indigo-200 dark:shadow-none
-                                   hover:bg-indigo-700 dark:hover:bg-indigo-600 transition-all uppercase
-                                   text-xs tracking-widest disabled:opacity-70 disabled:cursor-not-allowed">
+                            @if($selectedWeeklyHours > $maxWeeklyHours) disabled @endif
+                            class="flex items-center gap-2 px-8 py-3.5 text-white
+                                   rounded-xl font-black shadow-lg transition-all uppercase
+                                   text-xs tracking-widest disabled:opacity-50 disabled:cursor-not-allowed
+                                   {{ $selectedWeeklyHours > $maxWeeklyHours
+                                       ? 'bg-red-500 dark:bg-red-700 shadow-red-200 dark:shadow-none cursor-not-allowed'
+                                       : 'bg-indigo-600 dark:bg-indigo-700 shadow-indigo-200 dark:shadow-none hover:bg-indigo-700 dark:hover:bg-indigo-600' }}">
                             <span wire:loading wire:target="saveRoomAssignments" class="mr-2">
                                 <svg class="animate-spin w-5 h-5" fill="none" viewBox="0 0 24 24">
                                     <circle class="opacity-25" cx="12" cy="12" r="10"
@@ -1454,11 +1510,15 @@
                             <span wire:loading wire:target="saveRoomAssignments">Saving...</span>
 
                             <span wire:loading.remove wire:target="saveRoomAssignments" class="flex items-center">
-                                💾 Save Assignments
-                                @if($selectedCount > 0)
-                                    <span class="ml-3 px-2.5 py-0.5 bg-white/20 text-white rounded-full text-xs font-black">
-                                        {{ $selectedCount }}
-                                    </span>
+                                @if($selectedWeeklyHours > $maxWeeklyHours)
+                                    🚫 Capacity Exceeded
+                                @else
+                                    💾 Save Assignments
+                                    @if($selectedCount > 0)
+                                        <span class="ml-3 px-2.5 py-0.5 bg-white/20 text-white rounded-full text-xs font-black">
+                                            {{ $selectedCount }}
+                                        </span>
+                                    @endif
                                 @endif
                             </span>
                         </button>

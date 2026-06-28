@@ -2,6 +2,8 @@
 
 namespace App\Livewire;
 
+use App\Services\RoomCapacityService;
+
 use App\Models\Room;
 use App\Models\Schedule;
 use App\Models\Subject;  
@@ -44,11 +46,27 @@ class ManageRooms extends Component
     public array  $assigningRoomData   = [];   // Serialised room metadata for Blade
     public array  $modalSubjects       = [];   // Smart-filtered eligible subjects
     public array  $selectedSubjectIds  = [];   // Checkbox-bound IDs (Livewire stores as strings)
-    public float  $selectedWeeklyHours = 0.0;  // Live running total of selected hours
-    public string $capacityWarning     = '';   // Non-empty string → alert shown in modal
- 
+    public float  $selectedWeeklyHours  = 0.0;  // Live running total of selected hours
+    public string $capacityWarning      = '';   // Non-empty string → soft warning shown in modal
+    public string $capacityError        = '';   // Non-empty string → hard error blocking save
+
+    /**
+     * Weekly hours from subjects already bound to this room that are NOT visible
+     * in the current modal (different dept/type filter, or Practicum excluded).
+     * Added to the selected-subject sum so the capacity meter is always accurate.
+     */
+    public float $currentRoomHiddenLoad = 0.0;
+
+    /**
+     * Weekly hours already saved for subjects visible in the modal AND pre-ticked
+     * (already assigned to this room). Stored so the meter can show "current load"
+     * separately from "pending additions."
+     */
+    public float $currentRoomVisibleLoad = 0.0;
+
     // Maximum teaching hours one room should absorb per week (used for validation)
-    private const MAX_WEEKLY_ROOM_HOURS = 40;
+    // Weekly room capacity is now dynamic — always derived from Global Settings
+    // via RoomCapacityService::getWeeklyCapacity(). No hardcoded constant here.
     
     public $showModal = false;
     public $bulkOpen = false; 
@@ -527,11 +545,10 @@ class ManageRooms extends Component
                 'units'               => (int) $s->units,
                 'duration_hours'      => (float) $s->duration_hours,
                 'meetings_per_week'   => (int) ($s->meetings_per_week ?? 1),
-                // Pre-computed so Blade & capacity calc never divide by zero
-                'weekly_hours'        => round(
-                    (float) $s->duration_hours * max(1, (int) ($s->meetings_per_week ?? 1)),
-                    1
-                ),
+                // weekly_hours = duration_hours only (total weekly room block).
+                // meetings_per_week splits the block across days - it does NOT
+                // multiply room usage. SA101 4h/2x => 2h Mon + 2h Wed = 4h total.
+                'weekly_hours'        => round((float) $s->duration_hours, 1),
                 'requires_lab'        => (bool) $s->requires_lab,
                 'subject_type'        => (string) ($s->type ?? 'Major'),  // 'Major' or 'Minor'
                 'preferred_room_type' => (string) ($s->preferred_room_type ?? ''),
@@ -552,7 +569,25 @@ class ManageRooms extends Component
             ->pluck('id')
             ->map(fn ($id) => (string) $id) // Livewire checkboxes store strings
             ->toArray();
- 
+
+        // ── Calculate hidden load (assigned subjects not visible in modal) ──────
+        // Some subjects assigned to this room may not appear in modalSubjects because
+        // they belong to a different dept/type filter. We still need their hours in
+        // the capacity meter so the total is always accurate.
+        $modalSubjectIds = collect($this->modalSubjects)->pluck('id')->all();
+        $this->currentRoomHiddenLoad = (float) Subject::activeTerm()
+            ->where('preferred_room_id', $roomId)
+            ->when(!empty($modalSubjectIds), fn ($q) => $q->whereNotIn('id', $modalSubjectIds))
+            ->where(function ($q) {
+                $q->where('is_practicum', false)->orWhereNull('is_practicum');
+            })
+            ->sum('duration_hours');
+
+        // ── Pre-selected visible load (subjects in modal already bound to this room) ─
+        $this->currentRoomVisibleLoad = (float) collect($this->modalSubjects)
+            ->whereIn('id', $this->selectedSubjectIds)
+            ->sum('weekly_hours');
+
         $this->recalculateCapacity();
         $this->showAssignModal = true;
     }
@@ -666,10 +701,8 @@ class ManageRooms extends Component
             'units'               => (int) $s->units,
             'duration_hours'      => (float) $s->duration_hours,
             'meetings_per_week'   => (int) ($s->meetings_per_week ?? 1),
-            'weekly_hours'        => round(
-                (float) $s->duration_hours * max(1, (int) ($s->meetings_per_week ?? 1)),
-                1
-            ),
+            // weekly_hours = duration_hours only. meetings_per_week = splitting only.
+            'weekly_hours'        => round((float) $s->duration_hours, 1),
             'requires_lab'        => (bool) $s->requires_lab,
             'subject_type'        => (string) ($s->type ?? 'Major'),  // 'Major' or 'Minor'
             'preferred_room_type' => (string) ($s->preferred_room_type ?? ''),
@@ -742,6 +775,51 @@ class ManageRooms extends Component
             ->unique()
             ->values()
             ->all();
+
+        // ── HARD CAPACITY VALIDATION ─────────────────────────────────────────
+        // Block the save if the selected subjects would push this room over its
+        // maximum weekly hours. This is the authoritative check; the UI warning
+        // is advisory only.
+        $maxCapacity  = RoomCapacityService::getWeeklyCapacity();
+        $selectedHours = (float) collect($this->modalSubjects)
+            ->whereIn('id', $selectedIds)
+            ->sum('weekly_hours');
+        $projectedTotal = $this->currentRoomHiddenLoad + $selectedHours;
+
+        if ($projectedTotal > $maxCapacity) {
+            $roomName  = $this->assigningRoomData['room_name'] ?? "Room #{$this->assigningRoomId}";
+            $curLoad   = $this->currentRoomHiddenLoad + $this->currentRoomVisibleLoad;
+            $newHours  = $projectedTotal - $curLoad;
+            $remaining = max(0, $maxCapacity - $curLoad);
+
+            $this->capacityError = sprintf(
+                'Cannot save. %s would exceed its weekly capacity. '
+                . 'Maximum: %sh/wk · Current: %sh/wk · Remaining: %sh/wk · Trying to add: %sh/wk',
+                $roomName,
+                RoomCapacityService::formatHours($maxCapacity),
+                RoomCapacityService::formatHours($curLoad),
+                RoomCapacityService::formatHours($remaining),
+                RoomCapacityService::formatHours(max(0, $newHours))
+            );
+
+            $this->dispatch('toast', [
+                'type'    => 'error',
+                'message' => 'Room Capacity Exceeded',
+                'detail'  => "Cannot assign subject. {$roomName} maximum is "
+                           . RoomCapacityService::formatHours($maxCapacity)
+                           . '/wk · Current: '
+                           . RoomCapacityService::formatHours($curLoad)
+                           . '/wk · Remaining: '
+                           . RoomCapacityService::formatHours($remaining)
+                           . '/wk · Trying to add: '
+                           . RoomCapacityService::formatHours(max(0, $newHours)) . '/wk',
+            ]);
+
+            return; // ← Hard stop: do NOT write to DB
+        }
+
+        // Clear any stale hard error once the save is valid.
+        $this->capacityError = '';
  
         DB::transaction(function () use ($selectedIds) {
             // 1. Bind newly selected subjects to this room
@@ -795,18 +873,45 @@ class ManageRooms extends Component
     private function recalculateCapacity(): void
     {
         $selectedIds = array_map('intval', $this->selectedSubjectIds);
- 
-        $this->selectedWeeklyHours = (float) collect($this->modalSubjects)
+        $maxWeeklyHours = RoomCapacityService::getWeeklyCapacity();
+
+        // Hours from subjects visible in the modal that are currently selected.
+        $selectedModalHours = (float) collect($this->modalSubjects)
             ->whereIn('id', $selectedIds)
             ->sum('weekly_hours');
- 
-        $this->capacityWarning = $this->selectedWeeklyHours > self::MAX_WEEKLY_ROOM_HOURS
-            ? sprintf(
-                'Selected subjects require %.1f weekly hours, exceeding the %dh maximum for a single room.',
+
+        // Total projected load = hidden subjects (other depts/types) + visible selected.
+        $this->selectedWeeklyHours = $this->currentRoomHiddenLoad + $selectedModalHours;
+
+        // ── Current saved load (for display) ─────────────────────────────────
+        // = hidden load + visible subjects that are already saved to this room.
+        // This lets the blade show "Current: Xh" separate from "Adding: Yh".
+        $this->currentRoomVisibleLoad = (float) collect($this->modalSubjects)
+            ->whereIn('id', array_map('intval', array_filter(
+                $this->selectedSubjectIds,
+                fn ($id) => collect($this->modalSubjects)->firstWhere('id', (int) $id) !== null
+            )))
+            ->sum('weekly_hours');
+
+        // ── Soft warning (informational) ──────────────────────────────────────
+        if ($this->selectedWeeklyHours > $maxWeeklyHours) {
+            $roomName  = $this->assigningRoomData['room_name'] ?? 'this room';
+            $over      = $this->selectedWeeklyHours - $maxWeeklyHours;
+            $this->capacityWarning = sprintf(
+                '⚠ Selected subjects require %.1fh/wk, exceeding the %s maximum by %s. '
+                . 'Remove subjects or reduce assignments before saving.',
                 $this->selectedWeeklyHours,
-                self::MAX_WEEKLY_ROOM_HOURS
-            )
-            : '';
+                RoomCapacityService::getFormattedCapacity(),
+                RoomCapacityService::formatHours($over)
+            );
+        } else {
+            $this->capacityWarning = '';
+        }
+
+        // Clear hard error whenever the selection changes to a valid state.
+        if ($this->selectedWeeklyHours <= $maxWeeklyHours) {
+            $this->capacityError = '';
+        }
     }
  
     /**
@@ -891,12 +996,15 @@ class ManageRooms extends Component
     /** Wipe all assign-modal state so openAssignModal() starts clean. */
     private function resetAssignModal(): void
     {
-        $this->assigningRoomId     = null;
-        $this->assigningRoomData   = [];
-        $this->modalSubjects       = [];
-        $this->selectedSubjectIds  = [];
-        $this->selectedWeeklyHours = 0.0;
-        $this->capacityWarning     = '';
+        $this->assigningRoomId        = null;
+        $this->assigningRoomData      = [];
+        $this->modalSubjects          = [];
+        $this->selectedSubjectIds     = [];
+        $this->selectedWeeklyHours    = 0.0;
+        $this->currentRoomHiddenLoad  = 0.0;
+        $this->currentRoomVisibleLoad = 0.0;
+        $this->capacityWarning        = '';
+        $this->capacityError          = '';
     }
 
     /**
@@ -991,7 +1099,10 @@ class ManageRooms extends Component
             // The blade merges this with $room->subjects (preferred_room_id) to show
             // the full picture regardless of how the room assignment was made.
             'scheduledSubjectsByRoom'  => $scheduledSubjectsByRoom,
-            'maxWeeklyHours'           => self::MAX_WEEKLY_ROOM_HOURS,
+            'maxWeeklyHours'           => RoomCapacityService::getWeeklyCapacity(),
+            // Capacity breakdown for the assign modal meter
+            'currentRoomHiddenLoad'    => $this->currentRoomHiddenLoad,
+            'currentRoomVisibleLoad'   => $this->currentRoomVisibleLoad,
         ]);
     }
 }
