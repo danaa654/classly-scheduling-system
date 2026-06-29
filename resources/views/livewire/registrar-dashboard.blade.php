@@ -1050,7 +1050,7 @@
 
             </div>{{-- end filter row --}}
 
-            {{-- Faculty List (scrollable – first 5 visible, scroll for more) --}}
+            {{-- Faculty List (scrollable) --}}
             <div class="panel-scroll overflow-y-auto max-h-[330px] pr-1 space-y-3">
                 @forelse($facultyLoad as $faculty)
                 @php
@@ -1068,8 +1068,8 @@
 
                     // Determine faculty role for filtering
                     $facultyDept = $faculty['department'] ?? '';
-                    $isInstitutionWide = in_array(strtolower($facultyDept), ['institution-wide', 'gen ed', 'general education']);
-                    $isCrossDept = ($faculty['is_cross_dept'] ?? false);
+                    $isInstitutionWide = $faculty['is_gened'] ?? false;
+                    $isCrossDept = $faculty['is_cross_dept'] ?? false;
                     $facultyRole = $isInstitutionWide ? 'institution-wide' : ($isCrossDept ? 'cross-departmental' : 'departmental');
 
                     // Normalize dept for filtering
@@ -1119,7 +1119,8 @@
                     </div>
                 </div>
                 @empty
-                <div class="flex flex-col items-center justify-center py-6 text-slate-400">
+                <div class="flex flex-col items-center justify-center py-8 text-slate-400">
+                    <svg class="w-8 h-8 mb-2 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
                     <p class="text-[13px]">No faculty data</p>
                 </div>
                 @endforelse

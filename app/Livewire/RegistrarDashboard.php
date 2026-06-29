@@ -259,16 +259,19 @@ class RegistrarDashboard extends Component
         $this->facultyLoad = Faculty::withCount(['schedules' => fn ($q) => $q->activeTerm()])
             ->where('status', 'approved')
             ->orderByDesc('schedules_count')
-            ->limit(10)
+            ->orderBy('full_name')
             ->get()
             ->map(fn ($f) => [
-                'id'         => $f->id,
-                'name'       => $f->full_name,
-                'department' => $f->displayDepartment(),
-                'load'       => $f->schedules_count,
-                'max_units'  => $f->max_units ?? 21,
-                'status'     => $f->schedules_count > ($f->max_units ?? 21) ? 'overloaded'
-                              : ($f->schedules_count === 0 ? 'unassigned' : 'normal'),
+                'id'            => $f->id,
+                'name'          => $f->full_name,
+                'department'    => $f->displayDepartment(),
+                'faculty_scope' => $f->faculty_scope,
+                'is_cross_dept' => $f->isCrossDepartment(),
+                'is_gened'      => $f->isGenEd(),
+                'load'          => $f->schedules_count,
+                'max_units'     => $f->effectiveMaxUnits(),
+                'status'        => $f->schedules_count > $f->effectiveMaxUnits() ? 'overloaded'
+                                 : ($f->schedules_count === 0 ? 'unassigned' : 'normal'),
             ])->toArray();
     }
 

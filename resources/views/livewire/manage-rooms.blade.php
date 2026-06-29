@@ -958,7 +958,23 @@
                 get hasActiveFilters() {
                     return this.filterDept !== '' || this.filterMajor !== '' || this.filterYear !== '' || this.filterSection !== '';
                 },
-                clearFilters() { this.filterDept = ''; this.filterMajor = ''; this.filterYear = ''; this.filterSection = ''; }
+                clearFilters() { this.filterDept = ''; this.filterMajor = ''; this.filterYear = ''; this.filterSection = ''; },
+                // Reactive: true when the room's selected weekly hours meets or exceeds max capacity.
+                // $wire.selectedWeeklyHours updates on every Livewire re-render (after each toggle),
+                // so this getter always reflects the current server-side total.
+                get atCapacity() {
+                    return ($wire.selectedWeeklyHours || 0) >= {{ $maxWeeklyHours }};
+                },
+                isSubjectSelected(id) {
+                    return ($wire.selectedSubjectIds || []).includes(String(id));
+                },
+                handleRowClick(id) {
+                    // Client-side gate: prevent a round-trip when already at capacity.
+                    // PHP-side toggleSubjectId() also enforces this hard-stop, so no
+                    // subject can ever sneak through via a stale client state.
+                    if (this.atCapacity && !this.isSubjectSelected(id)) return;
+                    $wire.toggleSubjectId(String(id));
+                }
             }"
             x-effect="if (!open) { search = ''; filterDept = ''; filterMajor = ''; filterYear = ''; filterSection = ''; }"
             x-show="open"
@@ -1123,6 +1139,30 @@
                     @endif
 
                     <div class="relative mt-2">
+                        {{-- ── ROOM FULL banner (shown when at/over capacity) ──────── --}}
+                        <div
+                            x-show="atCapacity"
+                            x-transition:enter="transition ease-out duration-200"
+                            x-transition:enter-start="opacity-0 -translate-y-1"
+                            x-transition:enter-end="opacity-100 translate-y-0"
+                            x-transition:leave="transition ease-in duration-150"
+                            x-transition:leave-start="opacity-100 translate-y-0"
+                            x-transition:leave-end="opacity-0 -translate-y-1"
+                            class="flex items-center gap-3 mb-3 px-4 py-3
+                                   bg-red-50 dark:bg-red-900/20
+                                   border border-red-200 dark:border-red-700
+                                   rounded-xl shadow-sm">
+                            <span class="text-lg flex-shrink-0">🔒</span>
+                            <div>
+                                <p class="text-xs font-black text-red-800 dark:text-red-200 uppercase tracking-widest">
+                                    Room at Capacity
+                                </p>
+                                <p class="text-[11px] text-red-600 dark:text-red-300 font-medium mt-0.5">
+                                    Uncheck a subject to free up space before adding another.
+                                </p>
+                            </div>
+                        </div>
+
                         <span
                             class="absolute inset-y-0 left-5 flex items-center text-slate-400 pointer-events-none text-lg">
                             🔍
@@ -1242,21 +1282,7 @@
                                        bg-white/95 dark:bg-slate-900/95 backdrop-blur-sm
                                        text-xs font-black uppercase tracking-widest
                                        text-slate-500 dark:text-slate-400 rounded-t-xl mt-2"
-                                style="grid-template-columns: 2rem 1fr 9rem 4rem 6rem">
-                                <div>
-                                    <input
-                                        type="checkbox"
-                                        class="w-4 h-4 rounded border-slate-300 dark:border-slate-600
-                                               text-indigo-600 focus:ring-indigo-500 bg-white dark:bg-slate-800 cursor-pointer"
-                                        x-on:change="
-                                            const visible = $el.closest('[x-data]')
-                                                .querySelectorAll('[data-subject-row]:not([style*='display: none']) input[type=checkbox]');
-                                            visible.forEach(cb => {
-                                                if (cb.checked !== $el.checked) cb.click();
-                                            });
-                                        "
-                                        title="Toggle all visible subjects">
-                                </div>
+                                style="grid-template-columns: 1fr 9rem 4rem 6rem">
                                 <div>Subject Details</div>
                                 <div class="text-right">Dept · Yr/Sec</div>
                                 <div class="text-right">Units</div>
@@ -1298,20 +1324,19 @@
                                         })()
                                     "
                                     @class([
-                                        'grid items-center gap-4 px-4 py-3.5 mb-1 rounded-2xl cursor-pointer select-none transition-all group',
-                                        'border border-transparent hover:bg-indigo-50/80 dark:hover:bg-indigo-900/20 hover:border-indigo-200 dark:hover:border-indigo-800' => !$claimedByOtherRoom,
-                                        'border border-amber-200/60 dark:border-amber-700/30 bg-amber-50/30 dark:bg-amber-950/10 hover:bg-amber-50/70 dark:hover:bg-amber-950/25' => $claimedByOtherRoom,
+                                        'grid items-center gap-4 px-4 py-3.5 mb-1 rounded-2xl select-none transition-all group',
+                                        'border border-transparent' => !$claimedByOtherRoom,
+                                        'border border-amber-200/60 dark:border-amber-700/30 bg-amber-50/30 dark:bg-amber-950/10' => $claimedByOtherRoom,
                                     ])
-                                    style="grid-template-columns: 2rem 1fr 9rem 4rem 6rem"
-                                    wire:click="toggleSubjectId('{{ $subject['id'] }}')">
-                                    <div class="flex items-center" wire:click.stop>
-                                        <input
-                                            type="checkbox"
-                                            wire:model.live="selectedSubjectIds"
-                                            value="{{ $subject['id'] }}"
-                                            class="w-4 h-4 rounded border-slate-300 dark:border-slate-600
-                                                   text-indigo-600 focus:ring-indigo-500 bg-white dark:bg-slate-800 cursor-pointer">
-                                    </div>
+                                    :class="{
+                                        'bg-indigo-100 dark:bg-indigo-800/50 border-indigo-400 dark:border-indigo-500 ring-2 ring-indigo-300 dark:ring-indigo-600 shadow-md shadow-indigo-200/60 dark:shadow-indigo-900/40': isSubjectSelected('{{ $subject['id'] }}'),
+                                        'opacity-50 cursor-not-allowed': atCapacity && !isSubjectSelected('{{ $subject['id'] }}'),
+                                        'cursor-pointer hover:bg-indigo-50/80 dark:hover:bg-indigo-900/20 hover:border-indigo-200 dark:hover:border-indigo-800': !isSubjectSelected('{{ $subject['id'] }}') && (!atCapacity || isSubjectSelected('{{ $subject['id'] }}')),
+                                        'cursor-pointer': isSubjectSelected('{{ $subject['id'] }}'),
+                                        'hover:bg-amber-50/70 dark:hover:bg-amber-950/25': {{ $claimedByOtherRoom ? 'true' : 'false' }} && !isSubjectSelected('{{ $subject['id'] }}') && (!atCapacity || isSubjectSelected('{{ $subject['id'] }}')),
+                                    }"
+                                    style="grid-template-columns: 1fr 9rem 4rem 6rem"
+                                    @click="handleRowClick('{{ $subject['id'] }}')">
 
                                     <div class="min-w-0">
                                         <div class="flex items-center gap-2 flex-wrap mb-1">
@@ -1320,7 +1345,8 @@
                                                     'font-black text-sm md:text-base uppercase tracking-tight',
                                                     'text-slate-800 dark:text-slate-100' => !$claimedByOtherRoom,
                                                     'text-slate-500 dark:text-slate-400' => $claimedByOtherRoom,
-                                                ])>
+                                                ])
+                                                :class="isSubjectSelected('{{ $subject['id'] }}') ? 'text-indigo-700 dark:text-indigo-300' : ''">
                                                 {{ $subject['subject_code'] }}
                                             </span>
                                             @if($subject['requires_lab'])
@@ -1352,10 +1378,10 @@
                                             @endif
                                             @if(in_array((string)$subject['id'], $selectedSubjectIds))
                                                 <span
-                                                    class="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider
-                                                           bg-indigo-100 dark:bg-indigo-900/40
-                                                           text-indigo-700 dark:text-indigo-300">
-                                                    ✓ selected
+                                                    class="px-2.5 py-1 rounded-lg text-[10px] font-black uppercase tracking-wider
+                                                           bg-indigo-600 dark:bg-indigo-500
+                                                           text-white shadow-sm shadow-indigo-300 dark:shadow-indigo-900">
+                                                    ✓ Selected
                                                 </span>
                                             @endif
                                             @if($claimedByOtherRoom)
@@ -1405,6 +1431,14 @@
                                         <span
                                             class="block text-[10px] text-slate-500 dark:text-slate-500 font-bold uppercase tracking-widest mt-0.5">
                                             / wk
+                                        </span>
+                                        {{-- Lock badge: shown when room is full and this row is not selected --}}
+                                        <span
+                                            x-show="atCapacity && !isSubjectSelected('{{ $subject['id'] }}')"
+                                            class="mt-1 inline-block text-[9px] font-black uppercase tracking-widest
+                                                   text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-900/30
+                                                   border border-red-200 dark:border-red-800 px-1.5 py-0.5 rounded-md">
+                                            🔒 Full
                                         </span>
                                     </div>
                                 </div>

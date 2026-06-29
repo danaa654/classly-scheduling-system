@@ -732,11 +732,56 @@ class ManageRooms extends Component
         $id = (string) $id;
 
         if (in_array($id, $this->selectedSubjectIds, true)) {
-            // Remove: keep all other IDs, re-index so it stays a JSON array
+            // ── REMOVE: always allowed — deselecting never violates capacity ──
             $this->selectedSubjectIds = array_values(
                 array_filter($this->selectedSubjectIds, fn ($v) => $v !== $id)
             );
         } else {
+            // ── ADD: hard capacity gate — block if adding would push room over max ──
+            $maxWeeklyHours = RoomCapacityService::getWeeklyCapacity();
+            $subjectToAdd   = collect($this->modalSubjects)->firstWhere('id', (int) $id);
+
+            if ($subjectToAdd) {
+                $subjectHours   = (float) ($subjectToAdd['weekly_hours'] ?? 0);
+                $projectedTotal = $this->selectedWeeklyHours + $subjectHours;
+
+                if ($projectedTotal > $maxWeeklyHours) {
+                    $roomName  = $this->assigningRoomData['room_name'] ?? 'this room';
+                    $remaining = max(0, $maxWeeklyHours - $this->selectedWeeklyHours);
+
+                    // Update the soft-warning panel so the user sees exactly why they're blocked.
+                    $this->capacityWarning = sprintf(
+                        '⚠ Cannot add "%s" — %s is full. Maximum: %s/wk · Currently at: %s/wk · '
+                        . 'Remaining: %s/wk · Subject needs: %s/wk. Remove a subject first.',
+                        $subjectToAdd['subject_code'],
+                        $roomName,
+                        RoomCapacityService::getFormattedCapacity(),
+                        RoomCapacityService::formatHours($this->selectedWeeklyHours),
+                        RoomCapacityService::formatHours($remaining),
+                        RoomCapacityService::formatHours($subjectHours)
+                    );
+
+                    // Fire a toast so the user gets immediate feedback.
+                    $this->dispatch('toast', [
+                        'type'    => 'warning',
+                        'message' => 'Room at Capacity',
+                        'detail'  => sprintf(
+                            'Cannot add %s. %s is full — %s remaining, subject needs %s/wk.',
+                            $subjectToAdd['subject_code'],
+                            $roomName,
+                            RoomCapacityService::formatHours($remaining),
+                            RoomCapacityService::formatHours($subjectHours)
+                        ),
+                    ]);
+
+                    // Hard stop: do NOT push to selectedSubjectIds.
+                    // recalculateCapacity() is intentionally NOT called here so
+                    // the existing capacityWarning (set above) is preserved for
+                    // the re-render, giving the user the block-reason message.
+                    return;
+                }
+            }
+
             $this->selectedSubjectIds[] = $id;
         }
 

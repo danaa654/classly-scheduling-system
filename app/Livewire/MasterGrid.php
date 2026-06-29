@@ -46,6 +46,8 @@ class MasterGrid extends Component
     public $semester = '1st';
     public $semesterName = 'First Semester 2026-2027';
     public ?array $generationSummary = null;
+    public bool $showPreflightModal = false;
+    public array $preflightData = [];
     public bool $showGenerateModal = false;
     public bool $showGeneratingModal = false;
     public bool $showSummaryModal = false;
@@ -793,6 +795,147 @@ class MasterGrid extends Component
 
         return ($conflict['status'] ?? true) === false;
     }
+
+    // =========================================================================
+    // PRE-FLIGHT CHECK — runs before openGenerateModal
+    // =========================================================================
+
+    /**
+     * Entry point from the Generate button.
+     * Runs readiness queries, then either shows the preflight warning modal
+     * (when issues are found) or opens the generate modal directly (all clear).
+     */
+    public function runPreflightCheck(): void
+    {
+        if (!$this->canAutoGenerateSchedules()) {
+            $this->dispatch('toast', [
+                'type' => 'error',
+                'message' => 'Permission Denied',
+                'detail' => 'Only Admin and Registrar accounts can use AI auto generation.',
+            ]);
+            return;
+        }
+
+        $this->preflightData = $this->buildPreflightData();
+        $this->showPreflightModal = true;
+    }
+
+    public function closePreflightModal(): void
+    {
+        $this->showPreflightModal = false;
+        $this->preflightData = [];
+    }
+
+    /**
+     * Called when admin/registrar acknowledges the warnings and clicks "Generate Anyway".
+     */
+    public function generateAnyway(): void
+    {
+        $this->showPreflightModal = false;
+        $this->preflightData = [];
+        $this->openGenerateModal();
+    }
+
+    /**
+     * Called when the preflight check shows all-clear and the user clicks "Proceed".
+     * Identical to generateAnyway — kept separate for semantic clarity in the blade.
+     */
+    public function proceedToGenerate(): void
+    {
+        $this->showPreflightModal = false;
+        $this->preflightData = [];
+        $this->openGenerateModal();
+    }
+
+    /**
+     * Queries the active term's subjects and returns a structured preflight report
+     * covering Faculty Loading (missing faculty_id) and ManageRooms (missing preferred_room_id).
+     *
+     * Only non-practicum subjects are checked — Practicum/OJT skip room assignment by design.
+     *
+     * @return array{
+     *     has_warnings: bool,
+     *     all_clear: bool,
+     *     faculty_loading: array{total_missing: int, items: array},
+     *     preferred_rooms: array{total_missing: int, items: array},
+     * }
+     */
+    private function buildPreflightData(): array
+    {
+        $period = Setting::getAcademicPeriod();
+
+        // Base query — active term, non-archived, non-practicum subjects only
+        $base = Subject::query()
+            ->where('semester', $period['semester'])
+            ->where('school_year', $period['school_year'])
+            ->where('is_archived', false)
+            ->where(function ($q) {
+                $q->where('is_practicum', false)->orWhereNull('is_practicum');
+            });
+
+        // ── Faculty Loading: subjects with no faculty pre-assigned ────────────
+        $missingFacultyGroups = (clone $base)
+            ->whereNull('faculty_id')
+            ->selectRaw('department, major, year_level, section, COUNT(*) as count')
+            ->groupBy('department', 'major', 'year_level', 'section')
+            ->orderBy('department')
+            ->orderBy('major')
+            ->orderByRaw('CAST(year_level AS UNSIGNED)')
+            ->orderBy('section')
+            ->get()
+            ->map(fn ($row) => [
+                'department' => strtoupper((string) ($row->department ?? '—')),
+                'major'      => strtoupper((string) ($row->major ?? '—')),
+                'year_level' => (int) $row->year_level,
+                'section'    => strtoupper((string) ($row->section ?? '—')),
+                'count'      => (int) $row->count,
+            ])
+            ->values()
+            ->all();
+
+        $totalMissingFaculty = array_sum(array_column($missingFacultyGroups, 'count'));
+
+        // ── Preferred Rooms: subjects with no preferred_room_id set ──────────
+        $missingRoomGroups = (clone $base)
+            ->whereNull('preferred_room_id')
+            ->selectRaw('department, major, year_level, section, COUNT(*) as count')
+            ->groupBy('department', 'major', 'year_level', 'section')
+            ->orderBy('department')
+            ->orderBy('major')
+            ->orderByRaw('CAST(year_level AS UNSIGNED)')
+            ->orderBy('section')
+            ->get()
+            ->map(fn ($row) => [
+                'department' => strtoupper((string) ($row->department ?? '—')),
+                'major'      => strtoupper((string) ($row->major ?? '—')),
+                'year_level' => (int) $row->year_level,
+                'section'    => strtoupper((string) ($row->section ?? '—')),
+                'count'      => (int) $row->count,
+            ])
+            ->values()
+            ->all();
+
+        $totalMissingRooms = array_sum(array_column($missingRoomGroups, 'count'));
+
+        $hasWarnings = $totalMissingFaculty > 0 || $totalMissingRooms > 0;
+
+        return [
+            'has_warnings'    => $hasWarnings,
+            'all_clear'       => !$hasWarnings,
+            'faculty_loading' => [
+                'total_missing' => $totalMissingFaculty,
+                'items'         => $missingFacultyGroups,
+            ],
+            'preferred_rooms' => [
+                'total_missing' => $totalMissingRooms,
+                'items'         => $missingRoomGroups,
+            ],
+        ];
+    }
+
+    // =========================================================================
+    // END PRE-FLIGHT CHECK
+    // =========================================================================
 
     public function openGenerateModal(): void
     {

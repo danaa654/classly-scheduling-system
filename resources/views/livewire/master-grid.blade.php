@@ -37,14 +37,14 @@
                 <!-- AI GENERATION BUTTON -->
                 @if($canAutoGenerate ?? false)
                 <button 
-                    wire:click="openGenerateModal"
+                    wire:click="runPreflightCheck"
                     wire:loading.attr="disabled"
-                    wire:target="openGenerateModal,startGeneration,runGeneration,confirmGeneratedSchedules,saveGeneratedSchedules"
+                    wire:target="runPreflightCheck,startGeneration,runGeneration,confirmGeneratedSchedules,saveGeneratedSchedules"
                     class="px-3 py-1.5 rounded-md text-[8px] font-black uppercase transition-all flex items-center gap-1 border-2 border-indigo-400 dark:border-indigo-600 bg-indigo-100/70 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 hover:bg-indigo-200/70 dark:hover:bg-indigo-900/50 shadow-md hover:shadow-lg disabled:cursor-not-allowed disabled:opacity-60"
                     title="Generate schedule using the local heuristic scheduler">
                     <span>✨</span>
-                    <span wire:loading.remove wire:target="openGenerateModal,startGeneration,runGeneration">Generate</span>
-                    <span wire:loading wire:target="openGenerateModal,startGeneration,runGeneration">Working</span>
+                    <span wire:loading.remove wire:target="runPreflightCheck,startGeneration,runGeneration">Generate</span>
+                    <span wire:loading wire:target="runPreflightCheck,startGeneration,runGeneration">Working</span>
                 </button>
                 @endif
 
@@ -89,6 +89,213 @@
             </div>
         </div>
     </main>
+
+    {{-- ===================================================================== --}}
+    {{-- PRE-FLIGHT CHECK MODAL                                                --}}
+    {{-- Shown when the admin/registrar clicks "Generate".                     --}}
+    {{-- Queries faculty loading + preferred room completeness before           --}}
+    {{-- opening the main generation modal.                                    --}}
+    {{-- ===================================================================== --}}
+    @if($showPreflightModal && !empty($preflightData))
+        <div
+            class="fixed inset-0 z-[9996] flex items-center justify-center bg-slate-950/65 p-4 backdrop-blur-xl"
+            style="font-family: Inter, Montserrat, ui-sans-serif, system-ui, sans-serif;"
+            @click.self="$wire.closePreflightModal()">
+            <div class="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-white/50 bg-white/80 shadow-2xl backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-900/85">
+
+                {{-- Header --}}
+                <div class="shrink-0 border-b border-white/60 p-6 dark:border-slate-700/70">
+                    @if($preflightData['all_clear'])
+                        <div class="flex items-center gap-3">
+                            <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-100 text-xl dark:bg-emerald-900/40">✅</span>
+                            <div>
+                                <p class="text-[10px] font-black uppercase tracking-[0.26em] text-emerald-600 dark:text-emerald-400">System Readiness Check</p>
+                                <h3 class="mt-0.5 text-xl font-black uppercase text-slate-950 dark:text-white">All Systems Ready</h3>
+                            </div>
+                        </div>
+                    @else
+                        <div class="flex items-center gap-3">
+                            <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-xl dark:bg-amber-900/40">⚠️</span>
+                            <div>
+                                <p class="text-[10px] font-black uppercase tracking-[0.26em] text-amber-600 dark:text-amber-400">System Readiness Check</p>
+                                <h3 class="mt-0.5 text-xl font-black uppercase text-slate-950 dark:text-white">Incomplete Setup Detected</h3>
+                            </div>
+                        </div>
+                    @endif
+                </div>
+
+                {{-- Body --}}
+                <div class="min-h-0 flex-1 overflow-y-auto p-6 custom-scrollbar space-y-5">
+
+                    @if($preflightData['all_clear'])
+                        {{-- All Clear State --}}
+                        <div class="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5 dark:border-emerald-900/50 dark:bg-emerald-950/20">
+                            <p class="text-sm font-semibold leading-6 text-slate-700 dark:text-slate-300">
+                                Faculty loading assignments and preferred room configurations have been set for all active subjects. The auto-scheduler has everything it needs to produce an optimized, conflict-free timetable.
+                            </p>
+                            <div class="mt-4 grid gap-3 sm:grid-cols-2">
+                                <div class="flex items-center gap-3 rounded-xl border border-emerald-200 bg-white/70 p-3 dark:border-emerald-900/40 dark:bg-slate-900/60">
+                                    <span class="text-lg">👨‍🏫</span>
+                                    <div>
+                                        <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-400">Faculty Loading</p>
+                                        <p class="mt-0.5 text-xs font-bold text-slate-600 dark:text-slate-300">All subjects assigned</p>
+                                    </div>
+                                    <span class="ml-auto rounded-full bg-emerald-100 px-2 py-1 text-[9px] font-black uppercase text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">✓ OK</span>
+                                </div>
+                                <div class="flex items-center gap-3 rounded-xl border border-emerald-200 bg-white/70 p-3 dark:border-emerald-900/40 dark:bg-slate-900/60">
+                                    <span class="text-lg">🏢</span>
+                                    <div>
+                                        <p class="text-[10px] font-black uppercase tracking-widest text-emerald-700 dark:text-emerald-400">Preferred Rooms</p>
+                                        <p class="mt-0.5 text-xs font-bold text-slate-600 dark:text-slate-300">All rooms configured</p>
+                                    </div>
+                                    <span class="ml-auto rounded-full bg-emerald-100 px-2 py-1 text-[9px] font-black uppercase text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">✓ OK</span>
+                                </div>
+                            </div>
+                        </div>
+                    @else
+                        {{-- Warning intro --}}
+                        <div class="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900/50 dark:bg-amber-950/20">
+                            <p class="text-sm font-semibold leading-6 text-slate-700 dark:text-slate-300">
+                                The system detected incomplete setup in one or more modules. For best results and to prevent conflicts, make sure the <span class="font-black text-amber-700 dark:text-amber-400">Dean / OIC / Associate Dean</span> roles have completed Faculty Loading and Preferred Room assignments before generating.
+                            </p>
+                            <p class="mt-2 text-xs font-bold text-slate-500 dark:text-slate-400">
+                                You may still generate now — the scheduler will attempt to find compatible time slots and rooms automatically for any unassigned subjects.
+                            </p>
+                        </div>
+
+                        {{-- Faculty Loading Status --}}
+                        <div class="rounded-2xl border border-white/70 bg-white/70 shadow-sm backdrop-blur-sm dark:border-slate-700 dark:bg-slate-900/60">
+                            <div class="flex items-center justify-between gap-4 border-b border-white/60 px-5 py-4 dark:border-slate-700/70">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-lg">👨‍🏫</span>
+                                    <div>
+                                        <p class="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Module Check</p>
+                                        <p class="text-sm font-black text-slate-900 dark:text-white">Faculty Loading</p>
+                                    </div>
+                                </div>
+                                @if($preflightData['faculty_loading']['total_missing'] === 0)
+                                    <span class="shrink-0 rounded-full bg-emerald-100 px-3 py-1 text-[9px] font-black uppercase text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">✓ Complete</span>
+                                @else
+                                    <span class="shrink-0 rounded-full bg-red-100 px-3 py-1 text-[9px] font-black uppercase text-red-700 dark:bg-red-900/50 dark:text-red-300">
+                                        {{ $preflightData['faculty_loading']['total_missing'] }} subject(s) unassigned
+                                    </span>
+                                @endif
+                            </div>
+
+                            @if($preflightData['faculty_loading']['total_missing'] > 0)
+                                <div class="p-4">
+                                    <p class="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Groups with no faculty assignment</p>
+                                    <div class="space-y-2 max-h-44 overflow-y-auto custom-scrollbar pr-1">
+                                        @foreach($preflightData['faculty_loading']['items'] as $item)
+                                            <div class="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-2.5 dark:border-slate-800 dark:bg-slate-800/50">
+                                                <div class="flex items-center gap-2 min-w-0">
+                                                    <span class="shrink-0 rounded-md bg-slate-200 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-slate-700 dark:bg-slate-700 dark:text-slate-300">{{ $item['department'] }}</span>
+                                                    <span class="shrink-0 rounded-md bg-blue-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-blue-700 dark:bg-blue-900/40 dark:text-blue-300">{{ $item['major'] }}</span>
+                                                    <span class="truncate text-xs font-bold text-slate-600 dark:text-slate-400">Year {{ $item['year_level'] }} – Sec {{ $item['section'] }}</span>
+                                                </div>
+                                                <span class="shrink-0 ml-3 rounded-full bg-red-100 px-2 py-0.5 text-[9px] font-black text-red-700 dark:bg-red-900/40 dark:text-red-300">
+                                                    {{ $item['count'] }} subj.
+                                                </span>
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                    <p class="mt-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                                        Notify the Dean / OIC / Associate Dean of these departments to complete Faculty Loading.
+                                    </p>
+                                </div>
+                            @else
+                                <div class="px-5 py-4">
+                                    <p class="text-xs font-semibold text-emerald-700 dark:text-emerald-400">All active subjects have a faculty member pre-assigned. 👍</p>
+                                </div>
+                            @endif
+                        </div>
+
+                        {{-- Preferred Rooms Status --}}
+                        <div class="rounded-2xl border border-white/70 bg-white/70 shadow-sm backdrop-blur-sm dark:border-slate-700 dark:bg-slate-900/60">
+                            <div class="flex items-center justify-between gap-4 border-b border-white/60 px-5 py-4 dark:border-slate-700/70">
+                                <div class="flex items-center gap-3">
+                                    <span class="text-lg">🏢</span>
+                                    <div>
+                                        <p class="text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Module Check</p>
+                                        <p class="text-sm font-black text-slate-900 dark:text-white">Manage Rooms – Preferred Subjects</p>
+                                    </div>
+                                </div>
+                                @if($preflightData['preferred_rooms']['total_missing'] === 0)
+                                    <span class="shrink-0 rounded-full bg-emerald-100 px-3 py-1 text-[9px] font-black uppercase text-emerald-700 dark:bg-emerald-900/50 dark:text-emerald-300">✓ Complete</span>
+                                @else
+                                    <span class="shrink-0 rounded-full bg-amber-100 px-3 py-1 text-[9px] font-black uppercase text-amber-700 dark:bg-amber-900/50 dark:text-amber-300">
+                                        {{ $preflightData['preferred_rooms']['total_missing'] }} subject(s) without preferred room
+                                    </span>
+                                @endif
+                            </div>
+
+                            @if($preflightData['preferred_rooms']['total_missing'] > 0)
+                                <div class="p-4">
+                                    <p class="mb-3 text-[10px] font-black uppercase tracking-widest text-slate-500 dark:text-slate-400">Groups with no preferred room set</p>
+                                    <div class="space-y-2 max-h-44 overflow-y-auto custom-scrollbar pr-1">
+                                        @foreach($preflightData['preferred_rooms']['items'] as $item)
+                                            <div class="flex items-center justify-between rounded-xl border border-slate-100 bg-slate-50/80 px-4 py-2.5 dark:border-slate-800 dark:bg-slate-800/50">
+                                                <div class="flex items-center gap-2 min-w-0">
+                                                    <span class="shrink-0 rounded-md bg-slate-200 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-slate-700 dark:bg-slate-700 dark:text-slate-300">{{ $item['department'] }}</span>
+                                                    <span class="shrink-0 rounded-md bg-purple-100 px-2 py-0.5 text-[9px] font-black uppercase tracking-widest text-purple-700 dark:bg-purple-900/40 dark:text-purple-300">{{ $item['major'] }}</span>
+                                                    <span class="truncate text-xs font-bold text-slate-600 dark:text-slate-400">Year {{ $item['year_level'] }} – Sec {{ $item['section'] }}</span>
+                                                </div>
+                                                <span class="shrink-0 ml-3 rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+                                                    {{ $item['count'] }} subj.
+                                                </span>
+                                            </div>
+                                        @endforeach
+                                    </div>
+                                    <p class="mt-3 text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                                        Ask the Dean / OIC / Associate Dean to assign preferred rooms in Manage Rooms for these subject groups.
+                                    </p>
+                                </div>
+                            @else
+                                <div class="px-5 py-4">
+                                    <p class="text-xs font-semibold text-emerald-700 dark:text-emerald-400">All active subjects have a preferred room configured. 👍</p>
+                                </div>
+                            @endif
+                        </div>
+                    @endif
+                </div>
+
+                {{-- Footer --}}
+                <div class="sticky bottom-0 z-10 flex shrink-0 flex-col gap-3 border-t border-white/60 bg-white/80 p-5 backdrop-blur-xl dark:border-slate-700/70 dark:bg-slate-900/85 sm:flex-row sm:justify-end">
+                    @if($preflightData['all_clear'])
+                        <button
+                            wire:click="closePreflightModal"
+                            class="rounded-xl bg-slate-100 px-5 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+                            Cancel
+                        </button>
+                        <button
+                            wire:click="proceedToGenerate"
+                            wire:loading.attr="disabled"
+                            wire:target="proceedToGenerate"
+                            class="rounded-xl bg-emerald-600 px-5 py-3 text-xs font-black uppercase tracking-widest text-white shadow-lg shadow-emerald-600/20 transition hover:bg-emerald-700 disabled:opacity-60">
+                            <span wire:loading.remove wire:target="proceedToGenerate">✅ Proceed to Generate</span>
+                            <span wire:loading wire:target="proceedToGenerate">Opening...</span>
+                        </button>
+                    @else
+                        <button
+                            wire:click="closePreflightModal"
+                            class="rounded-xl bg-slate-100 px-5 py-3 text-xs font-black uppercase tracking-widest text-slate-700 transition hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700">
+                            Cancel — Fix Issues First
+                        </button>
+                        <button
+                            wire:click="generateAnyway"
+                            wire:loading.attr="disabled"
+                            wire:target="generateAnyway"
+                            class="rounded-xl border-2 border-amber-400 bg-amber-50 px-5 py-3 text-xs font-black uppercase tracking-widest text-amber-800 shadow-md transition hover:bg-amber-100 disabled:opacity-60 dark:border-amber-700 dark:bg-amber-950/30 dark:text-amber-300 dark:hover:bg-amber-950/50">
+                            <span wire:loading.remove wire:target="generateAnyway">⚠️ Generate Anyway</span>
+                            <span wire:loading wire:target="generateAnyway">Opening...</span>
+                        </button>
+                    @endif
+                </div>
+
+            </div>
+        </div>
+    @endif
+    {{-- END PRE-FLIGHT CHECK MODAL --}}
 
     @if($showGeneratingModal)
         <div
