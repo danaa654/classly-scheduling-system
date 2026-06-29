@@ -1912,6 +1912,103 @@ class BlockSchedule extends Component
         $this->flashType          = 'success';
     }
 
+    /**
+     * Reverse of finalizeSchedule(). Reopens every finalized, non-practicum
+     * schedule row in the current Department / Year / Section view so it can
+     * be edited again.
+     *
+     * Rows are demoted back to the status they would have carried right
+     * before finalization — STATUS_FACULTY_ASSIGNED when a faculty is
+     * already attached, STATUS_PARTIAL otherwise — mirroring the same rule
+     * used everywhere else a schedule's status is derived from faculty_id
+     * (see assignFacultyToSchedule()).
+     *
+     * Practicum / OJT placeholder rows are intentionally left untouched:
+     * they carry no day/time/room/faculty by design and are auto-repromoted
+     * to STATUS_FINALIZED on every render by currentBlockSchedules(), so
+     * reopening them here would have no visible effect.
+     */
+    public function unfinalizeSchedule(): void
+    {
+        if (! $this->canFinalizeSchedule()) {
+            $this->flashMessage = 'You do not have permission to unfinalize schedules.';
+            $this->flashType    = 'error';
+            return;
+        }
+
+        $schedules = Schedule::activeTerm($this->semester, $this->schoolYear)
+            ->where('status', Schedule::STATUS_FINALIZED)
+            ->where('section', $this->selectedSection)
+            ->whereHas('subject', function ($q) {
+                $q->where(function ($q2) {
+                    $q2->where('department', $this->selectedDepartment)
+                       ->orWhere('major', $this->selectedDepartment);
+                })
+                    ->where('year_level', (int) $this->selectedYear)
+                    // Practicum placeholders stay permanently finalized.
+                    ->where(function ($q2) {
+                        $q2->where('is_practicum', false)->orWhereNull('is_practicum');
+                    });
+            })
+            ->get(['id', 'faculty_id']);
+
+        if ($schedules->isEmpty()) {
+            $this->flashMessage = 'Nothing to unfinalize for this selection.';
+            $this->flashType    = 'warning';
+            return;
+        }
+
+        $withFacultyIds    = $schedules->filter(fn ($s) => filled($s->faculty_id))->pluck('id');
+        $withoutFacultyIds = $schedules->filter(fn ($s) => blank($s->faculty_id))->pluck('id');
+
+        $user = Auth::user();
+
+        DB::transaction(function () use ($withFacultyIds, $withoutFacultyIds) {
+            if ($withFacultyIds->isNotEmpty()) {
+                Schedule::whereIn('id', $withFacultyIds)->update([
+                    'status' => Schedule::STATUS_FACULTY_ASSIGNED,
+                ]);
+            }
+
+            if ($withoutFacultyIds->isNotEmpty()) {
+                Schedule::whereIn('id', $withoutFacultyIds)->update([
+                    'status' => Schedule::STATUS_PARTIAL,
+                ]);
+            }
+        });
+
+        // NOTE: 'unfinalized' is passed as a literal action string rather than
+        // a PermissionLog::ACTION_* constant because PermissionLog.php wasn't
+        // part of this edit. If you'd like it to match the existing
+        // ACTION_FINALIZED / ACTION_GRANT / ACTION_REVOKE pattern, add:
+        //     public const ACTION_UNFINALIZED = 'unfinalized';
+        // to PermissionLog.php and swap the string below for the constant.
+        PermissionLog::record(
+            action: 'unfinalized',
+            performer: $user,
+            target: null,
+            context: [
+                'department'     => $this->selectedDepartment,
+                'year_level'     => $this->selectedYear,
+                'section'        => $this->selectedSection,
+                'semester'       => $this->semester,
+                'school_year'    => $this->schoolYear,
+                'schedule_ids'   => $schedules->pluck('id')->toArray(),
+                'count'          => $schedules->count(),
+                'unfinalized_by' => $user?->name,
+                'role'           => $user?->role,
+                'timestamp'      => now()->toIso8601String(),
+            ],
+            description: "{$user?->name} ({$user?->role}) unfinalized {$schedules->count()} schedule(s) for "
+                . "{$this->selectedDepartment} Year {$this->selectedYear} Section {$this->selectedSection} "
+                . "— {$this->semesterName}.",
+        );
+
+        $this->finalizationErrors = [];
+        $this->flashMessage       = '🔓 Schedule unfinalized — it is unlocked and open for editing again.';
+        $this->flashType          = 'warning';
+    }
+
     protected function runFinalizationPreflight(): array
     {
         $errors    = [];

@@ -1342,30 +1342,52 @@
                             @endif
                         @endif
 
-                        @if($canFinalize && !$allFinalized && $totalRows > 0)
-                            <button
-                                wire:click="finalizeSchedule"
-                                wire:loading.attr="disabled"
-                                wire:confirm="Finalize all {{ $totalRows }} schedule(s) for {{ $departmentName }} · Year {{ $selectedYear }} · Section {{ $selectedSection }}? Room and time slots will be locked, but faculty can still be safely reassigned."
-                                @class([
-                                    'relative px-5 py-2.5 rounded-xl text-[13px] font-black uppercase tracking-wider',
-                                    'transition-all active:scale-95 flex items-center gap-2.5',
-                                    'text-white shadow-md',
-                                    'bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 shadow-emerald-200 dark:shadow-none cursor-pointer'
-                                        => ($unassignedCount === 0 && $conflictCount === 0),
-                                    'bg-gradient-to-r from-slate-400 to-slate-500 cursor-not-allowed opacity-50 shadow-none'
-                                        => ($unassignedCount > 0 || $conflictCount > 0),
-                                ])
-                                @if($unassignedCount > 0 || $conflictCount > 0) disabled title="Resolve all issues before finalizing" @endif
-                            >
-                                <span class="text-base leading-none">🔒</span>
-                                <span>Finalize Schedule</span>
-                                @if($unassignedCount > 0 || $conflictCount > 0)
-                                    <span class="text-[11px] opacity-70 font-medium normal-case tracking-normal">
-                                        (resolve issues first)
-                                    </span>
-                                @endif
-                            </button>
+                        @if($canFinalize && $totalRows > 0)
+                            @if($allFinalized)
+                                {{-- ── Unfinalize Schedule (reverse of Finalize) ──────────
+                                     Same slot in the action bar, flipped state: clicking
+                                     this demotes every finalized row back to
+                                     faculty_assigned/partial so the block can be edited
+                                     again. Practicum placeholder rows are left finalized. --}}
+                                <button
+                                    wire:click="unfinalizeSchedule"
+                                    wire:loading.attr="disabled"
+                                    wire:confirm="Unfinalize all schedule(s) for {{ $departmentName }} · Year {{ $selectedYear }} · Section {{ $selectedSection }}? This reopens the block for editing — room, time, and faculty assignments can be changed again."
+                                    class="relative px-5 py-2.5 rounded-xl text-[13px] font-black uppercase tracking-wider
+                                           transition-all active:scale-95 flex items-center gap-2.5
+                                           text-white shadow-md
+                                           bg-gradient-to-r from-amber-500 to-orange-600
+                                           hover:from-amber-400 hover:to-orange-500
+                                           shadow-amber-200 dark:shadow-none cursor-pointer"
+                                >
+                                    <span class="text-base leading-none">🔓</span>
+                                    <span>Unfinalize Schedule</span>
+                                </button>
+                            @else
+                                <button
+                                    wire:click="finalizeSchedule"
+                                    wire:loading.attr="disabled"
+                                    wire:confirm="Finalize all {{ $totalRows }} schedule(s) for {{ $departmentName }} · Year {{ $selectedYear }} · Section {{ $selectedSection }}? Room and time slots will be locked, but faculty can still be safely reassigned."
+                                    @class([
+                                        'relative px-5 py-2.5 rounded-xl text-[13px] font-black uppercase tracking-wider',
+                                        'transition-all active:scale-95 flex items-center gap-2.5',
+                                        'text-white shadow-md',
+                                        'bg-gradient-to-r from-emerald-600 to-green-600 hover:from-emerald-700 hover:to-green-700 shadow-emerald-200 dark:shadow-none cursor-pointer'
+                                            => ($unassignedCount === 0 && $conflictCount === 0),
+                                        'bg-gradient-to-r from-slate-400 to-slate-500 cursor-not-allowed opacity-50 shadow-none'
+                                            => ($unassignedCount > 0 || $conflictCount > 0),
+                                    ])
+                                    @if($unassignedCount > 0 || $conflictCount > 0) disabled title="Resolve all issues before finalizing" @endif
+                                >
+                                    <span class="text-base leading-none">🔒</span>
+                                    <span>Finalize Schedule</span>
+                                    @if($unassignedCount > 0 || $conflictCount > 0)
+                                        <span class="text-[11px] opacity-70 font-medium normal-case tracking-normal">
+                                            (resolve issues first)
+                                        </span>
+                                    @endif
+                                </button>
+                            @endif
                         @endif
 
                         {{-- ── Print Button ──────────────────────────────── --}}
